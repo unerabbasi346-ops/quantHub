@@ -258,7 +258,8 @@ CREATE TABLE core.users (
     role            VARCHAR(64)  NOT NULL DEFAULT 'analyst',
     is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
     -- No password_hash, api_key, api_secret, or credential columns.
-    -- Authentication is external (OIDC/SAML per Doc 13 §9.2 SSO spec).
+    -- D-9: every access request shall be authenticated; mechanism is Deferred
+    --   Technology Decision #6 (OIDC / API key / local session — not yet resolved).
     -- Doc 09 §Security: "never store API secrets or plaintext credentials in application tables"
     -- Doc 00 §14.9: AI agents shall never access credentials
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),

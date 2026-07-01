@@ -1,0 +1,5 @@
+/* Governing specification: Doc 08 — Frontend Architecture (QH-008 v1.0) */
+/* Technology: Tailwind CSS — Doc 08 §Technology                          */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

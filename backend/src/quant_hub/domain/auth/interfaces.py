@@ -10,10 +10,14 @@ from abc import ABC, abstractmethod
 
 
 class AuthServiceInterface(ABC):
-    """Authentication contract — Doc 07 §Security.
+    """Authentication contract — Doc 07 §Security / D-9 Zero-Trust Data Security.
 
-    External identity provider (OIDC/SAML); no credentials stored in application
-    tables per Doc 09 §Security and Doc 00 §14.9.
+    D-9: every access request shall be explicitly authenticated and authorized;
+    failure defaults to deny. Mechanism (OIDC, SAML, API key, local session)
+    is Deferred Technology Decision #6 — not yet resolved.
+
+    No credentials shall be stored in application tables per Doc 09 §Security
+    and Doc 00 §14.9 regardless of the mechanism chosen.
     """
 
     @abstractmethod
