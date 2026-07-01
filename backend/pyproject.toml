@@ -66,6 +66,10 @@ dev = [
     "mypy>=1.13",
 ]
 
+# Package discovery — src layout per Doc 04 §Repository Structure
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py312"

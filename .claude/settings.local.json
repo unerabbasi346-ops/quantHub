@@ -6,7 +6,9 @@
       "Bash(powershell -command \"Get-ChildItem -Path . | Select-Object Name, Length, Mode | Format-Table -AutoSize\")",
       "mcp__ruflo__autopilot_status",
       "mcp__ruflo__hooks_list",
-      "PowerShell(pip install *)"
+      "PowerShell(pip install *)",
+      "Bash(python *)",
+      "Bash(xargs grep -l \"RiskApproval\\\\|REQUEST_ID\\\\|configure_logging\\\\|RequestIDMiddleware\")"
     ]
   }
 }
