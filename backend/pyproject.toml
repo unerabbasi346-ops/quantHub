@@ -1,0 +1,75 @@
+# Governing specification: Doc 03 — Technology Stack (QH-003 v1.0)
+# Repository location: backend/ — per Doc 04 — Repository Structure (QH-004 v1.0)
+# Invariant compliance: P-3 Technology Independence, P-14 Security by Design
+# Per Doc 00 §14.11: implementation cites governing document, section, and invariant
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "quant-hub-backend"
+version = "0.1.0"
+description = "Quant Hub — backend services"
+requires-python = ">=3.12"    # Doc 03 §Core Stack: Programming Language — Python
+
+# Core dependencies — per Doc 03 §Core Stack
+dependencies = [
+    # Backend Framework — Doc 03
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+
+    # ORM — Doc 03
+    "sqlalchemy>=2.0",
+
+    # Database migrations — Doc 09 §Migration Strategy (Alembic)
+    "alembic>=1.14",
+
+    # PostgreSQL driver — Doc 03 §Core Stack: Database
+    "psycopg2-binary>=2.9",
+
+    # Data Validation — Doc 03
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+
+    # Cache driver — Doc 03 §Core Stack: Cache (Redis)
+    "redis>=5.2",
+
+    # HTTP client for internal service-to-service calls
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+# Quantitative libraries — per Doc 03 §Quantitative Libraries
+quant = [
+    "numpy>=2.1",
+    "pandas>=2.2",
+    "polars>=1.12",       # Doc 03: Polars (where performance is required)
+    "scipy>=1.14",
+    "scikit-learn>=1.5",
+    "torch>=2.5",         # Doc 03: PyTorch
+    "xgboost>=2.1",
+    "lightgbm>=4.5",
+    "ccxt>=4.4",          # Doc 03: CCXT (exchange connectivity)
+    "yfinance>=0.2",      # Doc 03: yfinance
+    # "TA-Lib"            # Doc 03: TA-Lib (optional — requires C build dependency)
+    # "vectorbt"          # Doc 03: VectorBT
+    # "backtesting"       # Doc 03: Backtesting.py (evaluation only, not production)
+]
+
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "black>=24.10",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

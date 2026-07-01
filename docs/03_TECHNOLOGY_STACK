@@ -1,0 +1,19 @@
+Quant Hub Engineering Handbook
+03_TECHNOLOGY_STACK
+Document ID: QH-003Version: 1.0 Draft
+Purpose
+Define the approved technologies for Quant Hub, the rationale behind each choice, and the engineering principles governing future technology adoption.
+Technology Selection Principles
+Technologies are selected according to:• Long-term maintenance• Community maturity• Performance• Security• Documentation quality• Ecosystem support• AI-assisted development compatibility• Production readiness
+Core Stack
+Programming Language: PythonBackend Framework: FastAPIFrontend: Next.js + React + TypeScriptStyling: Tailwind CSSDatabase: PostgreSQLCache: RedisORM: SQLAlchemyData Validation: PydanticContainerization: DockerVersion Control: GitIDE: Visual Studio CodePrimary AI: Claude CodeEngineering MCP: Ruflo
+Quantitative Libraries
+NumPyPandasPolars (where performance is required)SciPyscikit-learnPyTorchXGBoostLightGBMTA-Lib (optional)VectorBTBacktesting.py (evaluation only)CCXTyfinance
+Infrastructure
+Discord for notifications.GitHub for source control.Environment variables for secrets.Docker for reproducible deployments.
+Technology Governance
+No new dependency may be introduced without documenting:• Purpose• Alternatives considered• Security implications• Maintenance expectations• Licensing compatibility
+Future Technologies
+Potential future additions:• Kubernetes• Apache Kafka• Ray• MLflow• Prometheus• Grafana• TimescaleDB• Apache Arrow• DuckDB
+Closing
+Technology choices should support the architecture instead of dictating it. Stability, maintainability, and extensibility take precedence over trend adoption.

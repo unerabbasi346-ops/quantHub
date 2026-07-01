@@ -1,0 +1,20 @@
+Quant Hub Engineering Handbook
+Document: 00_PROJECT_CONSTITUTION.md (Draft v1.0)Status: DraftAuthority: Highest governing engineering specification
+Purpose
+This constitution defines the engineering principles governing the Quant Hub platform. Every architectural, implementation, testing, documentation, and deployment decision must align with this document unless formally amended.
+Platform Definition
+Quant Hub is a modular quantitative research, analytics, execution, monitoring, and portfolio platform. It is not a single trading bot. Strategies (including Lancaster) are plugins built on top of the platform.
+Mission
+Build a long-lived quantitative platform whose architecture survives changing markets, strategies, and technologies.
+Vision
+Provide a reusable ecosystem supporting research, backtesting, paper trading, live trading, machine learning, monitoring, risk management, and future multi-asset expansion.
+Core Principles
+• Architecture before implementation• Documentation before complexity• Modular design• Strategy-independent core• Security by design• Testing is mandatory• Observable systems• Measured performance• Continuous improvement
+Engineering Rules
+1. Every feature begins with a design.2. Every module has one responsibility.3. Public interfaces are documented.4. No hidden business logic.5. No undocumented breaking changes.6. Every production feature has automated tests.7. Technical debt must be recorded.
+Definition of Done
+A feature is complete only after implementation, review, tests, documentation, logging, configuration support, and validation are finished.
+Governance
+This handbook is the primary specification.Claude Code implements the specification.Ruflo coordinates engineering workflows.Architectural changes require handbook updates before implementation.
+Future Direction
+Quant Hub is intended to expand into a complete quantitative operating platform supporting multiple asset classes, exchanges, research pipelines, AI-assisted development, and institutional workflows.

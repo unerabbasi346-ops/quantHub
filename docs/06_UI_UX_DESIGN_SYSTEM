@@ -1,0 +1,25 @@
+Quant Hub Engineering Handbook
+06_UI_UX_DESIGN_SYSTEM
+Document ID: QH-006Version: 1.0 DraftStatus: Draft
+Design Philosophy
+Quant Hub is an institutional-grade engineering platform. The UI prioritizes clarity, consistency, speed, precision, and low cognitive load.
+Core Principles
+Function before aesthetics.Consistency over novelty.Reusable components.Accessibility.Minimal friction.Predictable interactions.
+Visual Language
+Dark-first theme, optional light mode. Semantic colors: green=profit, red=risk, blue=information, amber=warning. Use typography hierarchy and spacing consistently.
+Layout
+Persistent sidebar, top command bar, central workspace, optional contextual panel, responsive grid, modular widgets.
+Components
+Standardize buttons, cards, tables, forms, dialogs, charts, tabs, notifications, badges, and sidebars. Every component should have a reusable implementation.
+Dashboards
+Support customizable widgets for portfolio, positions, orders, signals, watchlists, risk metrics, logs, and alerts.
+Data Visualization
+Prefer readable charts. Support TradingView integration. Consistent legends, tooltips, axis formatting, and efficient rendering for large datasets.
+Interaction Standards
+Clear primary actions, confirmation for destructive operations, loading/success/error states, keyboard shortcuts where appropriate.
+Accessibility
+Keyboard navigation, readable typography, adequate contrast, responsive layouts, meaningful labels.
+Future Direction
+Design system must scale to desktop, web, tablet, and future mobile interfaces while preserving a single visual identity.
+Closing
+The UI is part of the trading workflow. Every interface should reduce friction and improve decision quality.

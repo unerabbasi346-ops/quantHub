@@ -1,0 +1,43 @@
+# Governing specification: Doc 03 — Technology Stack (QH-003 v1.0)
+# Containerization: Docker — Doc 03 §Core Stack
+# Database: PostgreSQL — Doc 03 §Core Stack; Doc 09 — Database Architecture (QH-009 v1.0)
+# Cache: Redis — Doc 03 §Core Stack
+# Security: credentials via environment variables only — never commit secrets
+#   per Doc 04 §Repository Rules and invariant P-14 Security by Design
+# Per Doc 00 §14.11: implementation cites governing document, section, and invariant
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: quant_hub
+      POSTGRES_USER: ${POSTGRES_USER:-quant_hub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env — never commit credentials}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quant_hub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:

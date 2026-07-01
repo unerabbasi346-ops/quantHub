@@ -1,0 +1,25 @@
+Quant Hub Engineering Handbook
+05_ENGINEERING_STANDARDS
+Document ID: QH-005Version: 1.0 DraftStatus: Draft
+Engineering Philosophy
+Engineering quality takes precedence over development speed. Every contribution must improve maintainability, readability, reliability, scalability, and testability.
+Core Principles
+- Architecture before implementation.- Explicit over implicit behaviour.- Single responsibility.- Loose coupling.- High cohesion.- Document significant decisions.- Every change must be reviewable.
+Code Quality Standards
+- Follow PEP 8.- Use Python type hints.- Public APIs require docstrings.- Avoid duplicated logic.- Keep business logic out of the UI.- No hard-coded configuration or secrets.
+Error Handling
+- Never ignore exceptions.- Log failures with context.- Use meaningful exception types.- Fail safely and predictably.
+Logging
+- Structured logging.- Record startup, shutdown, orders, warnings, and errors.- Never log credentials or secrets.
+Documentation
+Every module must document its purpose, responsibilities, dependencies, interfaces, and usage. Architectural changes require handbook updates.
+Testing
+Mandatory unit tests, integration tests for service boundaries, regression tests for bug fixes, and paper-trading validation before live deployment.
+Security Baseline
+Store secrets in environment variables, validate all external inputs, apply least privilege, and review dependencies regularly.
+Code Review Checklist
+- Architecture preserved- Tests included- Documentation updated- No duplicated logic- Security reviewed- Performance considered
+Definition of Production Code
+Production code is readable, tested, documented, monitored, configurable, secure, and maintainable.
+Closing Statement
+Engineering discipline is a feature of Quant Hub. These standards are mandatory for every module.

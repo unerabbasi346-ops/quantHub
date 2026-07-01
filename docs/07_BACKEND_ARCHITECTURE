@@ -1,0 +1,31 @@
+Quant Hub Engineering Handbook
+07_BACKEND_ARCHITECTURE
+Document ID: QH-007Version: 1.0 DraftStatus: Draft
+Purpose
+Define the backend architecture, responsibilities, boundaries, and implementation rules for Quant Hub.
+Architectural Style
+Use a modular monolith initially with clearly separated domains. Every domain can later be extracted into an independent service without major redesign.
+Layers
+Presentation/API LayerApplication LayerDomain LayerInfrastructure LayerPersistence Layer
+Core Services
+API GatewayAuthenticationConfigurationMarket DataResearchFeature EngineeringStrategy EngineBacktestingPaper TradingExecutionRiskPortfolioNotificationsMonitoringReporting
+Dependency Rules
+Dependencies flow inward only. UI never accesses the database directly. Domain logic never depends on frameworks. Infrastructure implements interfaces defined by the domain.
+API Standards
+REST using FastAPI. Version endpoints. Validate all requests with Pydantic. Return consistent error schemas. Document endpoints with OpenAPI.
+Background Processing
+Long-running tasks (data sync, backtests, ML jobs) execute asynchronously. Jobs are observable and retry transient failures.
+Configuration
+All runtime configuration comes from environment variables or version-controlled configuration files. No secrets in source code.
+Logging & Observability
+Structured logs, request IDs, execution metrics, health endpoints, audit logs for trading actions.
+Security
+Authentication required for protected APIs. Principle of least privilege. Input validation, rate limiting, secret management, dependency updates.
+Scalability
+Design service interfaces so engines can later run as independent services. Avoid tight coupling and shared mutable state.
+Testing
+Unit tests for business logic, integration tests for services, end-to-end tests for critical trading workflows.
+Implementation Rules
+No business logic in controllers. Services are small and focused. Repository pattern for persistence. Dependency injection for external resources.
+Closing
+The backend is the operational core of Quant Hub. Maintainability, observability, and correctness take precedence over premature optimization.

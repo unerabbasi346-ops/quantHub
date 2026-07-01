@@ -1,0 +1,468 @@
+# Frozen Architectural Decisions
+
+## Status
+
+Document 11 — Data Engineering & Data Pipeline Architecture is **APPROVED and FROZEN** as the canonical architecture specification for the Quant Hub data platform. All future documents shall reference this architecture but shall not redefine, override, or duplicate it. Amendments require explicit governance approval and a new document version.
+
+Date of freeze: 2026-06-30
+
+---
+
+## Foundational Architecture (Parts 1–6)
+
+### F-1: Bronze-Silver-Gold Medallion Architecture
+The data platform uses a three-layer storage model: Bronze (raw source data, immutable after receipt), Silver (validated, normalized, schema-compliant), Gold (business-ready, optimized for analytics and model consumption). Downstream layers shall never modify upstream data. Every dataset possesses a globally unique identifier and version.
+
+### F-2: Strategy Independence
+The data platform is entirely strategy-agnostic. No ingestion pipeline, transformation, storage schema, validation rule, metadata model, or governance mechanism shall assume the existence of any specific trading strategy. Lancaster participates as one governed strategy implementation without introducing architecture-specific behavior.
+
+### F-3: Immutable Dataset Publication
+Published datasets are immutable after publication. Corrections create new governed dataset versions rather than modifying published records. Dataset versioning is mandatory for all governed assets.
+
+### F-4: Event-Driven Pipeline Orchestration
+Every pipeline transition, validation result, lifecycle state change, publication event, and operational event is communicated through standardized event contracts. The Event Platform is the primary integration mechanism across Quant Hub.
+
+### F-5: Cloud-Neutral Architecture
+The architecture is vendor-independent and cloud-neutral. Storage architecture remains independent of cloud providers, object storage vendors, filesystem implementations, database vendors, and distributed storage frameworks. Migration between technologies shall not require redesign of higher architectural layers.
+
+### F-6: Full Auditability
+Every data operation generates immutable audit records. Complete audit trails support reconstruction of any published dataset. Audit records are retained according to enterprise retention policies.
+
+---
+
+## Part 7 — Enterprise Data Storage Architecture
+
+### 7.1: Enterprise Data Lake Architecture
+
+#### D-7.1.1: Authoritative Repository
+The Enterprise Data Lake is the single authoritative repository for all persistent enterprise data assets within Quant Hub. No production dataset shall exist outside the scope of the data lake.
+
+#### D-7.1.2: Storage Zone Model
+Storage is organized into governed zones with explicit data classification, access controls, and lifecycle policies per zone.
+
+#### D-7.1.3: Storage Independence
+Storage interfaces remain independent of physical storage implementations. Computational services interact through standardized storage interfaces. Physical storage details are abstracted from consuming applications.
+
+#### D-7.1.4: Dataset Registration Mandate
+Every dataset shall be registered in the enterprise catalog before entering any governed storage zone. No unregistered dataset shall persist within governed storage.
+
+---
+
+### 7.2: Enterprise Lakehouse Architecture
+
+#### D-7.2.1: Compute-Storage Separation
+Computation and storage are architecturally separated. Compute engines interact with storage through standardized interfaces. Storage is never embedded within computational services.
+
+#### D-7.2.2: ACID Compliance
+The Lakehouse provides ACID-compliant transaction semantics across analytical workloads. Multi-Version Concurrency Control (MVCC) enables concurrent reads and writes without blocking.
+
+#### D-7.2.3: Snapshot Management and Time Travel
+The Lakehouse supports governed snapshot management enabling deterministic time-travel queries. Every dataset mutation produces a new snapshot with explicit version identifiers. Historical snapshots are preserved according to enterprise retention policies.
+
+#### D-7.2.4: Processing Isolation
+Batch, streaming, and incremental processing workloads execute in isolated compute environments while sharing governed storage. No workload type shall interfere with the operational characteristics of another.
+
+---
+
+### 7.3: Storage Engines & File Formats
+
+#### D-7.3.1: Vendor Independence
+Storage architecture remains independent of cloud providers, object storage vendors, filesystem implementations, database vendors, and distributed storage frameworks.
+
+#### D-7.3.2: Computational Independence
+Persistent storage shall never embed assumptions regarding query engines, machine learning frameworks, research platforms, feature engineering pipelines, or strategy engines. All computational services interact through standardized storage interfaces.
+
+#### D-7.3.3: Format Selection Governance
+File format selection is governed through enterprise standards. Format decisions consider analytical performance, compression efficiency, schema evolution support, and ecosystem compatibility.
+
+---
+
+### 7.4: Data Lifecycle & Retention Architecture
+
+#### D-7.4.1: Lifecycle State Model
+Every governed dataset progresses through defined lifecycle states: Draft, Validating, Published, Active, Archived, Legal Hold, Retired, Destroyed. State transitions are deterministic, governed, and fully auditable.
+
+#### D-7.4.2: Immutable Published Assets
+Published datasets remain immutable. Corrections create new versions. This principle applies to data content and metadata alike.
+
+#### D-7.4.3: Legal Hold Architecture
+Legal Hold suspends standard lifecycle progression including archival, retirement, and destruction. Hold activation, duration, and release are governed through formal approval workflows.
+
+#### D-7.4.4: Secure Destruction
+Dataset destruction requires formal authorization. Destruction is irreversible and fully auditable. Destruction scope includes all copies, backups, and derived assets where legally permissible.
+
+#### D-7.4.5: Retention Policy Hierarchy
+Retention policies follow a hierarchical model: regulatory requirements take precedence over business policies, which take precedence over operational defaults. No asset may be destroyed while any retention obligation remains unsatisfied.
+
+---
+
+### 7.5: Backup & Disaster Recovery Architecture
+
+#### D-7.5.1: Backup is a Governance Process
+Backup is not an operational afterthought — it is a governed process with defined policies, verification procedures, and audit trails.
+
+#### D-7.5.2: Complete Platform Preservation
+Backup includes all information required to reconstruct enterprise analytical operations: raw/curated/published datasets, feature repositories, metadata services, catalogs, lineage graphs, configuration, workflow definitions, security metadata, and audit repositories.
+
+#### D-7.5.3: Immutable Backup Copies
+Approved backup sets become immutable after successful creation. Immutability protects against accidental modification, operational errors, insider threats, malware, ransomware, and unauthorized administrative activity.
+
+#### D-7.5.4: Independent Recovery
+Recovery procedures operate independently from production infrastructure. Recovery remains possible following complete infrastructure replacement.
+
+#### D-7.5.5: Continuous Verification
+Every backup undergoes automated integrity verification. Verification confirms completeness, correctness, recoverability, and immutability.
+
+---
+
+### 7.6: Data Archiving & Cold Storage Architecture
+
+#### D-7.6.1: Archive Does Not Mean Delete
+Archival is distinct from deletion. Archived datasets remain discoverable, governed, and recoverable. Storage optimization never becomes the primary objective. Preservation of enterprise information takes precedence over storage cost reduction.
+
+#### D-7.6.2: Metadata First
+Metadata remains immediately accessible even when archived datasets reside in deep storage. Enterprise discovery services never require physical restoration simply to identify archived assets.
+
+#### D-7.6.3: Immutable Historical Preservation
+Archived datasets remain immutable. Historical information is never modified after archival. Corrections create new governed dataset versions rather than modifying archived records.
+
+#### D-7.6.4: Four-Tier Storage Model
+Storage is organized into four tiers: Tier 0 (Active Operational), Tier 1 (Warm), Tier 2 (Cold), Tier 3 (Deep Archive). Tier transitions are policy-driven and governed.
+
+#### D-7.6.5: Deterministic Retrieval
+Every archived dataset possesses a deterministic retrieval path. Recovery preserves dataset identity, version identifiers, schema, metadata, lineage, and integrity verification evidence.
+
+---
+
+### 7.7: Metadata & Catalog Services Architecture
+
+#### D-7.7.1: Metadata is an Enterprise Asset
+Metadata is governed with the same rigor as the data it describes. Metadata governance is not optional.
+
+#### D-7.7.2: Single Source of Truth
+The Enterprise Metadata Registry is the single authoritative source of platform metadata. No subsystem shall maintain independent authoritative metadata outside the Registry.
+
+#### D-7.7.3: Metadata Before Storage
+No dataset enters governed storage without first being registered in the Enterprise Catalog. Metadata registration precedes physical storage operations.
+
+#### D-7.7.4: Immutable Historical Metadata
+Historical metadata remains immutable after publication. Changes affecting governed assets generate new metadata versions rather than modifying historical records.
+
+#### D-7.7.5: Continuous Synchronization
+Metadata remains synchronized with enterprise assets throughout their lifecycle. Synchronization failures generate operational alerts and governance review.
+
+#### D-7.7.6: Metadata Domain Model
+Metadata is organized into domains: Identity, Ownership, Lifecycle, Governance, Operational, and Relationship information. Every governed dataset possesses complete metadata across all applicable domains.
+
+---
+
+### 7.8: Data Lineage Architecture
+
+#### D-7.8.1: Complete Traceability
+Every governed data asset possesses complete end-to-end lineage. Lineage captures data origin, transformation, movement, validation, storage, and consumption.
+
+#### D-7.8.2: Immutable History
+Historical lineage remains immutable after publication. Lineage events are never retroactively modified.
+
+#### D-7.8.3: Deterministic Relationships
+Lineage relationships are deterministic. The lineage graph accurately represents actual data flows without approximation.
+
+#### D-7.8.4: Lineage Granularity
+Lineage is captured at multiple granularities: Dataset, Table, File, Partition, Column, Feature, Model, Pipeline, and Strategy levels.
+
+#### D-7.8.5: Technology Independence
+Lineage architecture remains independent from storage engines, processing frameworks, and infrastructure technologies.
+
+---
+
+### 7.9: Data Quality Architecture
+
+#### D-7.9.1: Quality by Design
+Quality validation occurs throughout the data lifecycle rather than only after ingestion. Quality is a first-class platform capability, not an optional validation process.
+
+#### D-7.9.2: Continuous Validation
+Quality is continuously monitored rather than periodically inspected. Validation executes during ingestion, pipeline processing, pre-publication, on schedule, on events, and on demand.
+
+#### D-7.9.3: Automated Enforcement
+Quality policies are enforced automatically. Manual quality enforcement is minimized.
+
+#### D-7.9.4: Immutable Quality Evidence
+Quality reports are immutable following publication. Historical validation evidence remains permanently available for governance purposes.
+
+#### D-7.9.5: Standardized Quality Dimensions
+Every governed dataset is evaluated across standardized dimensions: Accuracy, Completeness, Consistency, Timeliness, Validity, Integrity, Uniqueness, Availability, Traceability, and Compliance.
+
+#### D-7.9.6: Deterministic Quality Scoring
+Quality scores provide consistent, reproducible assessments derived from complete validation evidence. Every quality score is reproducible using identical datasets, validation rules, and quality policies. Scores never replace detailed validation reports.
+
+#### D-7.9.7: Validation Severity Classification
+Validation findings are classified by severity: Informational, Advisory, Warning, Error, Critical. Severity determines escalation paths and certification consequences.
+
+#### D-7.9.8: Quality Certification Framework
+Every production dataset requires formal quality certification. Certification gates prevent promotion of non-compliant datasets. Certification records are immutable.
+
+---
+
+### 7.10: Data Contracts Architecture
+
+#### D-7.10.1: Contract-First Design
+Every data interface is defined through a formal contract before implementation begins. Contracts serve as the source of truth for interface expectations.
+
+#### D-7.10.2: Independent Producer and Consumer Evolution
+Producers and consumers evolve independently. Contracts define the interface boundary. Contract compatibility is explicitly declared and governed.
+
+#### D-7.10.3: Immutable Contract Versions
+Published contract versions remain immutable. Modifications create new contract versions with explicit version identifiers. Version compatibility follows semantic versioning: Major (breaking), Minor (backward-compatible additions), Patch (backward-compatible corrections).
+
+#### D-7.10.4: Automated Enforcement
+Contract compliance is verified automatically. Enforcement mechanisms include Publication Gates, Consumption Gates, Quality Gates, Lifecycle Gates, and Integration Gates. Enforcement never silently degrades.
+
+#### D-7.10.5: Contract Components
+Every contract includes: Schema Definition, Semantic Definition, Quality Requirements, Availability Requirements, Performance Requirements, Security Requirements, Lifecycle Requirements, Governance Requirements, Ownership Information, and Version Information.
+
+#### D-7.10.6: Technology Independence
+Contracts remain independent of storage engines, serialization formats, processing frameworks, and infrastructure technologies.
+
+---
+
+### 7.11: Data Governance Architecture
+
+#### D-7.11.1: Governance by Default
+Every data asset is governed. Assets are explicitly exempted from governance rather than requiring explicit inclusion. No data asset, policy, or process operates outside enterprise governance.
+
+#### D-7.11.2: Policy as Code
+Governance policies are defined, versioned, and tested as code. Policy definitions are machine-readable and automatically enforceable.
+
+#### D-7.11.3: Separation of Duties
+Policy definition, policy enforcement, and policy audit are separated. No individual role possesses unrestricted governance authority.
+
+#### D-7.11.4: Continuous Compliance
+Compliance is continuously verified rather than periodically audited. Compliance violations trigger automated remediation workflows.
+
+#### D-7.11.5: Immutable Governance Evidence
+Governance decisions produce immutable audit records. Historical governance evidence remains permanently available.
+
+#### D-7.11.6: Formal Stewardship
+Every governed dataset has a formally designated Data Steward. Stewardship assignments are recorded in the enterprise metadata registry. Stewardship responsibilities include ownership, metadata management, quality oversight, and access approval.
+
+#### D-7.11.7: Exception Management
+Governance exceptions are time-bound and require formal justification, risk assessment, and periodic review. Exceptions never persist indefinitely.
+
+---
+
+### 7.12: Data Security Architecture
+
+#### D-7.12.1: Security by Design
+Security is incorporated during architecture design rather than added after implementation. Every component is designed with security controls from inception.
+
+#### D-7.12.2: Defense in Depth
+Multiple independent security controls protect every data asset. No single control failure shall compromise security.
+
+#### D-7.12.3: Zero Trust Architecture
+No component, service, or identity is inherently trusted. Every access request is explicitly authenticated and authorized.
+
+#### D-7.12.4: Least Privilege
+Every identity possesses only the permissions necessary for its authorized functions. Privileges are periodically reviewed and reduced where possible.
+
+#### D-7.12.5: Encryption Mandate
+All governed data is encrypted at rest. All data transmission is encrypted. Enterprise key management governs key generation, storage, rotation, revocation, and access.
+
+#### D-7.12.6: Data Classification
+Every data asset is classified according to enterprise security classification standards: Public, Internal, Confidential, Restricted, Regulated. Classification determines applicable security controls and is recorded in the metadata registry.
+
+#### D-7.12.7: Default-Deny Failure Mode
+Security service failure defaults to deny rather than allow. Availability architecture ensures no individual security component constitutes a single point of failure.
+
+---
+
+### 7.13: Data Observability Architecture
+
+#### D-7.13.1: Observability by Design
+Every platform component emits observability data from inception. Observability is not retrofitted after implementation.
+
+#### D-7.13.2: Unified Observability Model
+Metrics, logs, and traces follow standardized models across all components and are correlated through common identifiers.
+
+#### D-7.13.3: Proactive Detection
+Anomalies are detected before they affect downstream consumers. Detection is automated rather than dependent on manual inspection.
+
+#### D-7.13.4: Immutable Observability Evidence
+Operational data is immutable after recording. Historical observability evidence supports audit and investigation.
+
+#### D-7.13.5: Service Level Objectives
+Every critical service has defined SLOs covering availability, latency, throughput, error rate, durability, freshness, and recovery. SLOs are continuously measured. SLO violations trigger operational alerts and incident management.
+
+#### D-7.13.6: Intelligent Alerting
+Alerting includes threshold-based, anomaly-based, trend-based, and composite alerts with severity classification, routing, escalation, suppression, and resolution. Alert fatigue is actively managed.
+
+#### D-7.13.7: Technology Independence
+Observability architecture remains independent of monitored technologies, storage engines, and infrastructure platforms. Observability service failure shall not affect monitored platform services.
+
+---
+
+## Architectural Invariants (Cross-Cutting)
+
+These principles appear across multiple sections and are considered architectural invariants. No future document may redefine or contradict them.
+
+### I-1: Immutability After Publication
+Data, metadata, lineage, quality reports, governance decisions, audit records, backup copies, archived datasets, contracts, and observability evidence are all immutable after publication. Corrections create new versions. This invariant spans sections 7.1 through 7.13.
+
+### I-2: Technology Independence
+Storage, processing, governance, quality, security, contracts, lineage, metadata, and observability architectures all remain independent of specific technology implementations. This enables vendor migration without architectural redesign.
+
+### I-3: Strategy Independence
+No data platform component shall assume the existence of any specific trading strategy. The platform serves all strategies equally. Strategy-specific configurations are external to the platform architecture.
+
+### I-4: Automated Enforcement
+Manual enforcement of policies, quality rules, contracts, governance, and security is minimized. Automation is the default enforcement mechanism across all architectural domains.
+
+### I-5: Continuous Verification
+Validation, compliance, monitoring, quality assessment, backup integrity, and security posture are verified continuously rather than periodically. Proactive detection takes precedence over reactive response.
+
+### I-6: Complete Auditability
+Every governed action produces immutable audit evidence. Audit trails support complete reconstruction of platform history. Audit records are retained according to enterprise retention policies.
+
+### I-7: No Bypass Architecture
+No governed component, service, or path operates outside its designated governance, security, quality, or operational framework. Silently degraded enforcement is prohibited. Violations produce explicit, auditable evidence.
+
+---
+
+## Reference Constraints
+
+Future documents (12 through 15 and beyond) that reference the data platform architecture shall:
+
+- Reference Document 11 by its canonical name: "Document 11 — Data Engineering & Data Pipeline Architecture"
+- Cite specific frozen decision identifiers (e.g., "per D-7.9.1 Quality by Design") rather than re-stating requirements
+- Not redefine storage layers, lifecycle states, quality dimensions, contract models, governance frameworks, security controls, or observability patterns
+- Declare any new architectural decisions that extend or specialize Document 11 without contradiction
+- Maintain strategy independence — no strategy-specific logic is permitted within the data platform
+
+---
+
+## Approval
+
+| Role | Decision |
+|------|----------|
+| Document 11 | APPROVED — Complete and frozen |
+| Sections covered | 7.1 through 7.13, all subsections |
+| Date | 2026-06-30 |
+| Next review | Upon Document 12 completion or significant platform change |
+| Amendment process | Governance Council approval + new document version |
+
+---
+
+## Document 12 Outline Freeze
+
+| Role | Decision |
+|------|----------|
+| Document 12 Outline | APPROVED and FROZEN |
+| File | docs/12_Machine_Learning_Engineering_Outline.md |
+| Sections | 8.1 through 8.12, 280 total subsections |
+| ML Platform Invariants | M-1 through M-8 recorded in handbook/ARCHITECTURAL_INVARIANTS.md |
+| Date | 2026-06-30 |
+| Content generation | Shall follow the frozen outline without deviation |
+| Scope guarantee | Zero overlap with frozen Document 11 architectures |
+| Amendment process | Governance approval required for section additions, removals, or scope changes
+
+---
+
+## Document 13 Approval and Freeze
+
+| Role | Decision |
+|------|----------|
+| Document 13 Outline | APPROVED and FROZEN |
+| File | docs/13_Research_Engineering_Outline.md |
+| Sections | 9.1 through 9.16, 277 planned subsections |
+| Date | 2026-06-30 |
+
+| Role | Decision |
+|------|----------|
+| Document 13 Content | **APPROVED, COMPLETED, and FROZEN** |
+| File | docs/13_Research_Engineering.md |
+| Sections delivered | 9.1 through 9.16, 299 actual subsections |
+| Date | 2026-06-30 |
+| Content generation | Followed frozen outline without deviation |
+| Scope guarantee | Zero overlap with frozen Document 11 and Document 12 architectures |
+| Cross-references | All internal references verified and consistent |
+| Amendment process | Governance approval required for section additions, removals, or scope changes |
+| Research invariants | R-1 through R-7 recorded in handbook/ARCHITECTURAL_INVARIANTS.md |
+
+Research architecture invariants (R-1 through R-7):
+- R-1: Research Reproducibility by Design — every published finding reproducible
+- R-2: Hypothesis-Experiment Separation — hypotheses independent of experiment implementations
+- R-3: Governed Research-to-Production Promotion — no promotion without governance gates
+- R-4: Knowledge as Enterprise Asset — all research knowledge governed per P-17
+- R-5: Independent Research Workspaces — isolated reproducible computational environments
+- R-6: Strategy Independence (Research Domain) — no strategy-specific assumptions in platform
+- R-7: Multiple Testing Awareness — platform provides statistical correction infrastructure
+
+---
+
+## Document 14 Outline Freeze
+
+| Role | Decision |
+|------|----------|
+| Document 14 Outline | APPROVED and FROZEN |
+| File | docs/14_Trading_Infrastructure_Outline.md |
+| Sections | 10.1 through 10.13, 216 planned subsections |
+| Date | 2026-06-30 |
+
+---
+
+## Document 14 Approval and Freeze
+
+| Role | Decision |
+|------|----------|
+| Document 14 Content | **APPROVED, COMPLETED, and FROZEN** |
+| File | docs/14_Trading_Infrastructure.md |
+| Sections delivered | 10.1 through 10.13, 233 actual subsections |
+| Date | 2026-06-30 |
+| Content generation | Followed frozen outline without deviation |
+| Scope guarantee | Zero overlap with frozen Document 11, 12, and 13 architectures |
+| Cross-references | All internal references verified and consistent |
+| Amendment process | Governance approval required for section additions, removals, or scope changes |
+| Trading invariants | T-1 through T-7 recorded in handbook/ARCHITECTURAL_INVARIANTS.md |
+
+Trading architecture invariants (T-1 through T-7):
+- T-1: Deterministic Backtesting — identical configuration produces identical results per P-13
+- T-2: Strategy-Infrastructure Separation — strategy logic separate from trading infrastructure per P-9
+- T-3: Paper-Live Parity — paper and live trading share identical infrastructure and paths
+- T-4: Governed Strategy Promotion — no strategy enters live trading without governance gates
+- T-5: Complete Trade Auditability — every trading action produces immutable audit records per P-5
+- T-6: Trading Circuit Breakers — automated risk controls halt trading on defined thresholds
+- T-7: Real-Time Determinism — signal-to-order processing with bounded latency per P-13
+
+---
+
+## Document 15 Outline Freeze
+
+| Role | Decision |
+|------|----------|
+| Document 15 Outline | APPROVED and FROZEN |
+| File | docs/15_Portfolio_Management_Outline.md |
+| Sections | 11.1 through 11.11, 166 planned subsections |
+| Date | 2026-06-30 |
+
+---
+
+## Document 15 Approval and Freeze
+
+| Role | Decision |
+|------|----------|
+| Document 15 Content | **APPROVED, COMPLETED, and FROZEN** |
+| File | docs/15_Portfolio_Management.md |
+| Sections delivered | 11.1 through 11.11, 181 actual subsections |
+| Date | 2026-06-30 |
+| Content generation | Followed frozen outline without deviation |
+| Scope guarantee | Zero overlap with frozen Document 11, 12, 13, and 14 architectures |
+| Cross-references | All internal references verified and consistent |
+| Amendment process | Governance approval required for section additions, removals, or scope changes |
+| Portfolio invariants | Port-1 through Port-6 recorded in handbook/ARCHITECTURAL_INVARIANTS.md |
+
+Portfolio architecture invariants (Port-1 through Port-6):
+- Port-1: Portfolio Construction Separation — methodology separate from execution infrastructure per P-9
+- Port-2: Risk-Managed Capital Deployment — position sizes constrained by risk budgets per P-17
+- Port-3: Deterministic Portfolio State — risk metrics and attribution deterministic per P-13
+- Port-4: Continuous Risk Monitoring — risk continuously monitored per P-7
+- Port-5: Strategy Risk Separation — portfolio-level risk authority over individual strategies
+- Port-6: Complete Portfolio Auditability — every portfolio decision audited per P-5

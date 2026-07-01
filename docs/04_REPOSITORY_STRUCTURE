@@ -1,0 +1,19 @@
+Quant Hub Engineering Handbook
+04_REPOSITORY_STRUCTURE
+Document ID: QH-004Version: 1.0 DraftStatus: Draft
+Purpose
+Define the canonical repository layout for Quant Hub. Every source file, configuration, document, test, asset, and future module must conform to this structure.
+Repository Philosophy
+The repository shall be organized by responsibility rather than file type.Every directory has a single purpose.No miscellaneous folders are permitted.
+Top-Level Layout
+QuantHub/│├── docs/├── backend/├── frontend/├── data/├── strategies/├── research/├── ml/├── infrastructure/├── scripts/├── tests/├── configs/├── docker/├── logs/├── assets/├── notebooks/├── .github/└── README.md
+Directory Responsibilities
+docs/ : Engineering handbook and ADRsbackend/ : Core APIs and business servicesfrontend/ : Dashboard UIdata/ : Data ingestion and storage logicstrategies/ : Strategy plugins (e.g., Lancaster)research/ : Experimental quantitative researchml/ : Machine learning pipelinesinfrastructure/ : Deployment and DevOpstests/ : Unit, integration and regression testsconfigs/ : Configuration filesscripts/ : Automation utilitiesdocker/ : Containers and compose fileslogs/ : Runtime logs (gitignored)assets/ : Icons, images and brandingnotebooks/ : Exploratory research only
+Repository Rules
+• No business logic inside scripts/• No experiments inside production modules• No secrets committed to Git• Documentation updated with structural changes• Each module owns its own README where appropriate
+Naming Standards
+Directories: lowercase_snake_casePython modules: snake_caseClasses: PascalCaseFunctions: snake_caseConstants: UPPER_CASEConfiguration files: descriptive lowercase
+Future Growth
+Repository structure must accommodate:• Additional exchanges• Additional strategies• Multiple asset classes• Cloud services• AI tooling• Plugin marketplacewithout restructuring the repository.
+Closing
+The repository structure is an architectural contract. Consistent organization reduces maintenance cost, simplifies onboarding, and supports long-term scalability.

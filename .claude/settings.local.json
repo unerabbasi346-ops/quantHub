@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Content \"$env:APPDATA\\\\Claude\\\\claude_desktop_config.json\" -ErrorAction SilentlyContinue | ConvertFrom-Json | ConvertTo-Json -Depth 10)",
+      "Bash(ls -la --file-type)",
+      "Bash(powershell -command \"Get-ChildItem -Path . | Select-Object Name, Length, Mode | Format-Table -AutoSize\")",
+      "mcp__ruflo__autopilot_status",
+      "mcp__ruflo__hooks_list",
+      "PowerShell(pip install *)"
+    ]
+  }
+}
