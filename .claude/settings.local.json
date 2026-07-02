@@ -17,7 +17,14 @@
       "PowerShell(cd \"C:\\\\Users\\\\UNITECH\\\\OneDrive\\\\Desktop\\\\QuantHub\\\\backend\"; $env:DATABASE_URL = \"postgresql://quant_hub:changeme@localhost:5433/quant_hub\"; python -m alembic upgrade head)",
       "PowerShell(docker exec qh_pg_test *)",
       "PowerShell(docker run *)",
-      "PowerShell(docker cp \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-UNITECH-OneDrive-Desktop-QuantHub\\\\a63984f1-1eb7-45c8-929e-fe0f756c0c6b\\\\scratchpad\\\\verify_constraints.sql\" qh_pg_test:/tmp/verify_constraints.sql; docker exec -it qh_pg_test psql -U quant_hub -d quant_hub -f /tmp/verify_constraints.sql)"
+      "PowerShell(docker cp \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-UNITECH-OneDrive-Desktop-QuantHub\\\\a63984f1-1eb7-45c8-929e-fe0f756c0c6b\\\\scratchpad\\\\verify_constraints.sql\" qh_pg_test:/tmp/verify_constraints.sql; docker exec -it qh_pg_test psql -U quant_hub -d quant_hub -f /tmp/verify_constraints.sql)",
+      "Bash(PYTHONPATH=src python *)",
+      "Bash(python3 -c ' *)",
+      "Read(//c/Users/UNITECH/AppData/Local/Temp/claude/C--Projects-QuantHub/7c558a0f-c325-4d5f-ab1c-deccdf005f2c/scratchpad/verify_src/quant_hub/api//**)",
+      "Read(//c/Users/UNITECH/AppData/Local/Temp/claude/C--Projects-QuantHub/7c558a0f-c325-4d5f-ab1c-deccdf005f2c/scratchpad/verify_src/**)",
+      "Bash(echo \"---exit code: $?---\")",
+      "Bash(powershell -NoProfile -Command \"Test-NetConnection -ComputerName localhost -Port 5432 -InformationLevel Quiet\")",
+      "Bash(docker compose *)"
     ]
   }
 }
