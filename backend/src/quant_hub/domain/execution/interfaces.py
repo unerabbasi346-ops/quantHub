@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from uuid import UUID
 
+from quant_hub.domain.execution.entities import OrderIntent, RecordedOrder
+
 
 @dataclass(frozen=True)
 class RiskDecision:
@@ -37,10 +39,21 @@ class OrderRepository(ABC):
     """Persistence contract for core.orders — Doc 07 §Implementation Rules."""
 
     @abstractmethod
-    async def get_by_id(self, order_id: UUID) -> object | None: ...
+    async def create(self, intent: OrderIntent, asset_id: UUID) -> RecordedOrder:
+        """Persist a computed OrderIntent as a CREATED order (Step 3.3).
+
+        `asset_id` is passed resolved (AssetRef -> market_data.assets.id) by
+        the caller, mirroring SignalRepository.record(strategy_id, asset_id,
+        signal, ...) — the repository does not perform cross-table symbol
+        resolution. The first real core.orders write in the platform.
+        """
+        ...
 
     @abstractmethod
-    async def get_by_idempotency_key(self, key: UUID) -> object | None: ...
+    async def get_by_id(self, order_id: UUID) -> RecordedOrder | None: ...
+
+    @abstractmethod
+    async def get_by_idempotency_key(self, key: UUID) -> RecordedOrder | None: ...
 
     @abstractmethod
     async def list_by_portfolio(self, portfolio_id: UUID) -> list[object]: ...

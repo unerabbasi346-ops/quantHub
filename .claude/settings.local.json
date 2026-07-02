@@ -43,7 +43,10 @@
       "Bash(docker exec *)",
       "Bash(xargs -I{} sh -c 'echo {}; grep -E \"revision|down_revision\" {}')",
       "Bash(find . -iname \"*.env*\" -not -path \"*/node_modules/*\")",
-      "Bash(grep -n \"sqlalchemy.url\\\\|script_location\" alembic.ini)"
+      "Bash(grep -n \"sqlalchemy.url\\\\|script_location\" alembic.ini)",
+      "Bash(grep -nE \"^#{1,4} |§10\\\\.\\(6|7\\)\" 14_Trading_Infrastructure.md)",
+      "Bash(grep -nA40 \"core.orders\\\\|CREATE TABLE.*orders\\\\|orders \\(\" c3a8f2b91e4d_initial_schema.py)",
+      "Bash(grep -nA12 \"class AssetRef\")"
     ]
   }
 }
