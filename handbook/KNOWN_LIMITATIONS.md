@@ -62,10 +62,11 @@
 
 ## Phase 7 — Implementation-Phase Findings (Tracked, Blocking)
 
-Findings surfaced during Phase 1 backend implementation (Doc 11 Market
-Data Ingestion, Steps 1.2–1.4) that are tracked defects requiring
-resolution before a specific future phase begins — unlike Phase 4/5
-above, these are NOT accepted design decisions. Recorded here so each
+Findings surfaced during backend implementation (originally Phase 1, Doc
+11 Market Data Ingestion, Steps 1.2–1.4; extended in Phase 2, Doc 14
+Trading Infrastructure, Step 2.3 — F-9) that are tracked defects requiring
+resolution before a specific future phase/workflow begins — unlike Phase
+4/5 above, these are NOT accepted design decisions. Recorded here so each
 finding surfaces again naturally (e.g. when a blocked repository is about
 to be implemented) rather than depending on anyone's memory.
 
@@ -79,18 +80,26 @@ to be implemented) rather than depending on anyone's memory.
 | F-6 | `record_date`, `payment_date` | `market_data.corporate_actions` | Always `NULL` — yfinance's basic `Ticker.dividends`/`Ticker.splits` API only exposes `ex_date`, not the fuller corporate-action calendar. Both columns are nullable (Step 1.1 schema), so this is a gap, not a bug | When a consumer needs record/payment date specifically (e.g. settlement-date-aware calculations), not just ex-date | Requires a richer data source than yfinance's basic dividends/splits API (unnamed by Doc 11), or a yfinance calendar endpoint not yet investigated | `YFinanceConnector.fetch_corporate_actions` (Step 1.10); Doc 11 §3 |
 | F-7 | Symbol Changes, Delistings, Mergers (event-type coverage) | `market_data.corporate_actions` (connector scope) | Doc 11 §3 names 6 supported event types; only Dividends and Splits/Reverse Splits are sourced (via yfinance). No implemented data source for Symbol Changes, Delistings, or Mergers | When Doc 11 names a vendor for these event types, or before any consumer needs them | Doc 11 does not name a corporate-actions vendor for any event type; yfinance's `Ticker` API has no clean endpoint for these three | `YFinanceConnector` (Step 1.10); Doc 11 §3 |
 | F-8 | `adjustment_factor` | `market_data.ohlcv_bars` | Corporate-action facts (splits/dividends) are recorded in `market_data.corporate_actions`, but `ohlcv_bars.adjustment_factor` is never recomputed/updated from them — historical bars remain exactly as originally ingested (raw), unadjusted for later splits/dividends | Before any backtesting/analytics consumer requires split/dividend-adjusted historical price series | Correctly chaining multiple adjustments over a price series (multiple splits, ordering, precision) is a materially larger feature Doc 11 §3 does not detail | `CorporateActionsIngestionService` (Step 1.10); Doc 11 §3 Rules ("Adjustments are versioned. Original raw values remain preserved.") |
+| F-9 | `name` (sole natural key), no version-history storage | `core.strategies` | Doc 14 §10.2.5 requires: "Every strategy modification shall create a new version per P-2... Published strategy versions shall be immutable... Historical strategy versions shall remain available for audit, comparison, and rollback." The Step 1.1 schema has `name UNIQUE` as the only natural key and no separate version-history table, so `SQLAlchemyStrategyRepository.upsert`'s resolve-or-register pattern (`ON CONFLICT (name) DO UPDATE`, Step 2.3) **overwrites** the prior version's row in place — the previous version's config/description is not preserved anywhere, violating §10.2.5's immutability/audit/rollback requirement | Before any real strategy iteration/versioning workflow begins, or before Phase 2 is considered fully complete, whichever comes first | Requires a schema change: e.g. a separate `core.strategy_versions` table recording each version immutably, or changing the natural key from `name` alone to `(name, version)` so distinct versions coexist as distinct rows | Step 2.3 finding (2026-07-03); `persistence/repositories/strategy_engine.py` `SQLAlchemyStrategyRepository.upsert` docstring; Doc 14 §10.2.5; P-2 |
 
-**Status as of 2026-07-02:** No active data corruption from F-1–F-4 today
+**Status as of 2026-07-03:** No active data corruption from F-1–F-4 today
 — no order/execution/position repository exists yet, so nothing writes
 to these columns. `ohlcv_bars.volume` (the fifth instance of this
 pattern) was live and actively truncating data; it has been fixed and
 verified (Step 1.4, migration `fcec1b5ac8a0`). F-1 through F-4 remain
-open and must be resolved before Phase 2 begins. F-5 through F-8
+open; per `handbook/KNOWN_LIMITATIONS.md` S-4, Phase 2 as scoped (Steps
+2.1–2.4, Strategy Plugin Interface) does not touch `core.orders`/
+`core.executions`/`core.positions`, so F-1–F-4 do not block Phase 2's
+signal-generation work — they remain a hard prerequisite for the
+conditional Step 2.5 / any real order-writing code. F-5 through F-8
 (Step 1.10, Corporate Actions Processing) are scope/coverage gaps rather
 than active corruption — `corporate_actions` writes are correct for the
 event types and fields it does implement (Dividends, Splits/Reverse
 Splits, ex_date only), live-verified against real AAPL historical split
-and dividend data.
+and dividend data. F-9 (Step 2.3, `core.strategies` versioning) is active
+today: `SQLAlchemyStrategyRepository.upsert` is live and does overwrite
+prior version rows on every re-registration — not corruption of a single
+write, but data loss of prior version history on each re-registration.
 
 ---
 

@@ -14,6 +14,8 @@ from uuid import UUID
 
 from quant_hub.domain.market_data.entities import AssetRef
 
+_EMPTY_CONFIG: Mapping[str, object] = MappingProxyType({})
+
 
 @dataclass(frozen=True)
 class Signal:
@@ -109,3 +111,43 @@ class RecordedSignal:
     validation_status: str
     metadata: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class StrategyRef:
+    """Resolve-or-register input for core.strategies — Step 2.3, mirrors
+    market_data.AssetRef's role for SQLAlchemyAssetRepository.upsert.
+
+    `name` is the natural key (core.strategies.name UNIQUE, Step 1.1 schema).
+    `config` is opaque per P-1/T-2 — the platform stores and returns it
+    verbatim, never inspects its contents (same treatment as Signal.metadata).
+    """
+
+    name: str
+    version: str
+    description: str | None = None
+    config: Mapping[str, object] = field(default_factory=lambda: _EMPTY_CONFIG)
+    portfolio_id: UUID | None = None
+    registered_by: UUID | None = None
+
+
+@dataclass(frozen=True)
+class RegisteredStrategy:
+    """Persisted strategy — core.strategies (Doc 09, Step 1.1 schema).
+
+    `status` is deliberately NOT settable via StrategyRepository.upsert
+    (see that method's docstring): lifecycle transitions are a distinct,
+    governed concern (Doc 14 §10.2.6 "State transitions shall be governed
+    with explicit approval") that resolve-or-register does not perform.
+    """
+
+    id: UUID
+    name: str
+    description: str | None
+    version: str
+    status: str
+    config: Mapping[str, object]
+    portfolio_id: UUID | None
+    registered_by: UUID | None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

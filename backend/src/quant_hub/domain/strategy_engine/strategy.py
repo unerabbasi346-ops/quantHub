@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
 from quant_hub.domain.strategy_engine.entities import Signal
@@ -100,19 +100,46 @@ class Strategy(ABC):
       • It cannot self-attribute or self-validate — signal_id, strategy_id, and
         validation_status are stamped by the platform downstream (see Signal).
 
-    JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged): the plugin is passed its own
-    resolved configuration is NOT modelled here yet. Doc 14 §10.2 makes a
-    strategy's parameters an opaque external config (core.strategies.config
-    JSONB, P-1). How that opaque config is delivered to a plugin instance
-    (constructor injection vs. a param on generate_signals) is deferred to the
-    strategy-registry / reference-strategy steps (2.3/2.4), where a concrete
-    plugin first needs it. Modelling it now would be inventing a config-delivery
-    mechanism ahead of a consumer.
+    RESOLVED (Step 2.3, was deferred at Step 2.1) — CONFIG DELIVERY MECHANISM:
+    the strategy's opaque config (core.strategies.config JSONB, resolved via
+    StrategyRepository.get_by_id/upsert -> RegisteredStrategy.config) is
+    passed as a PARAMETER to generate_signals below, not injected via the
+    plugin's constructor. JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged, Doc
+    14 does not specify a delivery mechanism):
+      - A per-call parameter keeps a Strategy instance itself stateless —
+        it holds no config field a plugin author could forget to read, no
+        two-phase init lifecycle (construct, then separately configure)
+        for the ABC to define or a caller to get wrong, and it's directly
+        testable (call generate_signals with any config, no instance setup).
+      - It also naturally matches Doc 14 §10.2.5's "Configuration Snapshot
+        — Complete strategy configuration at this version": the config
+        passed into one call IS that call's immutable snapshot, rather
+        than mutable instance state that could theoretically drift between
+        calls if a caller reused one plugin instance across config updates.
+      - Constructor injection was the alternative considered and rejected:
+        it would tie a plugin instance to one config for its lifetime,
+        which is a real constraint (fine for a single backtest run, awkward
+        for a long-lived engine process resolving fresh RegisteredStrategy
+        rows per invocation) that a parameter avoids.
+    STILL OPEN, not addressed here (flagged, not silently assumed solved):
+    HOW the Strategy Engine obtains a live Python object of the correct
+    plugin class for a given core.strategies row (plugin discovery /
+    class registry / entry-points) is a separate question from config
+    delivery and remains for Step 2.4 (reference strategy) to resolve
+    concretely, since no second real plugin exists yet to design a
+    registry around.
     """
 
     @abstractmethod
-    async def generate_signals(self, view: MarketDataView) -> Sequence[Signal]:
+    async def generate_signals(
+        self, view: MarketDataView, config: Mapping[str, object]
+    ) -> Sequence[Signal]:
         """Produce signals from read-only market data — Doc 14 §10.6.4 Signal Combination.
+
+        `config` is the invoking RegisteredStrategy's opaque config
+        (core.strategies.config JSONB, Step 2.3) — the platform passes it
+        through verbatim and never inspects its contents (P-1/T-2); a
+        plugin interprets its own keys however it defines them.
 
         Returns zero or more Signals. Returning an empty sequence is valid and
         expected (a strategy with no view on the current market). The platform

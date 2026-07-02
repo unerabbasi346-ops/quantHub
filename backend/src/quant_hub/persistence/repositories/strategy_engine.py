@@ -19,19 +19,126 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from quant_hub.domain.strategy_engine.entities import RecordedSignal, Signal
+from quant_hub.domain.strategy_engine.entities import (
+    RecordedSignal,
+    RegisteredStrategy,
+    Signal,
+    StrategyRef,
+)
 from quant_hub.domain.strategy_engine.interfaces import SignalRepository, StrategyRepository
 from quant_hub.persistence.repositories.base import BaseRepository
 
 
+def _row_to_strategy(row: object) -> RegisteredStrategy:
+    return RegisteredStrategy(
+        id=row["id"],
+        name=row["name"],
+        description=row["description"],
+        version=row["version"],
+        status=row["status"],
+        config=dict(row["config"] or {}),
+        portfolio_id=row["portfolio_id"],
+        registered_by=row["registered_by"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 class SQLAlchemyStrategyRepository(BaseRepository[object], StrategyRepository):
-    """Concrete repository for core.strategies."""
+    """Concrete repository for core.strategies — Step 2.3, Doc 09 (Step 1.1 schema)."""
 
-    async def get_by_id(self, strategy_id: UUID) -> object | None:
-        return None  # stub
+    async def upsert(self, strategy: StrategyRef) -> UUID:
+        """Resolve-or-register on core.strategies.name — mirrors
+        SQLAlchemyAssetRepository.upsert (market_data.py, Step 1.3): ON
+        CONFLICT DO UPDATE so a re-registered strategy's description/
+        version/config/portfolio drift toward the latest caller-supplied
+        state, `id`/`created_at`/`status` excluded from SET, `updated_at`
+        via clock_timestamp() (not NOW(), frozen at transaction start —
+        same reasoning as market_data.py's upsert methods).
 
-    async def list_by_portfolio(self, portfolio_id: UUID) -> list[object]:
-        return []  # stub
+        `status` is deliberately excluded from BOTH the INSERT column list
+        (first insert takes the schema DEFAULT 'INACTIVE', Step 1.1) and
+        the ON CONFLICT SET clause (re-registration never touches it):
+        lifecycle state is a distinct governed concern (Doc 14 §10.2.6,
+        "State transitions shall be governed with explicit approval") that
+        this resolve-or-register mechanism does not perform.
+
+        FLAGGED TENSION WITH Doc 14 §10.2.5 (Doc 00 §14.5/§14.7 — not
+        silently resolved): §10.2.5 states "Every strategy modification
+        shall create a new version per P-2" and "Published strategy
+        versions shall be immutable... Historical strategy versions shall
+        remain available for audit, comparison, and rollback." The Step
+        1.1 schema (core.strategies.name UNIQUE, this table's only natural
+        key, no separate version-history table) makes that impossible to
+        honor with an upsert-on-name pattern: DO UPDATE necessarily
+        overwrites the previous version/config row in place rather than
+        preserving it. This method implements the resolve-or-register
+        pattern exactly as this step's instruction specifies (mirroring
+        AssetRepository.upsert), which is the only pattern the current
+        schema supports — but §10.2.5's full versioning requirement
+        (immutable version history, rollback) is NOT satisfied by it and
+        would need a schema change (e.g. a separate core.strategy_versions
+        table, or (name, version) as the natural key instead of name
+        alone) to be built later. Not resolved here since it was not part
+        of this step's scope and predates it (Step 1.1 schema).
+        """
+        stmt = text(
+            """
+            INSERT INTO core.strategies (name, description, version, config, portfolio_id, registered_by)
+            VALUES (:name, :description, :version, CAST(:config AS JSONB), :portfolio_id, :registered_by)
+            ON CONFLICT (name)
+            DO UPDATE SET
+                description   = EXCLUDED.description,
+                version       = EXCLUDED.version,
+                config        = EXCLUDED.config,
+                portfolio_id  = EXCLUDED.portfolio_id,
+                registered_by = EXCLUDED.registered_by,
+                updated_at    = clock_timestamp()
+            RETURNING id
+            """
+        )
+        result = await self._session.execute(
+            stmt,
+            {
+                "name": strategy.name,
+                "description": strategy.description,
+                "version": strategy.version,
+                "config": json.dumps(dict(strategy.config)),
+                "portfolio_id": strategy.portfolio_id,
+                "registered_by": strategy.registered_by,
+            },
+        )
+        return result.scalar_one()
+
+    async def get_by_id(self, strategy_id: UUID) -> RegisteredStrategy | None:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, name, description, version, status, config,
+                       portfolio_id, registered_by, created_at, updated_at
+                FROM core.strategies
+                WHERE id = :id AND deleted_at IS NULL
+                """
+            ),
+            {"id": strategy_id},
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else _row_to_strategy(row)
+
+    async def list_by_portfolio(self, portfolio_id: UUID) -> list[RegisteredStrategy]:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, name, description, version, status, config,
+                       portfolio_id, registered_by, created_at, updated_at
+                FROM core.strategies
+                WHERE portfolio_id = :portfolio_id AND deleted_at IS NULL
+                ORDER BY created_at
+                """
+            ),
+            {"portfolio_id": portfolio_id},
+        )
+        return [_row_to_strategy(row) for row in result.mappings().all()]
 
 
 class SQLAlchemySignalRepository(BaseRepository[object], SignalRepository):

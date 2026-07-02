@@ -84,13 +84,14 @@ async def test_a_concrete_plugin_emits_only_signals() -> None:
             return None
 
     class _AlwaysLongOne(Strategy):
-        async def generate_signals(self, view: MarketDataView) -> Sequence[Signal]:
+        async def generate_signals(self, view: MarketDataView, config) -> Sequence[Signal]:
             # Whatever a strategy does internally is opaque; it can ONLY read the
-            # view and can ONLY return Signals.
+            # view and can ONLY return Signals. `config` is passed through
+            # verbatim (Step 2.3) — this plugin ignores it, which is valid.
             await view.latest_tick(_ASSET)
             return [_signal(value=Decimal("1"))]
 
-    signals = await _AlwaysLongOne().generate_signals(_FakeView())
+    signals = await _AlwaysLongOne().generate_signals(_FakeView(), {})
 
     assert len(signals) == 1
     assert all(isinstance(s, Signal) for s in signals)
@@ -98,9 +99,14 @@ async def test_a_concrete_plugin_emits_only_signals() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_signal_sequence_is_valid() -> None:
-    class _Abstains(Strategy):
-        async def generate_signals(self, view: MarketDataView) -> Sequence[Signal]:
+async def test_config_is_passed_through_verbatim_and_unopened() -> None:
+    # P-1/T-2: the platform never inspects config contents; a plugin reads
+    # its own keys however it defines them.
+    received: dict = {}
+
+    class _ReadsConfig(Strategy):
+        async def generate_signals(self, view: MarketDataView, config) -> Sequence[Signal]:
+            received.update(config)
             return []
 
     class _NullView(MarketDataView):
@@ -110,4 +116,22 @@ async def test_empty_signal_sequence_is_valid() -> None:
         async def latest_tick(self, asset):
             return None
 
-    assert await _Abstains().generate_signals(_NullView()) == []
+    await _ReadsConfig().generate_signals(_NullView(), {"lookback": 20, "threshold": "0.5"})
+
+    assert received == {"lookback": 20, "threshold": "0.5"}
+
+
+@pytest.mark.asyncio
+async def test_empty_signal_sequence_is_valid() -> None:
+    class _Abstains(Strategy):
+        async def generate_signals(self, view: MarketDataView, config) -> Sequence[Signal]:
+            return []
+
+    class _NullView(MarketDataView):
+        async def latest_bars(self, asset, interval, limit=100):
+            return []
+
+        async def latest_tick(self, asset):
+            return None
+
+    assert await _Abstains().generate_signals(_NullView(), {}) == []

@@ -8,7 +8,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from quant_hub.domain.strategy_engine.entities import RecordedSignal, Signal
+from quant_hub.domain.strategy_engine.entities import (
+    RecordedSignal,
+    RegisteredStrategy,
+    Signal,
+    StrategyRef,
+)
 
 
 class StrategyRepository(ABC):
@@ -18,10 +23,20 @@ class StrategyRepository(ABC):
     """
 
     @abstractmethod
-    async def get_by_id(self, strategy_id: UUID) -> object | None: ...
+    async def upsert(self, strategy: StrategyRef) -> UUID:
+        """Resolve-or-register on core.strategies.name — Step 2.3.
+
+        Makes a strategy's identity concrete and persistent: `strategy_id`
+        (referenced by core.signals, Step 2.2) must resolve to a real,
+        registered row here, never an arbitrary caller-supplied UUID.
+        """
+        ...
 
     @abstractmethod
-    async def list_by_portfolio(self, portfolio_id: UUID) -> list[object]: ...
+    async def get_by_id(self, strategy_id: UUID) -> RegisteredStrategy | None: ...
+
+    @abstractmethod
+    async def list_by_portfolio(self, portfolio_id: UUID) -> list[RegisteredStrategy]: ...
 
 
 class SignalRepository(ABC):
