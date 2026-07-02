@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import text
@@ -143,6 +144,18 @@ class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
         (and bars 1-14) intact for the caller's eventual commit. The
         failing bar is logged (not silently dropped, per Doc 11 §8) and
         excluded from the returned count; the loop continues.
+
+        VERSION HISTORY (Step 1.9, Doc 11 §7 "Maintain dataset version
+        history", scoped per S-2 — see handbook/KNOWN_LIMITATIONS.md S-3
+        for the full judgment call): `updated_at` (clock_timestamp() on
+        every write, above) tells a reader THAT and WHEN a bar changed,
+        but not WHAT changed. As a lightweight addition — not a full
+        versioned/immutable dataset system (Part 4, out of scope per S-1)
+        — each write reports via Postgres' `xmax = 0` idiom (true only for
+        a row inserted, not updated, by the current command) whether it
+        was a fresh insert or a revision of an existing bar; the batch
+        logs an insert/revised summary at INFO level rather than
+        persisting a separate audit table.
         """
         stmt = text(
             """
@@ -165,13 +178,16 @@ class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
                 data_quality      = EXCLUDED.data_quality,
                 source            = EXCLUDED.source,
                 updated_at        = clock_timestamp()
+            RETURNING (xmax = 0) AS was_insert
             """
         )
-        count = 0
+        inserted = 0
+        revised = 0
+        failed = 0
         for bar in bars:
             try:
                 async with self._session.begin_nested():
-                    await self._session.execute(
+                    result = await self._session.execute(
                         stmt,
                         {
                             "asset_id": bar.asset_id,
@@ -189,14 +205,35 @@ class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
                             "source": bar.source,
                         },
                     )
-                count += 1
+                if result.scalar_one():
+                    inserted += 1
+                else:
+                    revised += 1
             except DBAPIError as exc:
+                failed += 1
                 logger.error(
                     "upsert_bars: failed to persist bar, asset_id=%s interval=%s "
                     "ts=%s error=%r",
                     bar.asset_id, bar.interval, bar.ts, exc,
                 )
-        return count
+        if bars:
+            logger.info(
+                "upsert_bars: batch summary asset_id=%s interval=%s "
+                "inserted=%d revised=%d failed=%d",
+                bars[0].asset_id, bars[0].interval, inserted, revised, failed,
+            )
+        return inserted + revised
+
+    async def get_latest_ts(self, asset_id: UUID, interval: str) -> datetime | None:
+        """Doc 11 §7 late-arrival-detection watermark — see interface docstring."""
+        result = await self._session.execute(
+            text(
+                "SELECT MAX(ts) FROM market_data.ohlcv_bars "
+                "WHERE asset_id = :asset_id AND interval = :interval"
+            ),
+            {"asset_id": asset_id, "interval": interval},
+        )
+        return result.scalar_one_or_none()
 
 
 class SQLAlchemyTickRepository(BaseRepository[object], TickRepository):
@@ -248,3 +285,17 @@ class SQLAlchemyTickRepository(BaseRepository[object], TickRepository):
                 "sequence_num": tick.sequence_num,
             },
         )
+
+    async def get_latest_ts(self, asset_id: UUID) -> datetime | None:
+        """Doc 11 §7 late-arrival-detection watermark — see interface docstring.
+
+        JUDGMENT CALL: scoped to asset_id only, not (asset_id,
+        feed_origin) — every current connector maps 1:1 to a single feed
+        per asset, so the extra dimension isn't yet meaningful. Revisit if
+        an asset is ever ingested from multiple concurrent tick feeds.
+        """
+        result = await self._session.execute(
+            text("SELECT MAX(ts) FROM market_data.ticks WHERE asset_id = :asset_id"),
+            {"asset_id": asset_id},
+        )
+        return result.scalar_one_or_none()

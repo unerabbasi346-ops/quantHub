@@ -234,6 +234,47 @@ async def test_ohlcv_upsert_bars_isolates_mid_batch_failure(db_session: AsyncSes
     assert [r.ts.hour for r in rows] == [0, 1, 3]
 
 
+async def test_ohlcv_get_latest_ts_reflects_persisted_bars(db_session: AsyncSession) -> None:
+    """Doc 11 §7 late-arrival-detection watermark (Step 1.9)."""
+    assets = SQLAlchemyAssetRepository(db_session)
+    ohlcv = SQLAlchemyOHLCVRepository(db_session)
+    asset_id = await assets.upsert(
+        AssetRef(symbol=_unique_symbol("WTRMRK"), exchange="TESTX", asset_class="crypto")
+    )
+
+    assert await ohlcv.get_latest_ts(asset_id, "1d") is None  # nothing persisted yet
+
+    ts1 = datetime(2026, 1, 1, 0, tzinfo=timezone.utc)
+    ts2 = datetime(2026, 1, 1, 5, tzinfo=timezone.utc)
+    await ohlcv.upsert_bars([_bar(asset_id, ts1, Decimal("1")), _bar(asset_id, ts2, Decimal("2"))])
+
+    assert await ohlcv.get_latest_ts(asset_id, "1d") == ts2  # MAX(ts), not last-inserted
+
+
+async def test_ohlcv_upsert_bars_reports_insert_vs_revised_counts(
+    db_session: AsyncSession, caplog
+) -> None:
+    """Doc 11 §7 minimal version-history signal (Step 1.9, S-3): the batch
+    summary log distinguishes fresh inserts from revisions of existing bars."""
+    import logging
+
+    assets = SQLAlchemyAssetRepository(db_session)
+    ohlcv = SQLAlchemyOHLCVRepository(db_session)
+    asset_id = await assets.upsert(
+        AssetRef(symbol=_unique_symbol("VERHIST"), exchange="TESTX", asset_class="crypto")
+    )
+    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    with caplog.at_level(logging.INFO):
+        await ohlcv.upsert_bars([_bar(asset_id, ts, Decimal("100"))])  # fresh insert
+        await ohlcv.upsert_bars([_bar(asset_id, ts, Decimal("999"))])  # revision
+
+    summaries = [r.getMessage() for r in caplog.records if "batch summary" in r.getMessage()]
+    assert len(summaries) == 2
+    assert "inserted=1 revised=0 failed=0" in summaries[0]
+    assert "inserted=0 revised=1 failed=0" in summaries[1]
+
+
 # ---------------------------------------------------------------------------
 # TickRepository.save_tick
 # ---------------------------------------------------------------------------

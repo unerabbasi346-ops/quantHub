@@ -24,6 +24,27 @@ from quant_hub.infrastructure.market_data.retry import RetryExhaustedError
 logger = logging.getLogger(__name__)
 
 
+def _log_late_arrival(*, context: str, ts: datetime, watermark: datetime | None) -> None:
+    """Doc 11 §7 "Detect late-arriving data", scoped per S-2.
+
+    JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged): "late" is defined as
+    "chronologically before the highest ts already persisted for this
+    asset (+interval, for bars)" — i.e. arriving out of the monotonic
+    order already established — rather than an arbitrary time-magnitude
+    threshold ("more than N hours old"). Doc 11 §7 doesn't specify a
+    threshold, and a magnitude-based one would need per-interval duration
+    parsing (1h vs 1d vs 1wk) for little added precision. Logged at INFO,
+    not WARNING/ERROR: legitimate historical backfills trigger this just
+    as often as genuine out-of-order live data, so it's a neutral trace,
+    not an anomaly signal (explicit in the Step 1.9 instruction).
+    """
+    if watermark is not None and ts < watermark:
+        logger.info(
+            "%s: late-arriving record, ts=%s is before current watermark=%s",
+            context, ts, watermark,
+        )
+
+
 @dataclass(frozen=True)
 class IngestionResult:
     """Outcome of one ingest_ohlcv() call — Doc 11 §2 Acquire/Validate/Persist stages.
@@ -40,12 +61,17 @@ class IngestionResult:
     exchange had no new data" (fetched=0, acquire_failed=False) from "we
     couldn't reach the exchange at all" (fetched=0, acquire_failed=True),
     which `fetched == 0` alone can't tell apart.
+
+    Step 1.9 adds `late_arrivals` (Doc 11 §7 Incremental Updates): count
+    of persisted bars whose ts was before the pre-batch watermark for
+    this asset+interval — see _log_late_arrival for the "late" definition.
     """
 
     fetched: int
     persisted: int
     rejected: int = 0
     acquire_failed: bool = False
+    late_arrivals: int = 0
 
 
 class MarketDataService:
@@ -96,6 +122,28 @@ class MarketDataIngestionService:
     subsystems not built yet — this service does not run publication
     events. It is not the full ETL/ELT pipeline described in Doc 11
     §"ETL/ELT Framework" (out of scope per S-1).
+
+    INCREMENTAL UPDATES (Step 1.9, Doc 11 §7):
+      - "Support append-only synchronization" — already true for ticks
+        since Step 1.2/1.3 (ticks_asset_ts_feed_origin_uq + ON CONFLICT
+        DO NOTHING).
+      - "Detect late-arriving data" — new in Step 1.9: see
+        _log_late_arrival above for the definition of "late" and why
+        it's logged at INFO (a neutral trace, not a WARNING/ERROR).
+      - "Maintain dataset version history" — judged sufficient at S-2
+        scope as: updated_at (clock_timestamp() on every write, Step 1.3)
+        plus an insert-vs-revised count logged per batch (Step 1.9, see
+        SQLAlchemyOHLCVRepository.upsert_bars) — NOT a full versioned/
+        immutable dataset system (Doc 11 Part 4, out of scope per S-1).
+        This does not capture what changed (no before/after delta), only
+        that and when. See handbook/KNOWN_LIMITATIONS.md S-3 for the full
+        judgment call and the trigger for revisiting it.
+      - "Prevent duplicate publication" — already fully covered, not
+        re-implemented: assets_symbol_exchange_uq,
+        ohlcv_bars_asset_interval_ts_uq (Doc 09, Step 1.1 migration), and
+        ticks_asset_ts_feed_origin_uq (migration a428732d6bfe) are the
+        idempotency constraints that make re-ingesting the same record a
+        no-op/revision rather than a duplicate, for all three tables.
     """
 
     def __init__(
@@ -160,6 +208,21 @@ class MarketDataIngestionService:
             return IngestionResult(fetched=len(raw_bars), persisted=0, rejected=rejected)
 
         asset_id = await self._assets.upsert(valid_raw_bars[0].asset)
+
+        # Doc 11 §7 "Detect late-arriving data" — one watermark query per
+        # batch (not per bar): the highest ts already persisted for this
+        # asset+interval before this batch is written.
+        watermark = await self._ohlcv.get_latest_ts(asset_id, interval)
+        late_arrivals = 0
+        for bar in valid_raw_bars:
+            if watermark is not None and bar.ts < watermark:
+                late_arrivals += 1
+            _log_late_arrival(
+                context=f"ingest_ohlcv(symbol={symbol}, interval={interval})",
+                ts=bar.ts,
+                watermark=watermark,
+            )
+
         bars = [
             OHLCVBar(
                 asset_id=asset_id,
@@ -179,7 +242,10 @@ class MarketDataIngestionService:
             for bar in valid_raw_bars
         ]
         persisted = await self._ohlcv.upsert_bars(bars)
-        return IngestionResult(fetched=len(raw_bars), persisted=persisted, rejected=rejected)
+        return IngestionResult(
+            fetched=len(raw_bars), persisted=persisted, rejected=rejected,
+            late_arrivals=late_arrivals,
+        )
 
     async def ingest_latest_tick(self, symbol: str) -> None:
         """Acquire, validate, and persist the latest tick — Doc 11 §2 (Acquire, Validate, Persist)."""
@@ -209,6 +275,14 @@ class MarketDataIngestionService:
             return
 
         asset_id = await self._assets.upsert(raw_tick.asset)
+
+        # Doc 11 §7 "Detect late-arriving data" — see ingest_ohlcv's
+        # equivalent block for the "late" definition.
+        watermark = await self._ticks.get_latest_ts(asset_id)
+        _log_late_arrival(
+            context=f"ingest_latest_tick(symbol={symbol})", ts=raw_tick.ts, watermark=watermark,
+        )
+
         tick = Tick(
             asset_id=asset_id,
             ts=raw_tick.ts,

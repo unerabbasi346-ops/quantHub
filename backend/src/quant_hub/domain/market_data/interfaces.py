@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
@@ -60,7 +61,21 @@ class OHLCVRepository(ABC):
         Added in Step 1.2 for the ingestion "Persist" stage — Doc 11 §2.
         Idempotent on the ohlcv_bars_asset_interval_ts_uq constraint
         (Doc 09, Step 1.1 migration) per Doc 11 §2 Requirements
-        ("Idempotent ingestion").
+        ("Idempotent ingestion"). This UNIQUE constraint is also the
+        mechanism behind Doc 11 §7 "Prevent duplicate publication" for
+        bars — a duplicate bar cannot be persisted twice, only revised.
+        """
+        ...
+
+    @abstractmethod
+    async def get_latest_ts(self, asset_id: UUID, interval: str) -> datetime | None:
+        """Most recent persisted bar timestamp for (asset_id, interval), or None.
+
+        Added in Step 1.9 for Doc 11 §7 "Detect late-arriving data" — the
+        watermark a newly-acquired bar's ts is compared against. Narrower
+        than get_bars() (returns a scalar, not full rows) since that's all
+        late-arrival detection needs; get_bars() remains unimplemented
+        pending a real consumer.
         """
         ...
 
@@ -83,6 +98,17 @@ class TickRepository(ABC):
         feed_origin) DO NOTHING per that migration's "Consequence for
         callers" note, so legitimate retries are absorbed rather than
         raising IntegrityError. See that migration for the residual
-        collision-risk limitation this key does not close.
+        collision-risk limitation this key does not close. This same
+        constraint is the mechanism behind Doc 11 §7 "Prevent duplicate
+        publication" for ticks.
+        """
+        ...
+
+    @abstractmethod
+    async def get_latest_ts(self, asset_id: UUID) -> datetime | None:
+        """Most recent persisted tick timestamp for asset_id, or None.
+
+        Added in Step 1.9 for Doc 11 §7 "Detect late-arriving data" — see
+        OHLCVRepository.get_latest_ts for the same rationale.
         """
         ...

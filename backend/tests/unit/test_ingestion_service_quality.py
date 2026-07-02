@@ -58,6 +58,9 @@ class _FakeOHLCVRepository:
         self.persisted_bars.extend(bars)
         return len(bars)
 
+    async def get_latest_ts(self, asset_id, interval):
+        return None
+
 
 class _FakeTickRepository:
     def __init__(self) -> None:
@@ -68,6 +71,9 @@ class _FakeTickRepository:
 
     async def save_tick(self, tick: Tick) -> None:
         self.saved_ticks.append(tick)
+
+    async def get_latest_ts(self, asset_id):
+        return None
 
 
 def _bar(**overrides: object) -> RawOHLCVBar:
