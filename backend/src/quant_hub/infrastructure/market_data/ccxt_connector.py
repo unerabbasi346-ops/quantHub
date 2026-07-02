@@ -131,7 +131,12 @@ class CCXTConnector(MarketDataConnector):
             bid=_to_decimal(ticker.get("bid")),
             ask=_to_decimal(ticker.get("ask")),
             last=_to_decimal(ticker.get("last")),
-            volume=int(ticker["baseVolume"]) if ticker.get("baseVolume") is not None else None,
+            # Decimal(str(...)), not int(...): ccxt's baseVolume is a float
+            # representing fractional base-asset cumulative volume, same
+            # field/reasoning as fetch_ohlcv's volume above — F-1 fix,
+            # migration 4253bf6672b9 (Step 3.0). int() previously
+            # truncated this silently on every live tick fetch.
+            volume=_to_decimal(ticker.get("baseVolume")),
         )
 
     async def close(self) -> None:

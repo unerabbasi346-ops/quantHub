@@ -89,6 +89,14 @@ class RawTick:
     Field shapes follow Doc 11 "Market Data Tick Contract" (Cross-Document
     Data Contract Shapes) minus `tick_id`/`symbol`/`exchange`, which are
     assigned/resolved at persistence time (id generation, asset_id lookup).
+
+    `bid_size`/`ask_size`/`last_size`/`volume`: `Decimal`, not `int` (F-1
+    fix, migration 4253bf6672b9, Step 3.0) — exchange-reported sizes and
+    volume are fractional base-asset units for crypto, the same reasoning
+    already applied to OHLCVBar.volume (Step 1.4, migration fcec1b5ac8a0).
+    An `int`-typed field forced connectors to truncate before the value
+    ever reached persistence — confirmed as a live active bug in
+    CCXTConnector.fetch_latest_tick's `volume` field, fixed in this step.
     """
 
     asset: AssetRef
@@ -98,17 +106,19 @@ class RawTick:
     bid: Decimal | None = None
     ask: Decimal | None = None
     last: Decimal | None = None
-    bid_size: int | None = None
-    ask_size: int | None = None
-    last_size: int | None = None
-    volume: int | None = None
+    bid_size: Decimal | None = None
+    ask_size: Decimal | None = None
+    last_size: Decimal | None = None
+    volume: Decimal | None = None
     conditions: tuple[str, ...] = field(default_factory=tuple)
     data_quality: str = "CLEAN"
 
 
 @dataclass(frozen=True)
 class Tick:
-    """Persistence-ready tick — market_data.ticks (Doc 09, Step 1.1 migration)."""
+    """Persistence-ready tick — market_data.ticks (Doc 09, Step 1.1 migration,
+    bid_size/ask_size/last_size/volume widened to NUMERIC(28,8) by migration
+    4253bf6672b9 — Step 3.0, F-1)."""
 
     asset_id: UUID
     ts: datetime
@@ -117,10 +127,10 @@ class Tick:
     bid: Decimal | None = None
     ask: Decimal | None = None
     last: Decimal | None = None
-    bid_size: int | None = None
-    ask_size: int | None = None
-    last_size: int | None = None
-    volume: int | None = None
+    bid_size: Decimal | None = None
+    ask_size: Decimal | None = None
+    last_size: Decimal | None = None
+    volume: Decimal | None = None
     conditions: tuple[str, ...] = field(default_factory=tuple)
     data_quality: str = "CLEAN"
     sequence_num: int | None = None
