@@ -17,6 +17,7 @@ from quant_hub.domain.market_data.interfaces import (
     OHLCVRepository,
     TickRepository,
 )
+from quant_hub.domain.market_data.quality import assess_bar_quality, assess_tick_quality
 from quant_hub.domain.market_data.validation import validate_bar, validate_tick
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,14 @@ class MarketDataIngestionService:
     datasets... Generate validation reports"), scoped down per
     handbook/KNOWN_LIMITATIONS.md S-2 to a per-record structured log entry
     rather than a full quality-rules-engine/report artifact.
+
+    QUALITY SCORING (Step 1.7, Doc 11 §6 Data Quality Scoring): every
+    record surviving Validate gets a computed `data_quality` value (see
+    domain/market_data/quality.py for the metric-by-metric scoping
+    rationale) instead of a hardcoded default — bars pass through their
+    connector-asserted quality (meaning "passed Step 1.6 Validate", not
+    an unconditional constant); ticks additionally get a staleness check
+    (Freshness/Timeliness, collapsed into one signal per S-2).
 
     SCOPE NOTE (Step 1.2, still current): Enrich and Publish are separate
     subsystems not built yet — this service does not run publication
@@ -140,7 +149,7 @@ class MarketDataIngestionService:
                 vwap=bar.vwap,
                 trade_count=bar.trade_count,
                 adjustment_factor=bar.adjustment_factor,
-                data_quality=bar.data_quality,
+                data_quality=assess_bar_quality(source_quality=bar.data_quality),
                 source=bar.source,
             )
             for bar in valid_raw_bars
@@ -178,6 +187,10 @@ class MarketDataIngestionService:
             last_size=raw_tick.last_size,
             volume=raw_tick.volume,
             conditions=raw_tick.conditions,
-            data_quality=raw_tick.data_quality,
+            data_quality=assess_tick_quality(
+                ts=raw_tick.ts,
+                received_at=raw_tick.received_at,
+                source_quality=raw_tick.data_quality,
+            ),
         )
         await self._ticks.save_tick(tick)

@@ -111,4 +111,19 @@ class YFinanceConnector(MarketDataConnector):
         )
 
     def _fetch_last_price(self, symbol: str) -> float | None:
-        return yf.Ticker(symbol).fast_info.get("last_price")
+        # BUG FIX (investigated per user request after ingest_latest_tick
+        # returned None for AAPL/MSFT/SPY in Steps 1.2 and 1.7): this was
+        # NOT a market-hours/deprecation/rate-limit issue. Root-caused via
+        # yfinance 1.4.1 source: FastInfo.get(key) only checks
+        # `key in self.keys()`, and `FastInfo.keys()` returns
+        # `_public_keys`, which holds only the camelCase field names
+        # (e.g. "lastPrice"). The snake_case alias "last_price" is never a
+        # member of `_public_keys`, so `.get("last_price")` fell through
+        # to its `default=None` on every call, deterministically,
+        # regardless of market hours. Attribute access (`.last_price`) and
+        # bracket access (`["last_price"]`) both go through
+        # `FastInfo.__getitem__`, which checks the broader `_keys` set
+        # (camelCase AND snake_case) and resolves correctly — confirmed
+        # live: `fast_info.get("last_price")` -> None,
+        # `fast_info.last_price` -> a real price, for the same object.
+        return yf.Ticker(symbol).fast_info.last_price
