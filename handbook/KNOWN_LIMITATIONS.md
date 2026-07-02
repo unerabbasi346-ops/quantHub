@@ -64,7 +64,8 @@
 
 Findings surfaced during backend implementation (originally Phase 1, Doc
 11 Market Data Ingestion, Steps 1.2–1.4; extended in Phase 2, Doc 14
-Trading Infrastructure, Step 2.3 — F-9) that are tracked defects requiring
+Trading Infrastructure — F-10 Step 2.2 signals idempotency, F-9 Step 2.3
+strategy versioning) that are tracked defects/open gaps requiring
 resolution before a specific future phase/workflow begins — unlike Phase
 4/5 above, these are NOT accepted design decisions. Recorded here so each
 finding surfaces again naturally (e.g. when a blocked repository is about
@@ -81,6 +82,7 @@ to be implemented) rather than depending on anyone's memory.
 | F-7 | Symbol Changes, Delistings, Mergers (event-type coverage) | `market_data.corporate_actions` (connector scope) | Doc 11 §3 names 6 supported event types; only Dividends and Splits/Reverse Splits are sourced (via yfinance). No implemented data source for Symbol Changes, Delistings, or Mergers | When Doc 11 names a vendor for these event types, or before any consumer needs them | Doc 11 does not name a corporate-actions vendor for any event type; yfinance's `Ticker` API has no clean endpoint for these three | `YFinanceConnector` (Step 1.10); Doc 11 §3 |
 | F-8 | `adjustment_factor` | `market_data.ohlcv_bars` | Corporate-action facts (splits/dividends) are recorded in `market_data.corporate_actions`, but `ohlcv_bars.adjustment_factor` is never recomputed/updated from them — historical bars remain exactly as originally ingested (raw), unadjusted for later splits/dividends | Before any backtesting/analytics consumer requires split/dividend-adjusted historical price series | Correctly chaining multiple adjustments over a price series (multiple splits, ordering, precision) is a materially larger feature Doc 11 §3 does not detail | `CorporateActionsIngestionService` (Step 1.10); Doc 11 §3 Rules ("Adjustments are versioned. Original raw values remain preserved.") |
 | F-9 | `name` (sole natural key), no version-history storage | `core.strategies` | Doc 14 §10.2.5 requires: "Every strategy modification shall create a new version per P-2... Published strategy versions shall be immutable... Historical strategy versions shall remain available for audit, comparison, and rollback." The Step 1.1 schema has `name UNIQUE` as the only natural key and no separate version-history table, so `SQLAlchemyStrategyRepository.upsert`'s resolve-or-register pattern (`ON CONFLICT (name) DO UPDATE`, Step 2.3) **overwrites** the prior version's row in place — the previous version's config/description is not preserved anywhere, violating §10.2.5's immutability/audit/rollback requirement | Before any real strategy iteration/versioning workflow begins, or before Phase 2 is considered fully complete, whichever comes first | Requires a schema change: e.g. a separate `core.strategy_versions` table recording each version immutably, or changing the natural key from `name` alone to `(name, version)` so distinct versions coexist as distinct rows | Step 2.3 finding (2026-07-03); `persistence/repositories/strategy_engine.py` `SQLAlchemyStrategyRepository.upsert` docstring; Doc 14 §10.2.5; P-2 |
+| F-10 | No idempotency/uniqueness constraint on `(strategy_id, asset_id, ts)` | `core.signals` | Migration `7c7482e4e00a` (Step 2.2) deliberately created `core.signals` with no natural-key uniqueness constraint. Consequence: re-invoking the same strategy for the same instrument at the same signal timestamp records a **second distinct row**, not a de-duplicated one. Live-observed in the Step 2.4 / Phase 2 regression pass (2026-07-02–03): running the reference strategy twice against the same `ts=2026-07-02 19:00:00+00` produced two `core.signals` rows. Note this is **arguably correct** for a P-5 immutable event log (each invocation *is* a separate generation event) — the gap is only that there is no protection against *unintended* duplicates from retries/re-invocation, unlike the ingestion tables. Doc 11 §2's ingestion tables (bars/ticks) carry an explicit "idempotent ingestion" requirement (external retryable feed); Doc 14 §10.6.4 states **no** equivalent idempotency requirement for internally-computed signals | Before any signal-generation service runs on a schedule or with retry/redelivery in a way that could produce unintended duplicate signal events, or before Phase 2 is considered fully complete, whichever comes first | Add a uniqueness constraint (e.g. on `(strategy_id, asset_id, ts)`) or a de-duplication rule at the recording-service layer — deferred until a real signal-generation service exists whose retry/re-invocation behavior can be observed, mirroring how the ticks idempotency gap (migration `a428732d6bfe`) was resolved only after Step 1.2 surfaced it concretely | Migration `7c7482e4e00a` docstring (Step 2.2); Step 2.4 regression live-observation (2026-07-03); Doc 14 §10.6.4; P-5 |
 
 **Status as of 2026-07-03:** No active data corruption from F-1–F-4 today
 — no order/execution/position repository exists yet, so nothing writes
@@ -100,6 +102,15 @@ and dividend data. F-9 (Step 2.3, `core.strategies` versioning) is active
 today: `SQLAlchemyStrategyRepository.upsert` is live and does overwrite
 prior version rows on every re-registration — not corruption of a single
 write, but data loss of prior version history on each re-registration.
+F-10 (Step 2.2, `core.signals` no natural-key idempotency) is present but
+not actively harmful today: it produces additional immutable signal-event
+rows on re-invocation, which is arguably correct P-5 behavior rather than
+corruption — it becomes a real concern only once a retrying/scheduled
+signal-generation service could emit unintended duplicates. Both F-9 and
+F-10 were surfaced/logged during Phase 2 (Steps 2.2–2.3) and confirmed in
+the Phase 2 regression pass; F-10 was flagged in the Step 2.2 migration
+docstring at the time and promoted to this tracked register during the
+Phase 2 regression pass (2026-07-03).
 
 ---
 
