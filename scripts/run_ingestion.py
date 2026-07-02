@@ -62,7 +62,7 @@ async def run(symbol: str, exchange: str, interval: str, limit: int) -> None:
             # belongs to the caller); this script is the caller.
             await session.commit()
             print(f"symbol={symbol} exchange={exchange} interval={interval} limit={limit}")
-            print(f"fetched={result.fetched} persisted={result.persisted}")
+            print(f"fetched={result.fetched} persisted={result.persisted} rejected={result.rejected}")
     finally:
         await connector.close()
         await engine.dispose()

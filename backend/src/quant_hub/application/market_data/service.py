@@ -6,6 +6,7 @@
 # Per Doc 00 §14.11
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -16,24 +17,26 @@ from quant_hub.domain.market_data.interfaces import (
     OHLCVRepository,
     TickRepository,
 )
+from quant_hub.domain.market_data.validation import validate_bar, validate_tick
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class IngestionResult:
-    """Outcome of one ingest_ohlcv() call — Doc 11 §2 Acquire/Persist stages.
+    """Outcome of one ingest_ohlcv() call — Doc 11 §2 Acquire/Validate/Persist stages.
 
-    Step 1.4 addition: `fetched` and `persisted` are reported separately
-    (rather than a single int) so callers can tell acquisition apart from
-    persistence. Today `fetched == persisted` always, since Step 1.2
-    explicitly scoped Validate (Doc 11 §2 pipeline stage, not built yet)
-    out of this service — nothing currently filters/rejects a fetched bar
-    before it reaches upsert_bars. The two counts will diverge once
-    Validate exists, so this shape is future-proof rather than assuming
-    equality.
+    Step 1.4: `fetched` and `persisted` reported separately so callers can
+    tell acquisition apart from persistence. Step 1.6 adds `rejected`
+    (Doc 11 §5 Data Validation Engine, scoped per handbook/
+    KNOWN_LIMITATIONS.md S-2): bars failing basic schema/completeness/
+    range/consistency checks are excluded before persistence.
+    `fetched == persisted + rejected` whenever nothing else fails.
     """
 
     fetched: int
     persisted: int
+    rejected: int = 0
 
 
 class MarketDataService:
@@ -56,17 +59,26 @@ class MarketDataService:
 class MarketDataIngestionService:
     """Historical OHLCV / latest-tick ingestion orchestration — Doc 11 §2.
 
-    Implements the Acquire and Persist stages of the Doc 11 §2 pipeline
-    (Acquire → Validate → Normalize → Enrich → Persist → Publish) by
-    delegating Acquire to a MarketDataConnector and Persist to the
+    Implements the Acquire, Validate, and Persist stages of the Doc 11 §2
+    pipeline (Acquire → Validate → Normalize → Enrich → Persist → Publish)
+    by delegating Acquire to a MarketDataConnector, Validate to
+    domain/market_data/validation.py (Step 1.6), and Persist to the
     market_data repositories; Normalize is partially done in the connector
     (see its docstring for flagged gaps).
 
-    SCOPE NOTE (Step 1.2, flagged rather than silently narrowed): Validate
-    (Doc 11 §5 Data Validation Engine), Enrich, and Publish are separate
-    subsystems not built yet — this service does not run quality gates or
-    publication events. It is a connector-to-repository wiring skeleton,
-    not the full ETL/ELT pipeline described in Doc 11 §"ETL/ELT Framework".
+    VALIDATE (Step 1.6, Doc 11 §5 Data Validation Engine): basic schema,
+    completeness, range, and consistency checks run on every acquired
+    bar/tick before persistence. Invalid records are rejected — logged
+    with their errors and full field values, never persisted, never
+    silently dropped — per Doc 11 §5 Failure Policy ("Reject invalid
+    datasets... Generate validation reports"), scoped down per
+    handbook/KNOWN_LIMITATIONS.md S-2 to a per-record structured log entry
+    rather than a full quality-rules-engine/report artifact.
+
+    SCOPE NOTE (Step 1.2, still current): Enrich and Publish are separate
+    subsystems not built yet — this service does not run publication
+    events. It is not the full ETL/ELT pipeline described in Doc 11
+    §"ETL/ELT Framework" (out of scope per S-1).
     """
 
     def __init__(
@@ -88,11 +100,33 @@ class MarketDataIngestionService:
         since: datetime | None = None,
         limit: int = 500,
     ) -> IngestionResult:
-        """Acquire bars from the connector and persist them — Doc 11 §2 (Acquire, Persist)."""
+        """Acquire, validate, and persist bars — Doc 11 §2 (Acquire, Validate, Persist)."""
         raw_bars = await self._connector.fetch_ohlcv(symbol, interval, since, limit)
         if not raw_bars:
-            return IngestionResult(fetched=0, persisted=0)
-        asset_id = await self._assets.upsert(raw_bars[0].asset)
+            return IngestionResult(fetched=0, persisted=0, rejected=0)
+
+        valid_raw_bars = []
+        rejected = 0
+        for bar in raw_bars:
+            result = validate_bar(bar)
+            if result.is_valid:
+                valid_raw_bars.append(bar)
+            else:
+                rejected += 1
+                # Doc 11 §5 Failure Policy: "Reject invalid datasets...
+                # Generate validation reports" — scoped per S-2 to a
+                # structured log line (what failed + full record) rather
+                # than a separate quarantine store/report artifact.
+                logger.warning(
+                    "ingest_ohlcv: rejected invalid bar, symbol=%s interval=%s "
+                    "errors=%s bar=%r",
+                    symbol, interval, list(result.errors), bar,
+                )
+
+        if not valid_raw_bars:
+            return IngestionResult(fetched=len(raw_bars), persisted=0, rejected=rejected)
+
+        asset_id = await self._assets.upsert(valid_raw_bars[0].asset)
         bars = [
             OHLCVBar(
                 asset_id=asset_id,
@@ -109,16 +143,27 @@ class MarketDataIngestionService:
                 data_quality=bar.data_quality,
                 source=bar.source,
             )
-            for bar in raw_bars
+            for bar in valid_raw_bars
         ]
         persisted = await self._ohlcv.upsert_bars(bars)
-        return IngestionResult(fetched=len(raw_bars), persisted=persisted)
+        return IngestionResult(fetched=len(raw_bars), persisted=persisted, rejected=rejected)
 
     async def ingest_latest_tick(self, symbol: str) -> None:
-        """Acquire the latest tick from the connector and persist it — Doc 11 §2 (Acquire, Persist)."""
+        """Acquire, validate, and persist the latest tick — Doc 11 §2 (Acquire, Validate, Persist)."""
         raw_tick = await self._connector.fetch_latest_tick(symbol)
         if raw_tick is None:
             return
+
+        result = validate_tick(raw_tick)
+        if not result.is_valid:
+            # Doc 11 §5 Failure Policy — see ingest_ohlcv's rejection log
+            # for the same S-2-scoped reasoning.
+            logger.warning(
+                "ingest_latest_tick: rejected invalid tick, symbol=%s errors=%s tick=%r",
+                symbol, list(result.errors), raw_tick,
+            )
+            return
+
         asset_id = await self._assets.upsert(raw_tick.asset)
         tick = Tick(
             asset_id=asset_id,
