@@ -29,7 +29,14 @@ class AssetRepository(ABC):
     async def get_by_id(self, asset_id: UUID) -> object | None: ...
 
     @abstractmethod
-    async def get_by_symbol_exchange(self, symbol: str, exchange: str) -> object | None: ...
+    async def get_by_symbol_exchange(self, symbol: str, exchange: str) -> UUID | None:
+        """Resolve an existing asset's id by natural key, or None if unregistered.
+
+        Implemented in Step 2.4 for MarketDataView's AssetRef -> asset_id
+        resolution (infrastructure/strategy_engine/market_data_view.py) —
+        the first real consumer of this previously-stubbed method.
+        """
+        ...
 
     @abstractmethod
     async def list_active(self) -> list[object]: ...
@@ -52,7 +59,15 @@ class OHLCVRepository(ABC):
     @abstractmethod
     async def get_bars(
         self, asset_id: UUID, interval: str, limit: int = 100
-    ) -> list[object]: ...
+    ) -> list[OHLCVBar]:
+        """Most recent `limit` bars for (asset_id, interval), oldest -> newest.
+
+        Implemented in Step 2.4 for MarketDataView.latest_bars — the first
+        real consumer of this previously-stubbed method (see
+        get_latest_ts's docstring: "get_bars() remains unimplemented
+        pending a real consumer").
+        """
+        ...
 
     @abstractmethod
     async def upsert_bars(self, bars: list[OHLCVBar]) -> int:
@@ -84,7 +99,13 @@ class TickRepository(ABC):
     """Persistence contract for market_data.ticks — Doc 07 §Implementation Rules."""
 
     @abstractmethod
-    async def get_latest(self, asset_id: UUID) -> object | None: ...
+    async def get_latest(self, asset_id: UUID) -> Tick | None:
+        """Most recently persisted tick for asset_id, or None.
+
+        Implemented in Step 2.4 for MarketDataView.latest_tick — the
+        first real consumer of this previously-stubbed method.
+        """
+        ...
 
     @abstractmethod
     async def save_tick(self, tick: Tick) -> None:

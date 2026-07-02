@@ -47,8 +47,21 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
     async def get_by_id(self, asset_id: UUID) -> object | None:
         return None  # stub: SQLAlchemy query in Step 0.5+
 
-    async def get_by_symbol_exchange(self, symbol: str, exchange: str) -> object | None:
-        return None  # stub
+    async def get_by_symbol_exchange(self, symbol: str, exchange: str) -> UUID | None:
+        """Resolve-only lookup on assets_symbol_exchange_uq — Step 2.4,
+        first real consumer: MarketDataView's AssetRef -> asset_id
+        resolution (infrastructure/strategy_engine/market_data_view.py).
+        Returns None (not an error) for an unregistered asset — the
+        caller decides what "no data" means for its use case.
+        """
+        result = await self._session.execute(
+            text(
+                "SELECT id FROM market_data.assets "
+                "WHERE symbol = :symbol AND exchange = :exchange AND deleted_at IS NULL"
+            ),
+            {"symbol": symbol, "exchange": exchange},
+        )
+        return result.scalar_one_or_none()
 
     async def list_active(self) -> list[object]:
         return []  # stub
@@ -101,8 +114,48 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
 class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
     """Concrete repository for market_data.ohlcv_bars."""
 
-    async def get_bars(self, asset_id: UUID, interval: str, limit: int = 100) -> list[object]:
-        return []  # stub
+    async def get_bars(self, asset_id: UUID, interval: str, limit: int = 100) -> list[OHLCVBar]:
+        """Most recent `limit` bars for (asset_id, interval), oldest -> newest —
+        Step 2.4, first real consumer: MarketDataView.latest_bars.
+
+        Queries ORDER BY ts DESC LIMIT :limit (cheapest way to get the
+        most-recent N rows), then reverses to oldest -> newest before
+        returning — MarketDataView's documented contract (Step 2.1) — so a
+        caller doing a moving-average-style computation over the result
+        doesn't have to remember to reverse it itself.
+        """
+        result = await self._session.execute(
+            text(
+                """
+                SELECT asset_id, interval, ts, open, high, low, close, volume,
+                       vwap, trade_count, adjustment_factor, data_quality, source
+                FROM market_data.ohlcv_bars
+                WHERE asset_id = :asset_id AND interval = :interval
+                ORDER BY ts DESC
+                LIMIT :limit
+                """
+            ),
+            {"asset_id": asset_id, "interval": interval, "limit": limit},
+        )
+        rows = result.mappings().all()
+        return [
+            OHLCVBar(
+                asset_id=row["asset_id"],
+                interval=row["interval"],
+                ts=row["ts"],
+                open=row["open"],
+                high=row["high"],
+                low=row["low"],
+                close=row["close"],
+                volume=row["volume"],
+                vwap=row["vwap"],
+                trade_count=row["trade_count"],
+                adjustment_factor=row["adjustment_factor"],
+                data_quality=row["data_quality"],
+                source=row["source"],
+            )
+            for row in reversed(rows)
+        ]
 
     async def upsert_bars(self, bars: list[OHLCVBar]) -> int:
         """Idempotently persist bars on ohlcv_bars_asset_interval_ts_uq — Doc 11 §2.
@@ -240,8 +293,42 @@ class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
 class SQLAlchemyTickRepository(BaseRepository[object], TickRepository):
     """Concrete repository for market_data.ticks."""
 
-    async def get_latest(self, asset_id: UUID) -> object | None:
-        return None  # stub
+    async def get_latest(self, asset_id: UUID) -> Tick | None:
+        """Most recent persisted tick for asset_id — Step 2.4, first real
+        consumer: MarketDataView.latest_tick."""
+        result = await self._session.execute(
+            text(
+                """
+                SELECT asset_id, ts, received_at, feed_origin, bid, ask, last,
+                       bid_size, ask_size, last_size, volume, conditions,
+                       data_quality, sequence_num
+                FROM market_data.ticks
+                WHERE asset_id = :asset_id
+                ORDER BY ts DESC
+                LIMIT 1
+                """
+            ),
+            {"asset_id": asset_id},
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return Tick(
+            asset_id=row["asset_id"],
+            ts=row["ts"],
+            received_at=row["received_at"],
+            feed_origin=row["feed_origin"],
+            bid=row["bid"],
+            ask=row["ask"],
+            last=row["last"],
+            bid_size=row["bid_size"],
+            ask_size=row["ask_size"],
+            last_size=row["last_size"],
+            volume=row["volume"],
+            conditions=tuple(row["conditions"] or ()),
+            data_quality=row["data_quality"],
+            sequence_num=row["sequence_num"],
+        )
 
     async def save_tick(self, tick: Tick) -> None:
         """Idempotently append a tick — Doc 11 §2, resolved via migration a428732d6bfe.

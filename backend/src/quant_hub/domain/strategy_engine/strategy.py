@@ -121,13 +121,14 @@ class Strategy(ABC):
         which is a real constraint (fine for a single backtest run, awkward
         for a long-lived engine process resolving fresh RegisteredStrategy
         rows per invocation) that a parameter avoids.
-    STILL OPEN, not addressed here (flagged, not silently assumed solved):
-    HOW the Strategy Engine obtains a live Python object of the correct
-    plugin class for a given core.strategies row (plugin discovery /
-    class registry / entry-points) is a separate question from config
-    delivery and remains for Step 2.4 (reference strategy) to resolve
-    concretely, since no second real plugin exists yet to design a
-    registry around.
+    RESOLVED (Step 2.4) — PLUGIN DISCOVERY: how the Strategy Engine obtains
+    a live Python object of the correct plugin class for a given
+    core.strategies row is answered by
+    infrastructure/strategy_engine/plugin_registry.py — a minimal
+    explicit-registration dict keyed by core.strategies.name (see that
+    module's docstring for the full judgment call and rejected
+    alternatives: dynamic class-path strings from DB config, and a full
+    entry-points discovery system).
     """
 
     @abstractmethod
