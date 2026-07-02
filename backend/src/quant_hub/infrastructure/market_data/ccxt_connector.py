@@ -13,6 +13,7 @@ import ccxt.async_support as ccxt
 
 from quant_hub.domain.market_data.connectors import MarketDataConnector
 from quant_hub.domain.market_data.entities import AssetRef, RawOHLCVBar, RawTick
+from quant_hub.infrastructure.market_data.retry import with_retry
 
 
 class CCXTConnector(MarketDataConnector):
@@ -28,10 +29,20 @@ class CCXTConnector(MarketDataConnector):
     (see AssetRef docstring) is likewise unspecified by Doc 11 — the
     vendor-native ccxt symbol (e.g. "BTC/USDT") passes through unchanged.
 
-    GAP: rate-limit handling beyond ccxt's built-in `enableRateLimit`,
-    retry policies, and source health monitoring (Doc 11 §1 Responsibilities)
-    are not implemented in this skeleton. Only public/unauthenticated
+    GAP: source health monitoring (Doc 11 §1 Responsibilities) is not
+    implemented. Retry policy is implemented (Step 1.8, Doc 11 §8 — see
+    RETRY below); rate-limit handling beyond ccxt's built-in
+    `enableRateLimit` is still not implemented. Only public/unauthenticated
     endpoints are used — no API credentials are handled, per Doc 00 §14.9.
+
+    RETRY (Step 1.8, Doc 11 §8 Error Recovery, scoped per S-2): both
+    fetch_ohlcv and fetch_latest_tick retry on ccxt.NetworkError (the
+    common base for RequestTimeout, RateLimitExceeded, ExchangeNotAvailable,
+    DDoSProtection — i.e. exactly Doc 11 §8's "network errors, rate
+    limits, timeouts" trigger list) with exponential backoff, bounded at
+    3 attempts (infrastructure/market_data/retry.py). Non-network ccxt
+    errors (BadSymbol, AuthenticationError, etc.) are not retryable —
+    retrying an invalid symbol wouldn't help — and propagate immediately.
 
     REAL-EXECUTION FINDING (Step 1.4 — flagged, not silently patched):
     ccxt.async_support's default aiohttp session resolves DNS via aiodns
@@ -66,8 +77,16 @@ class CCXTConnector(MarketDataConnector):
         limit: int = 500,
     ) -> list[RawOHLCVBar]:
         since_ms = int(since.timestamp() * 1000) if since is not None else None
-        raw_rows = await self._exchange.fetch_ohlcv(
-            symbol, timeframe=interval, since=since_ms, limit=limit
+
+        async def _do_fetch() -> list:
+            return await self._exchange.fetch_ohlcv(
+                symbol, timeframe=interval, since=since_ms, limit=limit
+            )
+
+        raw_rows = await with_retry(
+            _do_fetch,
+            retryable=(ccxt.NetworkError,),
+            context=f"CCXTConnector.fetch_ohlcv(symbol={symbol}, interval={interval})",
         )
         asset = AssetRef(symbol=symbol, exchange=self.source_id, asset_class="crypto")
         return [
@@ -91,7 +110,14 @@ class CCXTConnector(MarketDataConnector):
         ]
 
     async def fetch_latest_tick(self, symbol: str) -> RawTick | None:
-        ticker = await self._exchange.fetch_ticker(symbol)
+        async def _do_fetch() -> dict:
+            return await self._exchange.fetch_ticker(symbol)
+
+        ticker = await with_retry(
+            _do_fetch,
+            retryable=(ccxt.NetworkError,),
+            context=f"CCXTConnector.fetch_latest_tick(symbol={symbol})",
+        )
         if not ticker:
             return None
         asset = AssetRef(symbol=symbol, exchange=self.source_id, asset_class="crypto")

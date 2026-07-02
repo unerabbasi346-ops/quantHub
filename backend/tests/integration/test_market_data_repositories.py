@@ -197,6 +197,43 @@ async def test_ohlcv_upsert_bars_repeated_identical_calls_no_corruption(
     assert count == 1
 
 
+async def test_ohlcv_upsert_bars_isolates_mid_batch_failure(db_session: AsyncSession) -> None:
+    """Doc 11 §8 Error Recovery (Step 1.8), scoped per S-2: a real
+    foreign-key violation on one bar (a nonexistent asset_id) must not
+    poison bars before or after it in the same upsert_bars() call —
+    proves the per-bar SAVEPOINT checkpoint isolation, not just that a
+    single insert works."""
+    assets = SQLAlchemyAssetRepository(db_session)
+    ohlcv = SQLAlchemyOHLCVRepository(db_session)
+    asset_id = await assets.upsert(
+        AssetRef(symbol=_unique_symbol("CHKPT"), exchange="TESTX", asset_class="crypto")
+    )
+    fake_asset_id = uuid.uuid4()  # not present in market_data.assets
+
+    def bar_at(asset: uuid.UUID, hour: int) -> OHLCVBar:
+        return _bar(asset, datetime(2026, 1, 1, hour, tzinfo=timezone.utc), Decimal("100"))
+
+    batch = [
+        bar_at(asset_id, 0),  # before the failure
+        bar_at(asset_id, 1),  # before the failure
+        bar_at(fake_asset_id, 2),  # FK violation
+        bar_at(asset_id, 3),  # after the failure
+    ]
+
+    count = await ohlcv.upsert_bars(batch)
+
+    assert count == 3  # 3 of 4 persisted; the FK-violating bar excluded
+    rows = (
+        await db_session.execute(
+            text(
+                "SELECT ts FROM market_data.ohlcv_bars WHERE asset_id = :aid ORDER BY ts"
+            ),
+            {"aid": asset_id},
+        )
+    ).all()
+    assert [r.ts.hour for r in rows] == [0, 1, 3]
+
+
 # ---------------------------------------------------------------------------
 # TickRepository.save_tick
 # ---------------------------------------------------------------------------

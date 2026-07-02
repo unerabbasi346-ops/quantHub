@@ -10,12 +10,24 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import requests
 import yfinance as yf
 
 from quant_hub.domain.market_data.calendar import TimezoneCalendarService
 from quant_hub.domain.market_data.connectors import MarketDataConnector
 from quant_hub.domain.market_data.entities import AssetRef, RawOHLCVBar, RawTick
 from quant_hub.infrastructure.market_data.calendar_service import SystemCalendarService
+from quant_hub.infrastructure.market_data.retry import with_retry
+
+# JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged): yfinance has no typed
+# exception hierarchy of its own for network failures (unlike ccxt's
+# NetworkError); it surfaces them as whatever its underlying HTTP client
+# raises. requests.exceptions.RequestException covers the documented
+# `requests`-based path; OSError is added as a broader fallback since
+# yfinance 1.4.1's HTTP backend has changed across versions (curl_cffi
+# alongside requests) and low-level connection/DNS/timeout failures
+# commonly surface as OSError subclasses regardless of HTTP client.
+_YFINANCE_RETRYABLE: tuple[type[BaseException], ...] = (requests.exceptions.RequestException, OSError)
 
 
 class YFinanceConnector(MarketDataConnector):
@@ -36,6 +48,28 @@ class YFinanceConnector(MarketDataConnector):
     Doc 11 does not name one — and MUST NOT be treated as production
     tick-level data.
 
+    RESOLVED, NOT A RECURRING MYSTERY (investigated across Steps 1.2, 1.7,
+    and confirmed a third time on 2026-07-02 at 07:40 ET / pre-market):
+    `fetch_latest_tick` previously returned None for AAPL/MSFT/SPY. Root
+    cause was a genuine, deterministic bug in this connector's own code —
+    NOT market hours, NOT a deprecated/rate-limited field. yfinance
+    1.4.1's `FastInfo.get(key)` only checks `key in self.keys()`, and
+    `FastInfo.keys()` returns `_public_keys`, which holds only camelCase
+    field names (e.g. "lastPrice"); the snake_case alias "last_price" is
+    never in that set, so `.get("last_price")` silently returned its
+    `default=None` on every call, unconditionally. Fixed by switching to
+    attribute access (`fast_info.last_price`), which goes through
+    `FastInfo.__getitem__`'s broader key-resolution logic instead (see
+    `_fetch_last_price` below for the full trace). Confirmed
+    market-hours-independent: `fast_info.last_price` returns a real price
+    (falls back through 1y history / regularMarketPrice internally) even
+    with markets closed — verified live pre-market on both 2026-07-02
+    11:26 UTC and again at 11:40 UTC (07:26/07:40 ET, ~2h before the 9:30
+    ET open), both times returning real, non-None prices for all three
+    tickers. If `fetch_latest_tick` returns None again in the future, the
+    cause is something NEW — do not re-investigate this closed root cause
+    from scratch.
+
     TIMEZONE HANDLING (Step 1.5, Doc 11 §4 — supersedes the earlier Step 1.2
     simplification): yfinance's `history()` index is tz-aware in
     exchange-local time for intraday intervals but is sometimes tz-naive
@@ -49,6 +83,13 @@ class YFinanceConnector(MarketDataConnector):
     yfinance is synchronous; calls run via asyncio.to_thread so this adapter
     can satisfy the async MarketDataConnector contract without blocking the
     event loop.
+
+    RETRY (Step 1.8, Doc 11 §8 Error Recovery, scoped per S-2): both
+    fetch_ohlcv and fetch_latest_tick retry the to_thread call itself
+    (re-dispatching to a new thread each attempt, rather than sleeping
+    inside the worker thread) on network-shaped exceptions — see
+    _YFINANCE_RETRYABLE above — with exponential backoff, bounded at 3
+    attempts (infrastructure/market_data/retry.py).
     """
 
     def __init__(self, calendar: TimezoneCalendarService | None = None) -> None:
@@ -62,7 +103,14 @@ class YFinanceConnector(MarketDataConnector):
         since: datetime | None = None,
         limit: int = 500,
     ) -> list[RawOHLCVBar]:
-        history = await asyncio.to_thread(self._fetch_history, symbol, interval, since)
+        async def _do_fetch() -> Any:
+            return await asyncio.to_thread(self._fetch_history, symbol, interval, since)
+
+        history = await with_retry(
+            _do_fetch,
+            retryable=_YFINANCE_RETRYABLE,
+            context=f"YFinanceConnector.fetch_ohlcv(symbol={symbol}, interval={interval})",
+        )
         asset = AssetRef(symbol=symbol, exchange=self.source_id, asset_class="equity")
         rows = history.tail(limit) if limit else history
         return [
@@ -96,7 +144,14 @@ class YFinanceConnector(MarketDataConnector):
         return ticker.history(interval=interval, period="max", auto_adjust=False)
 
     async def fetch_latest_tick(self, symbol: str) -> RawTick | None:
-        last_price = await asyncio.to_thread(self._fetch_last_price, symbol)
+        async def _do_fetch() -> float | None:
+            return await asyncio.to_thread(self._fetch_last_price, symbol)
+
+        last_price = await with_retry(
+            _do_fetch,
+            retryable=_YFINANCE_RETRYABLE,
+            context=f"YFinanceConnector.fetch_latest_tick(symbol={symbol})",
+        )
         if last_price is None:
             return None
         asset = AssetRef(symbol=symbol, exchange=self.source_id, asset_class="equity")

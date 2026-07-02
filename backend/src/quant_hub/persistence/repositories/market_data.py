@@ -22,9 +22,11 @@
 # below commit explicitly where they need durability to assert against.
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
 from quant_hub.domain.market_data.interfaces import (
@@ -33,6 +35,8 @@ from quant_hub.domain.market_data.interfaces import (
     TickRepository,
 )
 from quant_hub.persistence.repositories.base import BaseRepository
+
+logger = logging.getLogger(__name__)
 
 
 class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
@@ -126,6 +130,19 @@ class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
         clock_timestamp() rather than NOW() for the same reason as
         AssetRepository.upsert above (NOW() is frozen for the lifetime of
         the caller's transaction).
+
+        CHECKPOINT RECOVERY (Step 1.8, Doc 11 §8 Error Recovery, scoped per
+        S-2): each bar's INSERT runs inside its own SAVEPOINT
+        (session.begin_nested()). In Postgres, one failing statement
+        aborts the whole enclosing transaction — without a SAVEPOINT, bar
+        15 of 24 failing would poison bars 1-14's already-executed (but
+        not yet committed, since repositories don't commit — see module
+        docstring) work too, and every subsequent statement in the same
+        transaction would also fail. Rolling back to the SAVEPOINT on
+        failure clears just that bar's error, leaving the transaction
+        (and bars 1-14) intact for the caller's eventual commit. The
+        failing bar is logged (not silently dropped, per Doc 11 §8) and
+        excluded from the returned count; the loop continues.
         """
         stmt = text(
             """
@@ -152,25 +169,33 @@ class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
         )
         count = 0
         for bar in bars:
-            await self._session.execute(
-                stmt,
-                {
-                    "asset_id": bar.asset_id,
-                    "interval": bar.interval,
-                    "ts": bar.ts,
-                    "open": bar.open,
-                    "high": bar.high,
-                    "low": bar.low,
-                    "close": bar.close,
-                    "volume": bar.volume,
-                    "vwap": bar.vwap,
-                    "trade_count": bar.trade_count,
-                    "adjustment_factor": bar.adjustment_factor,
-                    "data_quality": bar.data_quality,
-                    "source": bar.source,
-                },
-            )
-            count += 1
+            try:
+                async with self._session.begin_nested():
+                    await self._session.execute(
+                        stmt,
+                        {
+                            "asset_id": bar.asset_id,
+                            "interval": bar.interval,
+                            "ts": bar.ts,
+                            "open": bar.open,
+                            "high": bar.high,
+                            "low": bar.low,
+                            "close": bar.close,
+                            "volume": bar.volume,
+                            "vwap": bar.vwap,
+                            "trade_count": bar.trade_count,
+                            "adjustment_factor": bar.adjustment_factor,
+                            "data_quality": bar.data_quality,
+                            "source": bar.source,
+                        },
+                    )
+                count += 1
+            except DBAPIError as exc:
+                logger.error(
+                    "upsert_bars: failed to persist bar, asset_id=%s interval=%s "
+                    "ts=%s error=%r",
+                    bar.asset_id, bar.interval, bar.ts, exc,
+                )
         return count
 
 

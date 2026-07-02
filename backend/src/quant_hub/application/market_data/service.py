@@ -19,6 +19,7 @@ from quant_hub.domain.market_data.interfaces import (
 )
 from quant_hub.domain.market_data.quality import assess_bar_quality, assess_tick_quality
 from quant_hub.domain.market_data.validation import validate_bar, validate_tick
+from quant_hub.infrastructure.market_data.retry import RetryExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +34,18 @@ class IngestionResult:
     KNOWN_LIMITATIONS.md S-2): bars failing basic schema/completeness/
     range/consistency checks are excluded before persistence.
     `fetched == persisted + rejected` whenever nothing else fails.
+
+    Step 1.8 adds `acquire_failed` (Doc 11 §8 Error Recovery): True when
+    the connector call exhausted its retries — distinguishes "the
+    exchange had no new data" (fetched=0, acquire_failed=False) from "we
+    couldn't reach the exchange at all" (fetched=0, acquire_failed=True),
+    which `fetched == 0` alone can't tell apart.
     """
 
     fetched: int
     persisted: int
     rejected: int = 0
+    acquire_failed: bool = False
 
 
 class MarketDataService:
@@ -110,7 +118,23 @@ class MarketDataIngestionService:
         limit: int = 500,
     ) -> IngestionResult:
         """Acquire, validate, and persist bars — Doc 11 §2 (Acquire, Validate, Persist)."""
-        raw_bars = await self._connector.fetch_ohlcv(symbol, interval, since, limit)
+        try:
+            raw_bars = await self._connector.fetch_ohlcv(symbol, interval, since, limit)
+        except RetryExhaustedError as exc:
+            # Doc 11 §8: "No failed ingestion shall silently discard
+            # records" — this IS the S-2-scoped dead-letter-queue/operator-
+            # notification equivalent: a clear, structured ERROR log
+            # (more severe than a per-record validation WARNING, since
+            # nothing at all was acquired this cycle) rather than a raised
+            # exception that would crash the whole caller/script, and
+            # rather than a separate DLQ table/alerting system.
+            logger.error(
+                "ingest_ohlcv: acquire failed after retries, symbol=%s interval=%s "
+                "attempts=%d last_error=%r",
+                symbol, interval, exc.attempts, exc.last_error,
+            )
+            return IngestionResult(fetched=0, persisted=0, rejected=0, acquire_failed=True)
+
         if not raw_bars:
             return IngestionResult(fetched=0, persisted=0, rejected=0)
 
@@ -159,7 +183,18 @@ class MarketDataIngestionService:
 
     async def ingest_latest_tick(self, symbol: str) -> None:
         """Acquire, validate, and persist the latest tick — Doc 11 §2 (Acquire, Validate, Persist)."""
-        raw_tick = await self._connector.fetch_latest_tick(symbol)
+        try:
+            raw_tick = await self._connector.fetch_latest_tick(symbol)
+        except RetryExhaustedError as exc:
+            # Doc 11 §8 — see ingest_ohlcv's acquire-failure log for the
+            # same S-2-scoped reasoning.
+            logger.error(
+                "ingest_latest_tick: acquire failed after retries, symbol=%s "
+                "attempts=%d last_error=%r",
+                symbol, exc.attempts, exc.last_error,
+            )
+            return
+
         if raw_tick is None:
             return
 
