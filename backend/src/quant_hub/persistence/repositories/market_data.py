@@ -29,9 +29,10 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import AssetRef, CorporateAction, OHLCVBar, Tick
 from quant_hub.domain.market_data.interfaces import (
     AssetRepository,
+    CorporateActionsRepository,
     OHLCVRepository,
     TickRepository,
 )
@@ -299,3 +300,84 @@ class SQLAlchemyTickRepository(BaseRepository[object], TickRepository):
             {"asset_id": asset_id},
         )
         return result.scalar_one_or_none()
+
+
+class SQLAlchemyCorporateActionsRepository(BaseRepository[object], CorporateActionsRepository):
+    """Concrete repository for market_data.corporate_actions — Step 1.10, Doc 11 §3."""
+
+    async def get_by_asset(self, asset_id: UUID) -> list[object]:
+        return []  # stub — SQLAlchemy query pending a real consumer, same as get_bars/get_latest
+
+    async def upsert_actions(self, actions: list[CorporateAction]) -> int:
+        """Idempotently persist corporate actions on
+        corporate_actions_asset_type_exdate_uq — Doc 11 §2/§3, migration
+        97e88a746f25 (Step 1.10).
+
+        ON CONFLICT DO UPDATE, checkpoint isolation (SAVEPOINT per row),
+        and the insert/revised tally all follow the exact same pattern as
+        SQLAlchemyOHLCVRepository.upsert_bars above — see that method's
+        docstring for the full reasoning (DO-UPDATE-vs-DO-NOTHING
+        judgment call, per-row SAVEPOINT rationale, xmax=0 version-history
+        signal). Reused here rather than re-derived, per Doc 11 §3 Rules
+        "Original raw values remain preserved": this method only ever
+        writes to market_data.corporate_actions, never to
+        market_data.ohlcv_bars, so the raw OHLCV data is untouched by
+        definition, not by a special case in this code.
+        """
+        stmt = text(
+            """
+            INSERT INTO market_data.corporate_actions
+                (asset_id, action_type, ex_date, record_date, payment_date,
+                 ratio, amount, currency, notes)
+            VALUES
+                (:asset_id, :action_type, :ex_date, :record_date, :payment_date,
+                 :ratio, :amount, :currency, :notes)
+            ON CONFLICT ON CONSTRAINT corporate_actions_asset_type_exdate_uq
+            DO UPDATE SET
+                record_date  = EXCLUDED.record_date,
+                payment_date = EXCLUDED.payment_date,
+                ratio        = EXCLUDED.ratio,
+                amount       = EXCLUDED.amount,
+                currency     = EXCLUDED.currency,
+                notes        = EXCLUDED.notes,
+                updated_at   = clock_timestamp()
+            RETURNING (xmax = 0) AS was_insert
+            """
+        )
+        inserted = 0
+        revised = 0
+        failed = 0
+        for action in actions:
+            try:
+                async with self._session.begin_nested():
+                    result = await self._session.execute(
+                        stmt,
+                        {
+                            "asset_id": action.asset_id,
+                            "action_type": action.action_type,
+                            "ex_date": action.ex_date,
+                            "record_date": action.record_date,
+                            "payment_date": action.payment_date,
+                            "ratio": action.ratio,
+                            "amount": action.amount,
+                            "currency": action.currency,
+                            "notes": action.notes,
+                        },
+                    )
+                if result.scalar_one():
+                    inserted += 1
+                else:
+                    revised += 1
+            except DBAPIError as exc:
+                failed += 1
+                logger.error(
+                    "upsert_actions: failed to persist corporate action, asset_id=%s "
+                    "action_type=%s ex_date=%s error=%r",
+                    action.asset_id, action.action_type, action.ex_date, exc,
+                )
+        if actions:
+            logger.info(
+                "upsert_actions: batch summary asset_id=%s inserted=%d revised=%d failed=%d",
+                actions[0].asset_id, inserted, revised, failed,
+            )
+        return inserted + revised

@@ -8,7 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from quant_hub.domain.market_data.entities import RawOHLCVBar, RawTick
+from quant_hub.domain.market_data.entities import RawCorporateAction, RawOHLCVBar, RawTick
 
 
 class MarketDataConnector(ABC):
@@ -40,3 +40,28 @@ class MarketDataConnector(ABC):
 
     @abstractmethod
     async def fetch_latest_tick(self, symbol: str) -> RawTick | None: ...
+
+
+class CorporateActionsConnector(ABC):
+    """Corporate-actions data source contract — Doc 11 §3 Corporate Actions Processing.
+
+    JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged, Step 1.10): kept as a
+    SEPARATE ABC from MarketDataConnector (§1) rather than an additional
+    method on it. Corporate actions (splits, dividends, etc.) are an
+    equities-market construct with no crypto analog — ccxt/CCXTConnector
+    has no equivalent concept, so forcing this onto the shared connector
+    contract would require crypto connectors to implement a meaningless
+    NotImplementedError stub. Only equities connectors (YFinanceConnector)
+    implement this; a connector class may implement both ABCs.
+
+    GAP: Doc 11 §3 names 6 supported event types (Splits, Reverse Splits,
+    Dividends, Symbol Changes, Delistings, Mergers); no data source
+    implemented in Step 1.10 provides Symbol Changes, Delistings, or
+    Mergers — see YFinanceConnector's docstring for why. Doc 11 does not
+    name a corporate-actions vendor at all, for any event type.
+    """
+
+    source_id: str
+
+    @abstractmethod
+    async def fetch_corporate_actions(self, symbol: str) -> list[RawCorporateAction]: ...

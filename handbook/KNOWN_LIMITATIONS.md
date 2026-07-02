@@ -75,13 +75,22 @@ to be implemented) rather than depending on anyone's memory.
 | F-2 | `quantity`, `filled_quantity` | `core.orders` | `INTEGER` cannot represent fractional order quantities (e.g. crypto orders below 1 unit) | Order repository implementation (Phase 2) | Same as F-1 | Same as F-1 |
 | F-3 | `quantity` | `core.executions` | `INTEGER` cannot represent fractional execution quantities | Execution repository implementation (Phase 2) | Same as F-1 | Same as F-1 |
 | F-4 | `quantity` | `core.positions` | `INTEGER` cannot represent fractional position quantities | Position repository implementation (Phase 2) | Same as F-1 | Same as F-1 |
+| F-5 | `(asset_id, action_type, ex_date)` | `market_data.corporate_actions` | `UNIQUE(asset_id, action_type, ex_date)` (migration `97e88a746f25`) cannot distinguish two same-type actions with the same ex-date (e.g. a special dividend and a regular dividend both ex-dated the same day) — the second silently revises the first via `ON CONFLICT DO UPDATE` instead of being stored as a separate row | Before ingesting any corporate-actions source that can report same-day same-type multi-actions, or immediately if this case is observed in real data | Natural key needs an additional disambiguating column; Doc 11 §3 does not currently provide one (no per-action sequence/identifier field) | Migration `97e88a746f25` (Step 1.10); Doc 11 §3 |
+| F-6 | `record_date`, `payment_date` | `market_data.corporate_actions` | Always `NULL` — yfinance's basic `Ticker.dividends`/`Ticker.splits` API only exposes `ex_date`, not the fuller corporate-action calendar. Both columns are nullable (Step 1.1 schema), so this is a gap, not a bug | When a consumer needs record/payment date specifically (e.g. settlement-date-aware calculations), not just ex-date | Requires a richer data source than yfinance's basic dividends/splits API (unnamed by Doc 11), or a yfinance calendar endpoint not yet investigated | `YFinanceConnector.fetch_corporate_actions` (Step 1.10); Doc 11 §3 |
+| F-7 | Symbol Changes, Delistings, Mergers (event-type coverage) | `market_data.corporate_actions` (connector scope) | Doc 11 §3 names 6 supported event types; only Dividends and Splits/Reverse Splits are sourced (via yfinance). No implemented data source for Symbol Changes, Delistings, or Mergers | When Doc 11 names a vendor for these event types, or before any consumer needs them | Doc 11 does not name a corporate-actions vendor for any event type; yfinance's `Ticker` API has no clean endpoint for these three | `YFinanceConnector` (Step 1.10); Doc 11 §3 |
+| F-8 | `adjustment_factor` | `market_data.ohlcv_bars` | Corporate-action facts (splits/dividends) are recorded in `market_data.corporate_actions`, but `ohlcv_bars.adjustment_factor` is never recomputed/updated from them — historical bars remain exactly as originally ingested (raw), unadjusted for later splits/dividends | Before any backtesting/analytics consumer requires split/dividend-adjusted historical price series | Correctly chaining multiple adjustments over a price series (multiple splits, ordering, precision) is a materially larger feature Doc 11 §3 does not detail | `CorporateActionsIngestionService` (Step 1.10); Doc 11 §3 Rules ("Adjustments are versioned. Original raw values remain preserved.") |
 
 **Status as of 2026-07-02:** No active data corruption from F-1–F-4 today
 — no order/execution/position repository exists yet, so nothing writes
 to these columns. `ohlcv_bars.volume` (the fifth instance of this
 pattern) was live and actively truncating data; it has been fixed and
 verified (Step 1.4, migration `fcec1b5ac8a0`). F-1 through F-4 remain
-open and must be resolved before Phase 2 begins.
+open and must be resolved before Phase 2 begins. F-5 through F-8
+(Step 1.10, Corporate Actions Processing) are scope/coverage gaps rather
+than active corruption — `corporate_actions` writes are correct for the
+event types and fields it does implement (Dividends, Splits/Reverse
+Splits, ex_date only), live-verified against real AAPL historical split
+and dividend data.
 
 ---
 

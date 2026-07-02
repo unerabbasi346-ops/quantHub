@@ -16,9 +16,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from quant_hub.domain.market_data.entities import RawOHLCVBar, RawTick
+from quant_hub.domain.market_data.entities import RawCorporateAction, RawOHLCVBar, RawTick
 
 # JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged, not silently decided): a
 # small clock-skew tolerance for the "timestamp not in the future" check,
@@ -128,5 +128,38 @@ def validate_tick(tick: RawTick) -> ValidationResult:
         value = getattr(tick, name)
         if value is not None and value < 0:
             errors.append(f"{name}={value} is negative")
+
+    return ValidationResult(is_valid=not errors, errors=tuple(errors))
+
+
+def validate_corporate_action(action: RawCorporateAction) -> ValidationResult:
+    """Basic schema/completeness checks — Doc 11 §5/§3, scoped per S-2.
+
+    JUDGMENT CALL: deliberately lighter than validate_bar/validate_tick —
+    corporate actions are low-volume, low-risk data (a handful of rows
+    per symbol per year, not a continuous time series), so the same
+    range/consistency machinery isn't proportionate. Only completeness
+    and the one range check with an unambiguous correct sign (ratio/
+    amount must be positive) are checked.
+    """
+    errors: list[str] = []
+
+    if not action.asset.symbol:
+        errors.append("asset.symbol is empty")
+    if not action.asset.exchange:
+        errors.append("asset.exchange is empty")
+    if not action.action_type:
+        errors.append("action_type is empty")
+    if not isinstance(action.ex_date, date):
+        errors.append(f"ex_date is not a date: {type(action.ex_date).__name__}")
+
+    # A split/dividend must carry at least one of ratio/amount — an
+    # action with neither is not meaningfully describable.
+    if action.ratio is None and action.amount is None:
+        errors.append("ratio and amount are both missing — action carries no adjustment data")
+    if action.ratio is not None and action.ratio <= 0:
+        errors.append(f"ratio={action.ratio} is not > 0")
+    if action.amount is not None and action.amount <= 0:
+        errors.append(f"amount={action.amount} is not > 0")
 
     return ValidationResult(is_valid=not errors, errors=tuple(errors))

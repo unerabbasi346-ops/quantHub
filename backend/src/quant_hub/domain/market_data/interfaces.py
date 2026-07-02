@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from uuid import UUID
 
-from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import AssetRef, CorporateAction, OHLCVBar, Tick
 
 
 class AssetRepository(ABC):
@@ -110,5 +110,37 @@ class TickRepository(ABC):
 
         Added in Step 1.9 for Doc 11 §7 "Detect late-arriving data" — see
         OHLCVRepository.get_latest_ts for the same rationale.
+        """
+        ...
+
+
+class CorporateActionsRepository(ABC):
+    """Persistence contract for market_data.corporate_actions — Doc 07 §Implementation Rules.
+
+    Added in Step 1.10 for Doc 11 §3 Corporate Actions Processing.
+    """
+
+    @abstractmethod
+    async def get_by_asset(self, asset_id: UUID) -> list[object]: ...
+
+    @abstractmethod
+    async def upsert_actions(self, actions: list[CorporateAction]) -> int:
+        """Idempotently persist corporate actions, returning the count written.
+
+        Idempotent on corporate_actions_asset_type_exdate_uq (migration
+        97e88a746f25, Step 1.10) per Doc 11 §2 Requirements ("Idempotent
+        ingestion") — proactively added before this repository existed,
+        following the same precedent as the Step 1.2 tick-idempotency
+        follow-up (migration a428732d6bfe). This UNIQUE constraint is also
+        the mechanism behind Doc 11 §7 "Prevent duplicate publication" for
+        corporate actions. See that migration for the residual
+        same-ex-date-same-type collision limitation this key does not
+        close.
+
+        Doc 11 §3 Rules: "Original raw values remain preserved" — this
+        method never writes to market_data.ohlcv_bars; it only records
+        the corporate-action fact itself. Retroactively applying a split/
+        dividend adjustment to historical bars is explicitly NOT
+        implemented (Step 1.10 scope note, application service).
         """
         ...

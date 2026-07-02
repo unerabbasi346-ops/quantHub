@@ -14,8 +14,8 @@ import requests
 import yfinance as yf
 
 from quant_hub.domain.market_data.calendar import TimezoneCalendarService
-from quant_hub.domain.market_data.connectors import MarketDataConnector
-from quant_hub.domain.market_data.entities import AssetRef, RawOHLCVBar, RawTick
+from quant_hub.domain.market_data.connectors import CorporateActionsConnector, MarketDataConnector
+from quant_hub.domain.market_data.entities import AssetRef, RawCorporateAction, RawOHLCVBar, RawTick
 from quant_hub.infrastructure.market_data.calendar_service import SystemCalendarService
 from quant_hub.infrastructure.market_data.retry import with_retry
 
@@ -30,7 +30,7 @@ from quant_hub.infrastructure.market_data.retry import with_retry
 _YFINANCE_RETRYABLE: tuple[type[BaseException], ...] = (requests.exceptions.RequestException, OSError)
 
 
-class YFinanceConnector(MarketDataConnector):
+class YFinanceConnector(MarketDataConnector, CorporateActionsConnector):
     """Equities market-data adapter over yfinance — Doc 11 §1, Doc 03 §Quantitative Libraries.
 
     JUDGMENT CALL (flagged per Doc 00 §14.5/§14.7 — not silently decided):
@@ -90,6 +90,25 @@ class YFinanceConnector(MarketDataConnector):
     inside the worker thread) on network-shaped exceptions — see
     _YFINANCE_RETRYABLE above — with exponential backoff, bounded at 3
     attempts (infrastructure/market_data/retry.py).
+
+    CORPORATE ACTIONS (Step 1.10, Doc 11 §3, data-source judgment call —
+    flagged per Doc 00 §14.5/§14.7): Doc 11 §3 does not name a
+    corporate-actions vendor. yfinance is used here since it's already a
+    project dependency (Doc 03) and already exposes `Ticker.dividends`
+    and `Ticker.splits`. This covers only 2 of Doc 11 §3's 6 supported
+    event types — Dividends and Splits/Reverse Splits (a split ratio < 1
+    is classified REVERSE_SPLIT, >= 1 is SPLIT). Symbol Changes,
+    Delistings, and Mergers are NOT implemented: yfinance's Ticker API has
+    no clean endpoint for these (they'd require scraping or a different,
+    unnamed vendor), and inventing one would be exactly the kind of
+    silent architecture decision Doc 00 §14.5 prohibits. ccxt has no
+    corporate-actions equivalent at all — crypto assets don't have
+    dividends/splits — so this connector is the only source; corporate
+    actions are equities-only for now, stated explicitly rather than
+    forcing a crypto analog that doesn't exist. record_date/payment_date
+    are always None here: yfinance's basic dividends/splits API only
+    exposes ex_date, not the fuller corporate-action calendar; both
+    columns are nullable (Step 1.1 schema) so this is a gap, not a bug.
     """
 
     def __init__(self, calendar: TimezoneCalendarService | None = None) -> None:
@@ -182,3 +201,43 @@ class YFinanceConnector(MarketDataConnector):
         # live: `fast_info.get("last_price")` -> None,
         # `fast_info.last_price` -> a real price, for the same object.
         return yf.Ticker(symbol).fast_info.last_price
+
+    async def fetch_corporate_actions(self, symbol: str) -> list[RawCorporateAction]:
+        async def _do_fetch() -> Any:
+            return await asyncio.to_thread(self._fetch_actions, symbol)
+
+        dividends, splits, currency = await with_retry(
+            _do_fetch,
+            retryable=_YFINANCE_RETRYABLE,
+            context=f"YFinanceConnector.fetch_corporate_actions(symbol={symbol})",
+        )
+        asset = AssetRef(symbol=symbol, exchange=self.source_id, asset_class="equity")
+        actions: list[RawCorporateAction] = []
+        for ex_ts, amount in dividends.items():
+            actions.append(
+                RawCorporateAction(
+                    asset=asset,
+                    action_type="DIVIDEND",
+                    ex_date=ex_ts.date(),
+                    amount=Decimal(str(amount)),
+                    currency=currency,
+                )
+            )
+        for ex_ts, ratio in splits.items():
+            actions.append(
+                RawCorporateAction(
+                    asset=asset,
+                    # ratio < 1 is a reverse split (e.g. 1-for-10 -> 0.1);
+                    # yfinance's Stock Splits series carries the raw ratio
+                    # either way — see class docstring's CORPORATE ACTIONS note.
+                    action_type="SPLIT" if ratio >= 1 else "REVERSE_SPLIT",
+                    ex_date=ex_ts.date(),
+                    ratio=Decimal(str(ratio)),
+                )
+            )
+        return actions
+
+    def _fetch_actions(self, symbol: str) -> tuple[Any, Any, str | None]:
+        ticker = yf.Ticker(symbol)
+        currency = ticker.fast_info.currency
+        return ticker.dividends, ticker.splits, currency

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -124,3 +124,45 @@ class Tick:
     conditions: tuple[str, ...] = field(default_factory=tuple)
     data_quality: str = "CLEAN"
     sequence_num: int | None = None
+
+
+@dataclass(frozen=True)
+class RawCorporateAction:
+    """Connector output prior to asset_id resolution — Doc 11 §3 Corporate Actions Processing.
+
+    JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged, Step 1.10): `action_type`
+    is a free-form string, not an enum, matching the existing
+    market_data.corporate_actions.action_type VARCHAR(32) column (Step
+    1.1) rather than inventing a new type system. Values used by the
+    yfinance connector (infrastructure/market_data/yfinance_connector.py):
+    "DIVIDEND", "SPLIT", "REVERSE_SPLIT". Doc 11 §3 also lists Symbol
+    Changes, Delistings, and Mergers as supported event types, but no
+    connector implemented in Step 1.10 sources those (see connector
+    docstring) — those action_type values are reserved, not yet produced.
+    """
+
+    asset: AssetRef
+    action_type: str
+    ex_date: date
+    ratio: Decimal | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    record_date: date | None = None
+    payment_date: date | None = None
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
+class CorporateAction:
+    """Persistence-ready — market_data.corporate_actions (Doc 09, Step 1.1 migration,
+    idempotency constraint added by migration 97e88a746f25 — Step 1.10)."""
+
+    asset_id: UUID
+    action_type: str
+    ex_date: date
+    ratio: Decimal | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    record_date: date | None = None
+    payment_date: date | None = None
+    notes: str | None = None
