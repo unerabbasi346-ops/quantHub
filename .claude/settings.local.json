@@ -38,7 +38,9 @@
       "Bash(python3 *)",
       "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m pytest tests/integration/test_market_data_repositories.py -k \"latest_ts or insert_vs_revised\" -v)",
       "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m pytest tests/integration/test_corporate_actions_repository.py -v)",
-      "Bash(DATABASE_URL=postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub PYTHONPATH=/c/Projects/QuantHub/backend/src python -c ' *)"
+      "Bash(DATABASE_URL=postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub PYTHONPATH=/c/Projects/QuantHub/backend/src python -c ' *)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m pytest tests/ -v)",
+      "Bash(docker exec *)"
     ]
   }
 }
