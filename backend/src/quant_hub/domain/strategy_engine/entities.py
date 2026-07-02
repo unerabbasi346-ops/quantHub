@@ -10,6 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Mapping
+from uuid import UUID
 
 from quant_hub.domain.market_data.entities import AssetRef
 
@@ -79,3 +80,32 @@ class Signal:
     value: Decimal
     ts: datetime
     metadata: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+
+
+@dataclass(frozen=True)
+class RecordedSignal:
+    """Persisted, immutable signal event — core.signals (Doc 09, migration
+    7c7482e4e00a, Step 2.2), governed by Doc 14 §10.6.4 Signal Recording
+    ("Every generated signal recorded as immutable event per P-5 with
+    timestamp, values, and validation status").
+
+    Carries the three platform-stamped fields the emitted `Signal` (above)
+    deliberately omits — `id`, `strategy_id`, `validation_status` — per
+    Step 2.1's design: a strategy plugin cannot fabricate its own identity,
+    attribution, or validation outcome. `asset_id` replaces `Signal.asset`
+    (an AssetRef) once resolved to a concrete row, mirroring the
+    Raw*/persistence entity split already established in market_data
+    (e.g. RawOHLCVBar -> OHLCVBar).
+
+    No update path: this object represents a row that, once written, is
+    never modified — P-5 immutability, Doc 14 §10.6.4's "immutable event".
+    """
+
+    id: UUID
+    strategy_id: UUID
+    asset_id: UUID
+    value: Decimal
+    ts: datetime
+    validation_status: str
+    metadata: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    created_at: datetime | None = None

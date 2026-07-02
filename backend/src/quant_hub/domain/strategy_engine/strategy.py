@@ -38,6 +38,20 @@ class MarketDataView(ABC):
     will back these reads with the Phase 1 market-data repositories; the domain
     contract stays free of any persistence detail per Doc 07 §Dependency Rules.
 
+    FORWARD-LOOKING NOTE (not a KNOWN_LIMITATIONS entry — scope, not a defect):
+    this view exposes raw bars/ticks only, with NO feature access (Doc 12
+    §8.2 Feature Store, §8.7 Model Serving — Doc 14 §10.6.4's "Feature
+    Computation" and "Model Inference" stages, which sit upstream of Signal
+    Combination in the pipeline). That is a deliberate consequence of Doc 12's
+    Feature Store not existing yet in this codebase (Phase 3+ territory), NOT
+    a permanent design decision that a strategy should never see computed
+    features. Once Doc 12 is built, this interface will very likely need
+    extension (e.g. a `latest_features(asset, feature_set)` method) so a
+    strategy can consume feature-store output per §10.6.4 rather than
+    recomputing features itself from raw bars. Flagged here so this contract
+    is not mistaken for finished/permanent — it is scoped to what Phase 2 can
+    build against today (Doc 11 market data only).
+
     JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged): methods return the existing
     market_data domain value objects (OHLCVBar, Tick) rather than a parallel
     strategy-facing DTO set. Reusing the platform's canonical shapes avoids
