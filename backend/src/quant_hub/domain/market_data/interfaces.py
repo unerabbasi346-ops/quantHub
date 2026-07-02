@@ -73,13 +73,16 @@ class TickRepository(ABC):
 
     @abstractmethod
     async def save_tick(self, tick: Tick) -> None:
-        """Append a tick row — Doc 11 §2 Persist stage.
+        """Idempotently append a tick row — Doc 11 §2 Persist stage, §7 append-only.
 
-        Added in Step 1.2. GAP (flagged, not silently resolved): ticks are
-        described as append-only (Doc 11 §7 "append-only synchronization")
-        but the Step 1.1 migration defines no unique constraint on
-        market_data.ticks, so no DB-enforced idempotency key exists for
-        individual ticks the way it does for assets/bars. Duplicate-tick
-        prevention is therefore not guaranteed at this layer.
+        Added in Step 1.2; idempotency resolved in Step 1.2 follow-up
+        migration a428732d6bfe, which added
+        ticks_asset_ts_feed_origin_uq UNIQUE (asset_id, ts, feed_origin) to
+        market_data.ticks (Doc 09, migration a428732d6bfe). Implementations
+        (Step 1.3+) must use INSERT ... ON CONFLICT (asset_id, ts,
+        feed_origin) DO NOTHING per that migration's "Consequence for
+        callers" note, so legitimate retries are absorbed rather than
+        raising IntegrityError. See that migration for the residual
+        collision-risk limitation this key does not close.
         """
         ...

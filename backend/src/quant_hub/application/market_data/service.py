@@ -6,6 +6,7 @@
 # Per Doc 00 §14.11
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from quant_hub.domain.market_data.connectors import MarketDataConnector
@@ -15,6 +16,24 @@ from quant_hub.domain.market_data.interfaces import (
     OHLCVRepository,
     TickRepository,
 )
+
+
+@dataclass(frozen=True)
+class IngestionResult:
+    """Outcome of one ingest_ohlcv() call — Doc 11 §2 Acquire/Persist stages.
+
+    Step 1.4 addition: `fetched` and `persisted` are reported separately
+    (rather than a single int) so callers can tell acquisition apart from
+    persistence. Today `fetched == persisted` always, since Step 1.2
+    explicitly scoped Validate (Doc 11 §2 pipeline stage, not built yet)
+    out of this service — nothing currently filters/rejects a fetched bar
+    before it reaches upsert_bars. The two counts will diverge once
+    Validate exists, so this shape is future-proof rather than assuming
+    equality.
+    """
+
+    fetched: int
+    persisted: int
 
 
 class MarketDataService:
@@ -68,11 +87,11 @@ class MarketDataIngestionService:
         interval: str,
         since: datetime | None = None,
         limit: int = 500,
-    ) -> int:
+    ) -> IngestionResult:
         """Acquire bars from the connector and persist them — Doc 11 §2 (Acquire, Persist)."""
         raw_bars = await self._connector.fetch_ohlcv(symbol, interval, since, limit)
         if not raw_bars:
-            return 0
+            return IngestionResult(fetched=0, persisted=0)
         asset_id = await self._assets.upsert(raw_bars[0].asset)
         bars = [
             OHLCVBar(
@@ -92,7 +111,8 @@ class MarketDataIngestionService:
             )
             for bar in raw_bars
         ]
-        return await self._ohlcv.upsert_bars(bars)
+        persisted = await self._ohlcv.upsert_bars(bars)
+        return IngestionResult(fetched=len(raw_bars), persisted=persisted)
 
     async def ingest_latest_tick(self, symbol: str) -> None:
         """Acquire the latest tick from the connector and persist it — Doc 11 §2 (Acquire, Persist)."""

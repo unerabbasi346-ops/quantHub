@@ -24,7 +24,14 @@
       "Read(//c/Users/UNITECH/AppData/Local/Temp/claude/C--Projects-QuantHub/7c558a0f-c325-4d5f-ab1c-deccdf005f2c/scratchpad/verify_src/**)",
       "Bash(echo \"---exit code: $?---\")",
       "Bash(powershell -NoProfile -Command \"Test-NetConnection -ComputerName localhost -Port 5432 -InformationLevel Quiet\")",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(pip show *)",
+      "Bash(pip install *)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" python *)",
+      "Bash(PYTHONPATH=src DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" python *)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=/c/Projects/QuantHub/backend/src python *)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m pytest tests/integration/test_market_data_repositories.py -q)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m pytest tests/integration/test_market_data_repositories.py -v)"
     ]
   }
 }

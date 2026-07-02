@@ -60,6 +60,46 @@
 
 ---
 
+## Phase 7 — Implementation-Phase Findings (Tracked, Blocking)
+
+Findings surfaced during Phase 1 backend implementation (Doc 11 Market
+Data Ingestion, Steps 1.2–1.4) that are tracked defects requiring
+resolution before a specific future phase begins — unlike Phase 4/5
+above, these are NOT accepted design decisions. Recorded here so each
+finding surfaces again naturally (e.g. when a blocked repository is about
+to be implemented) rather than depending on anyone's memory.
+
+| ID | Field(s) | Table | Issue | Must resolve before | Resolution pattern | Reference |
+|----|----------|-------|-------|----------------------|---------------------|-----------|
+| F-1 | `bid_size`, `ask_size`, `last_size`, `volume` | `market_data.ticks` | `INTEGER`/`BIGINT` cannot represent fractional trade/order sizes (e.g. crypto sizes below 1 unit) — same class of bug as the confirmed `ohlcv_bars.volume` truncation fixed in migration `fcec1b5ac8a0` | Any order/execution/position repository implementation (Phase 2) | `INTEGER`/`BIGINT` → `NUMERIC`, following the `ohlcv_bars.volume` fix (migration `fcec1b5ac8a0`, Step 1.4) | Step 1.4 live-execution finding (2026-07-02); Doc 09 §Entity Standards; Doc 11 §1, §2 |
+| F-2 | `quantity`, `filled_quantity` | `core.orders` | `INTEGER` cannot represent fractional order quantities (e.g. crypto orders below 1 unit) | Order repository implementation (Phase 2) | Same as F-1 | Same as F-1 |
+| F-3 | `quantity` | `core.executions` | `INTEGER` cannot represent fractional execution quantities | Execution repository implementation (Phase 2) | Same as F-1 | Same as F-1 |
+| F-4 | `quantity` | `core.positions` | `INTEGER` cannot represent fractional position quantities | Position repository implementation (Phase 2) | Same as F-1 | Same as F-1 |
+
+**Status as of 2026-07-02:** No active data corruption from F-1–F-4 today
+— no order/execution/position repository exists yet, so nothing writes
+to these columns. `ohlcv_bars.volume` (the fifth instance of this
+pattern) was live and actively truncating data; it has been fixed and
+verified (Step 1.4, migration `fcec1b5ac8a0`). F-1 through F-4 remain
+open and must be resolved before Phase 2 begins.
+
+---
+
+## Phase 8 — Implementation Scope Decisions (Recorded, Not to Be Re-litigated by Silence)
+
+Explicit scope decisions made during implementation about how much of a
+governing document to build now vs. defer. Distinct from Phase 7 above:
+those are tracked defects; these are deliberate boundaries, recorded so
+a future session without this conversation's context doesn't silently
+re-expand scope or re-derive a different boundary from Doc 11's text.
+
+| ID | Decision | Rationale | Reference |
+|----|----------|-----------|-----------|
+| S-1 | Doc 11 (Data Engineering) Phase 1 implementation scope = **Part 2 (§1–§9, "Market Data Connectors" through "Performance & Operations") only.** Parts 3–7 — ETL/ELT orchestration engine, streaming architecture, the versioned dataset catalog/publication lifecycle (Part 4), deep data governance/security/compliance/DR (Part 4), distributed execution/worker clusters (Part 5), the full Data Quality/Validation/Lineage/Catalog framework (Part 6), and the Enterprise Lakehouse/storage-engine architecture (Part 7) — are explicitly OUT of scope for Phase 1 and any near-term phase. | These parts describe enterprise-scale platform infrastructure (comparable to standing up an Airflow-style orchestrator, Kafka, a data catalog, and a Delta Lake/Iceberg-style Lakehouse from scratch) not needed at the platform's current stage. Doc 11 never declares phase boundaries itself, so without this record the boundary could be silently re-litigated or expanded by a future session reading only the raw document. | Step 1.4→1.5 planning inventory (2026-07-02); Doc 11 Parts 2–7 |
+| S-2 | Within the in-scope Part 2, four items are implemented as scoped-down versions, not Part 2's/Part 6's full enterprise specification: **§5 Data Validation Engine** = basic schema/range/completeness checks, not a full validation framework; **§6 Data Quality Scoring** = simple computed flags, not the formal 5-metric scoring system; **§8 Error Recovery** = retry with backoff + logging, not a full dead-letter-queue/operator-notification system; **§2 "Publish" pipeline stage** = a minimal "mark as ingestion-complete" step scoped to market data, not Part 4's full versioned dataset-lifecycle/catalog machinery. | Same rationale as S-1, applied within Part 2 itself — its section text (and Part 6's/Part 4's much deeper specifications of the same concepts) describe more machinery than a solo-developer platform's near-term needs justify. | Step 1.5+ planning (2026-07-02); Doc 11 §2, §5, §6, §8; Doc 11 Part 4 §1–2, Part 6 |
+
+---
+
 ## Implementation Decisions Deferred
 
 | Decision Category | Guidance | Constraint |

@@ -39,6 +39,12 @@ class RawOHLCVBar:
     (market_data.ohlcv_bars: vwap/trade_count nullable, adjustment_factor
     DEFAULT 1.0, data_quality DEFAULT 'CLEAN') rather than an invented
     estimation rule — see connector docstrings for the specific gap.
+
+    `volume: Decimal`, not int (Step 1.4 fix, migration fcec1b5ac8a0):
+    exchange-reported volume is fractional base-asset units for crypto
+    (live-observed e.g. 573.38622 BTC); an int field forced connectors to
+    truncate it before it ever reached persistence, corrupting the value
+    at the domain boundary regardless of what the DB column could hold.
     """
 
     asset: AssetRef
@@ -48,7 +54,7 @@ class RawOHLCVBar:
     high: Decimal
     low: Decimal
     close: Decimal
-    volume: int
+    volume: Decimal
     vwap: Decimal | None = None
     trade_count: int | None = None
     adjustment_factor: Decimal = Decimal("1.0")
@@ -58,7 +64,8 @@ class RawOHLCVBar:
 
 @dataclass(frozen=True)
 class OHLCVBar:
-    """Persistence-ready OHLCV bar — market_data.ohlcv_bars (Doc 09, Step 1.1 migration)."""
+    """Persistence-ready OHLCV bar — market_data.ohlcv_bars (Doc 09, Step 1.1 migration,
+    volume column widened to NUMERIC(28,8) by migration fcec1b5ac8a0 — Step 1.4)."""
 
     asset_id: UUID
     interval: str
@@ -67,7 +74,7 @@ class OHLCVBar:
     high: Decimal
     low: Decimal
     close: Decimal
-    volume: int
+    volume: Decimal
     vwap: Decimal | None = None
     trade_count: int | None = None
     adjustment_factor: Decimal = Decimal("1.0")

@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import aiohttp
 import ccxt.async_support as ccxt
 
 from quant_hub.domain.market_data.connectors import MarketDataConnector
@@ -31,12 +32,31 @@ class CCXTConnector(MarketDataConnector):
     retry policies, and source health monitoring (Doc 11 §1 Responsibilities)
     are not implemented in this skeleton. Only public/unauthenticated
     endpoints are used — no API credentials are handled, per Doc 00 §14.9.
+
+    REAL-EXECUTION FINDING (Step 1.4 — flagged, not silently patched):
+    ccxt.async_support's default aiohttp session resolves DNS via aiodns
+    (c-ares), which failed outright in Step 1.4's first live run
+    (`aiodns.error.DNSError: Could not contact DNS servers`) even though
+    the OS resolver worked fine for the same host (verified via curl and
+    urllib.request during that run). This is a known class of issue with
+    c-ares on Windows / sandboxed or corporate DNS setups, not specific to
+    one machine. An explicit aiohttp session using aiohttp's standard
+    ThreadedResolver (OS getaddrinfo, same path curl/urllib use) is passed
+    in below so the connector doesn't depend on aiodns succeeding. Doc 11
+    does not specify DNS/session configuration, so this is filed as a
+    portability fix, not an invented requirement.
     """
 
     def __init__(self, exchange_id: str) -> None:
         self.source_id = exchange_id
         exchange_class = getattr(ccxt, exchange_id)
-        self._exchange = exchange_class({"enableRateLimit": True})
+        # Passing an explicit session makes ccxt treat it as caller-owned
+        # (own_session=False internally) — it will NOT close this session
+        # for us, so close() below must do it explicitly.
+        self._session = aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+        )
+        self._exchange = exchange_class({"enableRateLimit": True, "session": self._session})
 
     async def fetch_ohlcv(
         self,
@@ -59,7 +79,12 @@ class CCXTConnector(MarketDataConnector):
                 high=Decimal(str(row[2])),
                 low=Decimal(str(row[3])),
                 close=Decimal(str(row[4])),
-                volume=int(row[5]) if row[5] is not None else 0,
+                # Decimal(str(...)), not int(...): ccxt's volume is a float
+                # of fractional base-asset units (e.g. 573.38622 BTC) —
+                # truncating to int silently discarded real trade volume.
+                # Fixed Step 1.4 alongside migration fcec1b5ac8a0. str()
+                # first avoids Decimal(float) binary-representation noise.
+                volume=Decimal(str(row[5])) if row[5] is not None else Decimal("0"),
                 source=self.source_id,
             )
             for row in raw_rows
@@ -84,8 +109,13 @@ class CCXTConnector(MarketDataConnector):
         )
 
     async def close(self) -> None:
-        """Release the underlying ccxt client's network resources."""
+        """Release the underlying ccxt client's network resources.
+
+        ccxt.close() does not close caller-supplied sessions (see __init__
+        comment), so the explicit ThreadedResolver session is closed here.
+        """
         await self._exchange.close()
+        await self._session.close()
 
 
 def _to_decimal(value: float | int | None) -> Decimal | None:

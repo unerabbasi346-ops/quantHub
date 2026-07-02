@@ -12,8 +12,10 @@ from typing import Any
 
 import yfinance as yf
 
+from quant_hub.domain.market_data.calendar import TimezoneCalendarService
 from quant_hub.domain.market_data.connectors import MarketDataConnector
 from quant_hub.domain.market_data.entities import AssetRef, RawOHLCVBar, RawTick
+from quant_hub.infrastructure.market_data.calendar_service import SystemCalendarService
 
 
 class YFinanceConnector(MarketDataConnector):
@@ -34,21 +36,24 @@ class YFinanceConnector(MarketDataConnector):
     Doc 11 does not name one — and MUST NOT be treated as production
     tick-level data.
 
-    JUDGMENT CALL — timezone handling: Doc 11 §4 requires timestamps
-    normalized to UTC. yfinance's `history()` index is tz-aware in exchange-
-    local time for intraday intervals but is sometimes tz-naive for daily+
-    intervals; Doc 11 does not specify how to treat naive timestamps from a
-    vendor. Naive timestamps are treated here as already representing UTC
-    instant equivalents (attached, not converted) — a simplification flagged
-    for revisit once a real timezone/calendar service (Doc 11 §4) exists.
+    TIMEZONE HANDLING (Step 1.5, Doc 11 §4 — supersedes the earlier Step 1.2
+    simplification): yfinance's `history()` index is tz-aware in
+    exchange-local time for intraday intervals but is sometimes tz-naive
+    for daily+ intervals. Naive timestamps are now correctly localized as
+    exchange-local time (via TimezoneCalendarService.to_utc) rather than
+    assumed to already be UTC — see
+    infrastructure/market_data/calendar_service.py for the exchange ->
+    timezone mapping and its flagged limitations (single default US
+    timezone for all yfinance symbols; no holiday/half-day awareness).
 
     yfinance is synchronous; calls run via asyncio.to_thread so this adapter
     can satisfy the async MarketDataConnector contract without blocking the
     event loop.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, calendar: TimezoneCalendarService | None = None) -> None:
         self.source_id = "yfinance"
+        self._calendar = calendar or SystemCalendarService()
 
     async def fetch_ohlcv(
         self,
@@ -64,12 +69,21 @@ class YFinanceConnector(MarketDataConnector):
             RawOHLCVBar(
                 asset=asset,
                 interval=interval,
-                ts=_to_utc(index),
+                ts=self._calendar.to_utc(index.to_pydatetime(), exchange=self.source_id),
                 open=Decimal(str(row["Open"])),
                 high=Decimal(str(row["High"])),
                 low=Decimal(str(row["Low"])),
                 close=Decimal(str(row["Close"])),
-                volume=int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,  # NaN guard
+                # RawOHLCVBar.volume is Decimal (Step 1.4, migration
+                # fcec1b5ac8a0 widened the column for ccxt's fractional
+                # crypto volumes); equity share counts from yfinance are
+                # still whole units, so this stays an integer value, just
+                # carried in a Decimal to satisfy the shared field type.
+                volume=(
+                    Decimal(int(row["Volume"]))
+                    if row["Volume"] == row["Volume"]  # NaN guard
+                    else Decimal("0")
+                ),
                 source=self.source_id,
             )
             for index, row in rows.iterrows()
@@ -98,10 +112,3 @@ class YFinanceConnector(MarketDataConnector):
 
     def _fetch_last_price(self, symbol: str) -> float | None:
         return yf.Ticker(symbol).fast_info.get("last_price")
-
-
-def _to_utc(ts: Any) -> datetime:
-    dt = ts.to_pydatetime()
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
