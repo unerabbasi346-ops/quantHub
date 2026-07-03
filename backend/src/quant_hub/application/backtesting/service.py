@@ -13,6 +13,11 @@ class BacktestingService:
 
     Doc 07 §Background Processing: backtest jobs are long-running and execute
     asynchronously; they are observable and retry transient failures.
+
+    STILL A STUB as of Step 3.7: the real backtesting logic was built as
+    `application/backtesting/engine.py` BacktestEngine instead of filling in
+    this class — see that module for the live deterministic-replay path.
+    This stub is unused by the real engine and intentionally left untouched.
     """
 
     def __init__(self, repository: BacktestRepository) -> None:

@@ -12,3 +12,10 @@ node_modules/
 .next/
 .DS_Store
 *.swp
+
+# Local tooling/cache artifacts (Claude Code skills, swarm memory, vector cache)
+.claude/skills/
+.github/hooks/
+.github/skills/
+.swarm/
+ruvector.db
