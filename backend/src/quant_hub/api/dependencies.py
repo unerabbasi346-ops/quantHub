@@ -12,10 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from quant_hub.application.risk.service import RiskService
 from quant_hub.domain.execution.interfaces import RiskApprovalInterface
+from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
 from quant_hub.infrastructure.cache import get_redis
 from quant_hub.infrastructure.database import get_session
 from quant_hub.infrastructure.risk_approval_adapter import RiskApprovalAdapter
 from quant_hub.infrastructure.risk_model import PositionExposureRiskModel
+from quant_hub.persistence.repositories.market_data import (
+    SQLAlchemyAssetRepository,
+    SQLAlchemyOHLCVRepository,
+)
 from quant_hub.persistence.repositories.risk import (
     SQLAlchemyPreTradeRiskRepository,
     SQLAlchemyRiskLimitRepository,
@@ -26,6 +31,23 @@ from quant_hub.persistence.repositories.risk import (
 # Doc 07 §Implementation Rules: dependency injection for external resources
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 CacheClient = Annotated[Redis, Depends(get_redis)]
+
+
+# Market-data read repositories — Step 4.1 (API Foundation). Each binds the
+# domain repository interface to its SQLAlchemy implementation over the
+# request-scoped session, so route handlers depend on the interface type
+# (AssetRepository / OHLCVRepository), not the concrete class — Doc 07
+# §Dependency Rules. Mirrors the RiskGate provider pattern below.
+def get_asset_repository(session: DbSession) -> AssetRepository:
+    return SQLAlchemyAssetRepository(session)
+
+
+def get_ohlcv_repository(session: DbSession) -> OHLCVRepository:
+    return SQLAlchemyOHLCVRepository(session)
+
+
+AssetRepo = Annotated[AssetRepository, Depends(get_asset_repository)]
+OHLCVRepo = Annotated[OHLCVRepository, Depends(get_ohlcv_repository)]
 
 
 def build_risk_service(session: AsyncSession) -> RiskService:

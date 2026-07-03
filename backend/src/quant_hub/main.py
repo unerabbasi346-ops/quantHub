@@ -13,8 +13,9 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from quant_hub.api.envelope import register_exception_handlers
 from quant_hub.api.middleware import RequestIDMiddleware
-from quant_hub.api.v1 import health
+from quant_hub.api.v1.router import api_router
 from quant_hub.config import settings
 from quant_hub.infrastructure.cache import redis_pool
 from quant_hub.infrastructure.logging import configure_logging
@@ -52,6 +53,10 @@ app.add_middleware(
 # Doc 07 §Logging & Observability: request-ID propagation — runs first on every request
 app.add_middleware(RequestIDMiddleware)
 
-# Doc 07 §API Standards: version all endpoints
-# Doc 07 §Logging & Observability: health endpoint registered
-app.include_router(health.router, prefix="/v1")
+# Doc 10 §6/§9 + Doc 07 §API Standards: install the shared error-envelope
+# handlers so every error path returns the consistent Doc 10 shape.
+register_exception_handlers(app)
+
+# Doc 07 §API Standards: version all endpoints — the aggregate /v1 router
+# (health + markets today; feature slices register in api/v1/router.py).
+app.include_router(api_router, prefix="/v1")

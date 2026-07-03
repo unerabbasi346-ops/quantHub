@@ -1,0 +1,24 @@
+# Governing specification: Doc 07 — Backend Architecture (QH-007 v1.0)
+#   §API Standards: "Version endpoints." This is the single aggregation
+#   point for all /v1 routers — main.py mounts THIS with prefix="/v1", and
+#   new feature slices (Step 4.2+: portfolio, execution, ...) register here
+#   rather than each editing main.py.
+# Per Doc 00 §14.11
+#
+# A dedicated router module (not the package __init__) so importing
+# quant_hub.api.v1 stays side-effect-free — aggregation is an explicit
+# import of this module, avoiding import-time coupling in the package init.
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from quant_hub.api.v1 import health, markets
+
+api_router = APIRouter()
+
+# Doc 07 §Logging & Observability: health endpoint (unchanged, intentionally
+# NOT enveloped — a liveness probe returns a fixed minimal shape).
+api_router.include_router(health.router)
+
+# Step 4.1: markets vertical slice — the first real data endpoints.
+api_router.include_router(markets.router)

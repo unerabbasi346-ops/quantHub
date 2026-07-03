@@ -19,14 +19,28 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from uuid import UUID
 
-from quant_hub.domain.market_data.entities import AssetRef, CorporateAction, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import (
+    Asset,
+    AssetRef,
+    CorporateAction,
+    OHLCVBar,
+    Tick,
+)
 
 
 class AssetRepository(ABC):
     """Persistence contract for market_data.assets — Doc 07 §Implementation Rules."""
 
     @abstractmethod
-    async def get_by_id(self, asset_id: UUID) -> object | None: ...
+    async def get_by_id(self, asset_id: UUID) -> Asset | None:
+        """The persisted Asset for `asset_id`, or None if absent/soft-deleted.
+
+        Return type tightened from `object` to `Asset` in Step 4.1 (API
+        Foundation), its first real consumer (GET /v1/assets/{id}) — the
+        previously-stubbed placeholder type is replaced now that a concrete
+        read shape exists.
+        """
+        ...
 
     @abstractmethod
     async def get_by_symbol_exchange(self, symbol: str, exchange: str) -> UUID | None:
@@ -39,7 +53,13 @@ class AssetRepository(ABC):
         ...
 
     @abstractmethod
-    async def list_active(self) -> list[object]: ...
+    async def list_active(self) -> list[Asset]:
+        """All active (is_active, not soft-deleted) assets, ordered stably.
+
+        Return type tightened from `list[object]` to `list[Asset]` in Step
+        4.1 (API Foundation), its first real consumer (GET /v1/assets).
+        """
+        ...
 
     @abstractmethod
     async def upsert(self, asset: AssetRef) -> UUID:

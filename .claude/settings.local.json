@@ -64,7 +64,18 @@
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/design-system)",
       "Bash(curl -s http://localhost:3000/design-system)",
       "Bash(npx eslint *)",
-      "Bash(taskkill //F //IM node.exe)"
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(cd \"C:\\\\Projects\\\\QuantHub\\\\backend\")",
+      "Bash(export DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\")",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m uvicorn quant_hub.main:app --host 127.0.0.1 --port 8010 --log-level warning)",
+      "Bash(curl -s -o /dev/null -w \"health: HTTP %{http_code}\\\\n\" http://127.0.0.1:8010/v1/health)",
+      "Bash(echo \"=== 1. GET /v1/assets ===\")",
+      "Bash(curl -s http://127.0.0.1:8010/v1/assets)",
+      "Bash(echo \"=== 4. 404 unknown asset ===\")",
+      "Bash(curl -s -o /dev/null -w 'HTTP %{http_code}\\\\n' http://127.0.0.1:8010/v1/assets/00000000-0000-0000-0000-000000000000)",
+      "Bash(curl -s http://127.0.0.1:8010/v1/assets/00000000-0000-0000-0000-000000000000)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(xargs echo \"killed processes:\")"
     ]
   },
   "hooks": {

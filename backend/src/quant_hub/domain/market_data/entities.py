@@ -32,6 +32,32 @@ class AssetRef:
 
 
 @dataclass(frozen=True)
+class Asset:
+    """A persisted market_data.assets row — the READ counterpart to AssetRef.
+
+    AssetRef is the vendor-agnostic identity used to RESOLVE-OR-CREATE a row
+    (no id, consumed by ingestion). Asset is a row already persisted: it
+    carries the surrogate `id` and `is_active`, and is what the read methods
+    AssetRepository.get_by_id / list_active return.
+
+    Added in Step 4.1 (API Foundation), the first real consumer of those two
+    previously-stubbed read methods — mirroring the RawOHLCVBar (pre-persist)
+    vs OHLCVBar (persisted) split already used in this module. Fields are the
+    subset of market_data.assets (Step 1.1 migration) an API/read consumer
+    needs; created_at/updated_at/deleted_at are intentionally omitted until a
+    consumer needs them (Doc 00 §14.6 — additive, minimal).
+    """
+
+    id: UUID
+    symbol: str
+    exchange: str
+    asset_class: str
+    name: str | None
+    currency: str
+    is_active: bool
+
+
+@dataclass(frozen=True)
 class RawOHLCVBar:
     """Connector output prior to asset_id resolution — Doc 11 §2 Normalize stage.
 

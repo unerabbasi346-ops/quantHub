@@ -29,7 +29,13 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from quant_hub.domain.market_data.entities import AssetRef, CorporateAction, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import (
+    Asset,
+    AssetRef,
+    CorporateAction,
+    OHLCVBar,
+    Tick,
+)
 from quant_hub.domain.market_data.interfaces import (
     AssetRepository,
     CorporateActionsRepository,
@@ -44,8 +50,35 @@ logger = logging.getLogger(__name__)
 class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
     """Concrete repository for market_data.assets — Doc 07 §Implementation Rules."""
 
-    async def get_by_id(self, asset_id: UUID) -> object | None:
-        return None  # stub: SQLAlchemy query in Step 0.5+
+    async def get_by_id(self, asset_id: UUID) -> Asset | None:
+        """The persisted Asset for `asset_id`, or None — Step 4.1 (API
+        Foundation), first real consumer (GET /v1/assets/{id}).
+
+        Filters `deleted_at IS NULL` so a soft-deleted asset reads as "not
+        found", matching get_by_symbol_exchange's existing filter. Raw
+        parameterized SQL via text(), same approach as every other method
+        here (no ORM model for market_data.* — see module docstring).
+        """
+        result = await self._session.execute(
+            text(
+                "SELECT id, symbol, exchange, asset_class, name, currency, is_active "
+                "FROM market_data.assets "
+                "WHERE id = :asset_id AND deleted_at IS NULL"
+            ),
+            {"asset_id": asset_id},
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return Asset(
+            id=row["id"],
+            symbol=row["symbol"],
+            exchange=row["exchange"],
+            asset_class=row["asset_class"],
+            name=row["name"],
+            currency=row["currency"],
+            is_active=row["is_active"],
+        )
 
     async def get_by_symbol_exchange(self, symbol: str, exchange: str) -> UUID | None:
         """Resolve-only lookup on assets_symbol_exchange_uq — Step 2.4,
@@ -63,8 +96,35 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
         )
         return result.scalar_one_or_none()
 
-    async def list_active(self) -> list[object]:
-        return []  # stub
+    async def list_active(self) -> list[Asset]:
+        """All active, non-soft-deleted assets, ordered (symbol, exchange) —
+        Step 4.1 (API Foundation), first real consumer (GET /v1/assets).
+
+        `is_active = TRUE AND deleted_at IS NULL`: is_active is the explicit
+        tradable flag; deleted_at is the soft-delete tombstone. Ordered for
+        a stable, deterministic list response (no ORDER BY would leave row
+        order to the planner).
+        """
+        result = await self._session.execute(
+            text(
+                "SELECT id, symbol, exchange, asset_class, name, currency, is_active "
+                "FROM market_data.assets "
+                "WHERE is_active = TRUE AND deleted_at IS NULL "
+                "ORDER BY symbol, exchange"
+            )
+        )
+        return [
+            Asset(
+                id=row["id"],
+                symbol=row["symbol"],
+                exchange=row["exchange"],
+                asset_class=row["asset_class"],
+                name=row["name"],
+                currency=row["currency"],
+                is_active=row["is_active"],
+            )
+            for row in result.mappings().all()
+        ]
 
     async def upsert(self, asset: AssetRef) -> UUID:
         """Resolve-or-create on assets_symbol_exchange_uq — Doc 11 §2 idempotent ingestion.
