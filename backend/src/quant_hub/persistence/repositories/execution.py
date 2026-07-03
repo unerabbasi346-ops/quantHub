@@ -14,20 +14,34 @@
 # resolution, migration d1f8b6c4a7e2) for signal lineage.
 from __future__ import annotations
 
+from decimal import ROUND_HALF_EVEN, Decimal
 from uuid import UUID
 
 from sqlalchemy import text
 
 from quant_hub.domain.execution.entities import (
+    Fill,
     OrderIntent,
     OrderSide,
     OrderStatus,
     OrderType,
+    RecordedExecution,
     RecordedOrder,
     TimeInForce,
 )
-from quant_hub.domain.execution.interfaces import ExecutionRepository, OrderRepository
+from quant_hub.domain.execution.interfaces import (
+    ExecutionRepository,
+    InvalidOrderTransition,
+    OrderRepository,
+)
 from quant_hub.persistence.repositories.base import BaseRepository
+
+# The core.orders columns _row_to_order needs, for RETURNING on transitions.
+_ORDER_COLS = (
+    "id, idempotency_key, portfolio_id, strategy_id, asset_id, "
+    "order_type, side, quantity, time_in_force, status, signal_id, created_at"
+)
+_NET_SCALE = Decimal("0.0001")  # core.executions.net_amount NUMERIC(20,4)
 
 
 def _row_to_order(row: object) -> RecordedOrder:
@@ -149,9 +163,141 @@ class SQLAlchemyOrderRepository(BaseRepository[object], OrderRepository):
         )
         return [_row_to_order(row) for row in result.mappings().all()]
 
+    async def _transition(
+        self,
+        order_id: UUID,
+        expected: OrderStatus,
+        new_status: OrderStatus,
+        extra_sets: str = "",
+        extra_params: dict | None = None,
+    ) -> RecordedOrder:
+        """Guarded lifecycle transition — Doc 14 §10.7.4. UPDATE only if the
+        order is in `expected`; a zero-row result raises InvalidOrderTransition
+        ("Invalid transitions shall be rejected"). updated_at via
+        clock_timestamp() (not NOW(), which is frozen at transaction start —
+        same reasoning as the strategy/market_data upserts). Does not commit.
+        """
+        stmt = text(
+            f"""
+            UPDATE core.orders
+            SET status = :new_status, updated_at = clock_timestamp(){extra_sets}
+            WHERE id = :order_id AND status = :expected
+            RETURNING {_ORDER_COLS}
+            """
+        )
+        params = {
+            "order_id": order_id,
+            "expected": expected.value,
+            "new_status": new_status.value,
+            **(extra_params or {}),
+        }
+        row = (await self._session.execute(stmt, params)).mappings().one_or_none()
+        if row is None:
+            raise InvalidOrderTransition(
+                f"order {order_id} is not in {expected.value}; "
+                f"cannot transition to {new_status.value}"
+            )
+        return _row_to_order(row)
+
+    async def mark_validated(self, order_id: UUID) -> RecordedOrder:
+        return await self._transition(order_id, OrderStatus.CREATED, OrderStatus.VALIDATED)
+
+    async def mark_rejected(self, order_id: UUID) -> RecordedOrder:
+        return await self._transition(order_id, OrderStatus.CREATED, OrderStatus.REJECTED)
+
+    async def mark_filled(
+        self, order_id: UUID, filled_quantity: Decimal, average_price: Decimal
+    ) -> RecordedOrder:
+        return await self._transition(
+            order_id,
+            OrderStatus.VALIDATED,
+            OrderStatus.FILLED,
+            extra_sets=(
+                ", filled_quantity = :filled_quantity, average_price = :average_price, "
+                "filled_at = clock_timestamp()"
+            ),
+            extra_params={"filled_quantity": filled_quantity, "average_price": average_price},
+        )
+
+
+def _row_to_execution(row: object) -> RecordedExecution:
+    return RecordedExecution(
+        id=row["id"],
+        order_id=row["order_id"],
+        portfolio_id=row["portfolio_id"],
+        asset_id=row["asset_id"],
+        side=OrderSide(row["side"]),
+        quantity=row["quantity"],
+        price=row["price"],
+        commission=row["commission"],
+        net_amount=row["net_amount"],
+        venue=row["venue"],
+        executed_at=row["executed_at"],
+        created_at=row["created_at"],
+    )
+
 
 class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository):
-    """Concrete repository for core.executions — Step 3.5 (not yet implemented)."""
+    """Concrete repository for core.executions — Step 3.5, Doc 14 §10.9.4.
 
-    async def get_by_order(self, order_id: UUID) -> list[object]:
-        return []  # stub — Execution (Step 3.5, §10.8/§10.9) not yet built
+    Append-only immutable trade record per P-2/§10.9.4. Does not commit
+    (caller owns the transaction boundary).
+    """
+
+    async def record(self, fill: Fill) -> RecordedExecution:
+        """Persist a simulated Fill as a core.executions row.
+
+        `net_amount` is the signed cash effect (§10.9.4): BUY is cash out
+        (negative), SELL is cash in (positive), commission included. Quantized
+        to the column scale NUMERIC(20,4).
+        """
+        gross = fill.quantity * fill.price
+        if fill.side is OrderSide.BUY:
+            net_amount = -(gross + fill.commission)
+        else:
+            net_amount = gross - fill.commission
+        net_amount = net_amount.quantize(_NET_SCALE, rounding=ROUND_HALF_EVEN)
+
+        stmt = text(
+            """
+            INSERT INTO core.executions
+                (order_id, portfolio_id, asset_id, side, quantity, price,
+                 commission, net_amount, venue, executed_at)
+            VALUES
+                (:order_id, :portfolio_id, :asset_id, :side, :quantity, :price,
+                 :commission, :net_amount, :venue, :executed_at)
+            RETURNING id, order_id, portfolio_id, asset_id, side, quantity, price,
+                      commission, net_amount, venue, executed_at, created_at
+            """
+        )
+        result = await self._session.execute(
+            stmt,
+            {
+                "order_id": fill.order_id,
+                "portfolio_id": fill.portfolio_id,
+                "asset_id": fill.asset_id,
+                "side": fill.side.value,
+                "quantity": fill.quantity,
+                "price": fill.price,
+                "commission": fill.commission,
+                "net_amount": net_amount,
+                "venue": fill.venue,
+                "executed_at": fill.executed_at,
+            },
+        )
+        return _row_to_execution(result.mappings().one())
+
+    async def get_by_order(self, order_id: UUID) -> list[RecordedExecution]:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, order_id, portfolio_id, asset_id, side, quantity, price,
+                       commission, net_amount, venue, executed_at, created_at
+                FROM core.executions
+                WHERE order_id = :order_id
+                ORDER BY executed_at, id
+                """
+            ),
+            {"order_id": order_id},
+        )
+        return [_row_to_execution(row) for row in result.mappings().all()]

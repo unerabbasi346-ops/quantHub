@@ -5,7 +5,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from uuid import UUID
+
+from quant_hub.domain.portfolio.positions import RecordedPosition
 
 
 class PortfolioRepository(ABC):
@@ -27,4 +30,24 @@ class PositionRepository(ABC):
     @abstractmethod
     async def get_by_portfolio_and_asset(
         self, portfolio_id: UUID, asset_id: UUID
-    ) -> object | None: ...
+    ) -> RecordedPosition | None: ...
+
+    @abstractmethod
+    async def upsert(
+        self,
+        portfolio_id: UUID,
+        asset_id: UUID,
+        *,
+        quantity: Decimal,
+        average_entry_price: Decimal,
+        market_value: Decimal,
+        last_price: Decimal,
+        last_price_at: object,
+        is_closed: bool,
+    ) -> RecordedPosition:
+        """Write the next position snapshot — Doc 14 §10.6.6 (position updated
+        on every fill). Upsert on the (portfolio_id, asset_id) natural key,
+        incrementing sequence_number. Does not commit (caller owns the
+        transaction boundary).
+        """
+        ...

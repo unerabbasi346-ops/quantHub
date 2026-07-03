@@ -7,9 +7,26 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import UUID
 
-from quant_hub.domain.execution.entities import OrderIntent, RecordedOrder
+from quant_hub.domain.execution.entities import (
+    Fill,
+    OrderIntent,
+    RecordedExecution,
+    RecordedOrder,
+)
+
+
+class InvalidOrderTransition(RuntimeError):
+    """Raised when an order lifecycle transition is not permitted — Doc 14
+    §10.7.4 ("Invalid transitions shall be rejected").
+
+    The persistence layer guards each transition with UPDATE ... WHERE
+    status = <expected>; a zero-row result means the order was not in the
+    required prior state (or does not exist), and this is raised rather than
+    silently no-op'ing.
+    """
 
 
 @dataclass(frozen=True)
@@ -58,9 +75,39 @@ class OrderRepository(ABC):
     @abstractmethod
     async def list_by_portfolio(self, portfolio_id: UUID) -> list[object]: ...
 
+    # Order lifecycle transitions — Doc 14 §10.7.4. Each guards the prior
+    # state and raises InvalidOrderTransition on a disallowed transition.
+    @abstractmethod
+    async def mark_validated(self, order_id: UUID) -> RecordedOrder:
+        """CREATED -> VALIDATED (order passed pre-trade risk, §10.7.5)."""
+        ...
+
+    @abstractmethod
+    async def mark_rejected(self, order_id: UUID) -> RecordedOrder:
+        """CREATED -> REJECTED (pre-trade risk rejected the order, §10.7.5).
+
+        The human-readable reason is recorded in analytics.risk_assessments
+        (linked by order_id, Step 3.4), so §10.7.5's "rejection reason shall
+        be recorded ... not silently swallowed" is satisfied without a
+        redundant column on core.orders.
+        """
+        ...
+
+    @abstractmethod
+    async def mark_filled(
+        self, order_id: UUID, filled_quantity: Decimal, average_price: Decimal
+    ) -> RecordedOrder:
+        """VALIDATED -> FILLED (simulated fill complete, §10.8.6/§10.7.4)."""
+        ...
+
 
 class ExecutionRepository(ABC):
     """Persistence contract for core.executions — Doc 07 §Implementation Rules."""
 
     @abstractmethod
-    async def get_by_order(self, order_id: UUID) -> list[object]: ...
+    async def record(self, fill: Fill) -> RecordedExecution:
+        """Persist a Fill as an immutable core.executions row — §10.9.4."""
+        ...
+
+    @abstractmethod
+    async def get_by_order(self, order_id: UUID) -> list[RecordedExecution]: ...

@@ -63,19 +63,27 @@ class TimeInForce(str, Enum):
 class OrderStatus(str, Enum):
     """Order lifecycle state — Doc 14 §10.7.4.
 
-    Step 3.3 only ever writes CREATED — "Order has been created from a
-    validated signal. Not yet validated for routing." (§10.7.4). The
-    CREATED -> VALIDATED / REJECTED transition is real Pre-Trade Risk's job
-    (Step 3.4, §10.7.5); PENDING..FILLED belong to Execution (Step 3.5,
-    §10.8/§10.9). The full state machine and its governed-transition
-    enforcement (§10.7.4 "Invalid transitions shall be rejected") are NOT
-    built here — this enum names the states for lineage but does not police
-    transitions.
+    Step 3.3 writes CREATED — "Order has been created from a validated
+    signal. Not yet validated for routing." (§10.7.4). Step 3.4 (Pre-Trade
+    Risk, §10.7.5) drives CREATED -> VALIDATED / REJECTED. Step 3.5
+    (Execution, §10.8/§10.9) drives VALIDATED -> FILLED for a simulated
+    immediate fill.
+
+    SCOPED DOWN (S-5, F-16): the intermediate routing states §10.7.4 lists
+    between VALIDATED and FILLED — PENDING, ROUTED, ACKNOWLEDGED — and the
+    PARTIALLY_FILLED / CANCELLED / EXPIRED states are NOT modeled: they
+    presuppose a broker/venue round-trip and partial-fill/TIF machinery that
+    S-5 excludes (simulated immediate full fill has no routing round-trip).
+    Transition enforcement (§10.7.4 "Invalid transitions shall be rejected")
+    IS applied at the persistence layer for the transitions that exist
+    (guarded UPDATE ... WHERE status = <expected>), but this enum does not
+    encode a full state-machine graph.
     """
 
     CREATED = "CREATED"
     VALIDATED = "VALIDATED"
     REJECTED = "REJECTED"
+    FILLED = "FILLED"
 
 
 @dataclass(frozen=True)
@@ -196,3 +204,62 @@ class RecordedOrder:
     status: OrderStatus
     signal_id: UUID | None
     created_at: object  # datetime; typed loosely to avoid a datetime import in the value layer
+
+
+@dataclass(frozen=True)
+class Fill:
+    """A simulated execution fill — Doc 14 §10.8.6 (Fill Handling), the input
+    to trade recording (§10.9.4) and position update (§10.6.6).
+
+    Step 3.5 (S-5, F-16): produced by the SIMULATED fill engine
+    (domain/execution/simulation.py) — a full fill of the order's quantity at
+    the supplied market price, zero commission, venue "SIM". No slippage,
+    partial-fill, or liquidity model (deferred per S-5's paper-trading
+    exclusion). `quantity` is the ABSOLUTE fill size (> 0); direction is `side`.
+    Immutable per P-2 (§10.8.6 "Every fill produces immutable record per P-5").
+    """
+
+    order_id: UUID
+    portfolio_id: UUID
+    asset_id: UUID               # resolved instrument id (matches RecordedOrder)
+    side: OrderSide
+    quantity: Decimal            # absolute fill size in units, > 0
+    price: Decimal               # execution price
+    commission: Decimal          # 0 in Step 3.5 (S-5, F-16)
+    venue: str                   # "SIM" — no real broker/venue (S-5)
+    executed_at: object          # datetime; typed loosely per this module's convention
+
+    @property
+    def signed_quantity(self) -> Decimal:
+        """Signed position delta this fill applies (+ BUY, − SELL)."""
+        return self.quantity if self.side is OrderSide.BUY else -self.quantity
+
+    @property
+    def gross_notional(self) -> Decimal:
+        """Absolute traded notional = quantity × price (commission separate)."""
+        return self.quantity * self.price
+
+
+@dataclass(frozen=True)
+class RecordedExecution:
+    """A persisted execution — the core.executions view of a Fill (§10.9.4
+    Trade Recording). Returned by ExecutionRepository.record.
+
+    `net_amount` is the signed cash effect of the trade (§10.9.4): negative
+    for a BUY (cash out), positive for a SELL (cash in), commission included.
+    Immutable per P-2/§10.9.4 ("Trade records shall be immutable after
+    recording. Corrections shall create adjusting entries").
+    """
+
+    id: UUID
+    order_id: UUID
+    portfolio_id: UUID
+    asset_id: UUID
+    side: OrderSide
+    quantity: Decimal
+    price: Decimal
+    commission: Decimal
+    net_amount: Decimal
+    venue: str
+    executed_at: object
+    created_at: object
