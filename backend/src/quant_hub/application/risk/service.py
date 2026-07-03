@@ -16,14 +16,12 @@ from quant_hub.domain.risk.entities import (
     PreTradeCheck,
     PreTradeRiskRequest,
     PreTradeRiskResult,
-    RiskAssessment,
     RiskLimitAssessment,
     RiskLimitStatus,
     RiskMetrics,
 )
 from quant_hub.domain.risk.interfaces import (
     PreTradeRiskRepository,
-    RiskAssessmentRepository,
     RiskLimitRepository,
     RiskModelInterface,
     RiskSnapshotRepository,
@@ -67,13 +65,11 @@ class RiskService:
         self,
         risk_model: RiskModelInterface,           # P-1: model is external config
         limits: RiskLimitRepository,
-        assessments: RiskAssessmentRepository,
         snapshots: RiskSnapshotRepository,
         pretrade: PreTradeRiskRepository,
     ) -> None:
         self._model = risk_model
         self._limits = limits
-        self._assessments = assessments
         self._snapshots = snapshots
         self._pretrade = pretrade
 
@@ -203,10 +199,3 @@ class RiskService:
                 )
             )
         return assessments
-
-    async def get_latest_assessment(self, portfolio_id: UUID) -> RiskAssessment | None:
-        """Retrieve latest risk assessment artifact — Doc 15 §11.5.13.
-
-        Assessments are immutable governed artifacts per P-2 and P-5.
-        """
-        return await self._assessments.get_latest(portfolio_id)

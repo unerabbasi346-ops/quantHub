@@ -87,28 +87,15 @@ class RiskLimitAssessment:
     status: RiskLimitStatus
 
 
-@dataclass(frozen=True)
-class RiskAssessment:
-    """Complete point-in-time risk assessment for one portfolio — Doc 15 §11.5.
-
-    Immutable after creation per P-2.
-    Recorded as a governed artifact per Doc 15 §11.5.13 and P-5 (audit trail).
-    """
-
-    assessment_id: UUID
-    portfolio_id: UUID
-    metrics: RiskMetrics
-    limit_assessments: tuple[RiskLimitAssessment, ...]
-    breaches: tuple[RiskLimitAssessment, ...]  # subset where status == BREACH
-    assessed_at: datetime
-
-
 # ---------------------------------------------------------------------------
 # Pre-Trade Risk Check — Doc 14 §10.7.5 / §Pre-Trade Risk Check API Contract
 # ---------------------------------------------------------------------------
-# Distinct from the §11.5.13 portfolio-level RiskAssessment above: these value
-# objects model the ORDER-level gate that authorizes or rejects a single
-# proposed order before routing (Doc 14 §10.7.4 CREATED -> VALIDATED/REJECTED).
+# These value objects model the ORDER-level gate that authorizes or rejects a
+# single proposed order before routing (Doc 14 §10.7.4 CREATED -> VALIDATED/
+# REJECTED). Distinct from the §11.5.13 portfolio-level risk snapshot — the
+# periodic portfolio-metrics artifact persisted to analytics.risk_snapshots via
+# RiskSnapshotRepository. (A duplicate portfolio-level `RiskAssessment` entity
+# formerly sat here; it was never wired and was removed — see F-14, RESOLVED.)
 # Scoped per S-5 to risk-limit checks (position-size, exposure) only — the
 # other §10.7.5 checks (compliance, price sanity, trading schedule, instrument
 # state, duplicate detection, quantity/lot) are deferred (F-15).

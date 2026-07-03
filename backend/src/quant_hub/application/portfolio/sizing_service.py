@@ -7,8 +7,6 @@
 # Per Doc 00 §14.11
 from __future__ import annotations
 
-from decimal import Decimal
-
 from quant_hub.domain.portfolio.sizing import (
     PositionSizer,
     PositionSizingDecision,
@@ -62,7 +60,7 @@ class PositionSizingService:
             target, constrained = raw, False
 
         return PositionSizingDecision(
-            asset=context.signal.asset,
+            asset=context.asset,
             target_notional=target,
             raw_notional=raw,
             constrained=constrained,

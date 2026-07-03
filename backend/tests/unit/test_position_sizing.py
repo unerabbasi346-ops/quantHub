@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -21,18 +20,18 @@ from quant_hub.domain.portfolio.sizing import (
     SizingConstraints,
     SizingContext,
 )
-from quant_hub.domain.strategy_engine.entities import Signal
 
 _ASSET = AssetRef(symbol="BTC/USDT", exchange="binance", asset_class="crypto")
 
 
-def _signal(value: str) -> Signal:
-    return Signal(asset=_ASSET, value=Decimal(value), ts=datetime(2026, 7, 3, tzinfo=timezone.utc))
-
-
-def _ctx(value: str, portfolio_value: str = "100000", volatility: str | None = None, **config) -> SizingContext:
+def _ctx(target_weight: str, portfolio_value: str = "100000", volatility: str | None = None, **config) -> SizingContext:
+    # `target_weight` is the portfolio construction output the sizer converts
+    # into a size (F-12 inversion — sizing consumes weights, not raw signals).
+    # For the N=1 reference case target_weight == the raw conviction, so these
+    # values are identical to the pre-inversion conviction-based ones.
     return SizingContext(
-        signal=_signal(value),
+        asset=_ASSET,
+        target_weight=Decimal(target_weight),
         portfolio_value=Decimal(portfolio_value),
         volatility=Decimal(volatility) if volatility is not None else None,
         config=config,

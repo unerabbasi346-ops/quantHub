@@ -12,7 +12,6 @@ from types import MappingProxyType
 from typing import Mapping
 
 from quant_hub.domain.market_data.entities import AssetRef
-from quant_hub.domain.strategy_engine.entities import Signal
 
 
 @dataclass(frozen=True)
@@ -22,22 +21,28 @@ class SizingContext:
     ── PROPOSED CONTRACT FILLING/SCOPING A NAMED SPEC (Doc 00 §14.5/§14.7) ──
     Flagged, not silently invented. §11.3.3 names the Input Parameters as
     "Signal strength, volatility forecast, correlation matrix, risk budget
-    allocation, capital allocation". This context is the SCOPED-DOWN subset
-    (S-5) needed to convert one signal into one instrument's target size:
+    allocation, capital allocation". After the F-12 inversion, sizing runs
+    AFTER portfolio construction and converts a portfolio-level target *weight*
+    into an actionable position size (§11.3.1 "position sizing converts these
+    [weights] into actionable position sizes"). This context is the SCOPED-DOWN
+    subset (S-5) needed to size one instrument from that weight:
 
-      signal            §11.3.3 "Signal strength" — the conviction to size.
-                        Reuses the Phase 2 Signal (Signal.value ∈ [-1, 1],
-                        signed conviction, Step 2.2) rather than a parallel
-                        "signal strength" scalar — not redefining an existing
-                        platform concept (Doc 00 §14.6).
+      asset             the instrument being sized — carried through to the
+                        PositionSizingDecision output (the Order-Generation
+                        handoff, Doc 14 §10.6.5, needs the AssetRef). In the
+                        pre-inversion contract this came from the Signal;
+                        construction no longer passes a Signal down, so it is
+                        supplied directly.
+      target_weight     §11.2.4 construction OUTPUT — the signed portfolio
+                        target weight this methodology converts into a size.
+                        Replaces the raw Signal the pre-inversion contract took
+                        (§11.3.1: weights feed into sizing, not signals).
       portfolio_value   §11.3.3 "capital allocation" + §11.3.4 "Maximum
                         Position ... as percentage of portfolio value" — the
-                        AUM the sizing and its max-position cap are relative
-                        to. This is the "current portfolio value" a sizer
-                        needs beyond the Signal.
+                        AUM the size and its max-position cap are relative to.
       volatility        §11.3.3 "volatility forecast" + §11.3.4 "Volatility
                         Targeting". OPTIONAL — only vol-targeting
-                        methodologies use it; a pure conviction-scaling
+                        methodologies use it; a pure weight-scaling
                         methodology ignores it. A forecast passed IN (§11.3.3
                         makes it an input, not something sizing computes).
       config            The external methodology parameters per P-1 (§11.3.1
@@ -62,7 +67,8 @@ class SizingContext:
         out of Phase 3A scope per S-5 (single-instrument sizing only).
     """
 
-    signal: Signal
+    asset: AssetRef
+    target_weight: Decimal
     portfolio_value: Decimal
     volatility: Decimal | None = None
     config: Mapping[str, object] = field(default_factory=lambda: MappingProxyType({}))

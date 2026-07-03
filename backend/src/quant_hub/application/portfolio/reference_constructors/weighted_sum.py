@@ -28,49 +28,43 @@ from quant_hub.domain.portfolio.construction import (
 
 
 class WeightedSumConstructor(PortfolioConstructor):
-    """target_weight = Σ(strategy_weight_i × target_notional_i) / portfolio_value.
+    """target_weight = Σ(strategy_weight_i × signal_i.value).
+
+    Aggregates each constituent strategy's signed conviction (Signal.value,
+    Step 2.2), weighted by its governed strategy_weight, into one portfolio
+    target weight — the §11.2.4 construction output that Position Sizing
+    (Step 3.1) then converts into an actionable size (§11.3.1 order).
 
     With exactly one constituent strategy at strategy_weight=1 (today's only
-    exercisable case — Step 2.4's reference strategy), this collapses
-    exactly to target_weight = target_notional / portfolio_value — the
-    identity transform Step 3.1's PositionSizingDecision already implies.
-    With N>1 contributions it generalizes to a genuine weighted aggregation
-    (exercised only by synthetic test data today, per this step's scope —
-    see the flagged pipeline-ordering divergence in domain/portfolio/
-    construction.py's module docstring for why this doesn't yet reflect
-    Doc 15's real multi-strategy construction methodology).
+    exercisable case — Step 2.4's reference strategy), this collapses to
+    target_weight = signal.value — the raw conviction passed straight through
+    as the portfolio weight. With N>1 contributions it generalizes to a
+    genuine weighted aggregation (exercised only by synthetic test data today).
 
-    JUDGMENT CALL (flagged): requires all contributions to share the same
-    `portfolio_value` (raises ValueError otherwise) — §11.2.3's Portfolio
-    Model implies one portfolio has one AUM at construction time; mixing
-    contributions computed against different portfolio_value snapshots
-    would silently produce a meaningless weight. Not stated explicitly by
-    §11.2, but the only sound reading given target_weight is denominated in
-    a single portfolio_value.
+    KNOWN SIMPLIFICATION (flagged; see PortfolioConstructionResult's docstring):
+    the result is the raw signed conviction aggregate, NOT normalized to sum
+    to 1 across the portfolio — a real optimization-based methodology (§11.2.4)
+    must add normalization explicitly; it does not exist here.
+
+    Sizing/capital note (F-12): this constructor is dimensionless — it needs no
+    portfolio_value (capital enters downstream at Position Sizing, §11.3.3).
+    The pre-inversion version consumed already-sized PositionSizingDecision
+    outputs and divided by portfolio_value; post-inversion it consumes raw
+    convictions, per the doc-correct Construction-before-Sizing order.
     """
 
     def construct(self, contributions: Sequence[StrategyContribution]) -> PortfolioConstructionResult:
         if not contributions:
             raise ValueError("construct() requires at least one contribution")
 
-        asset = contributions[0].decision.asset
-        portfolio_value = contributions[0].decision.portfolio_value
-        for c in contributions:
-            if c.decision.portfolio_value != portfolio_value:
-                raise ValueError(
-                    "all contributions must share the same portfolio_value "
-                    f"(got {c.decision.portfolio_value} and {portfolio_value})"
-                )
-
-        weighted_notional: Decimal = sum(
-            (c.strategy_weight * c.decision.target_notional for c in contributions),
+        asset = contributions[0].signal.asset
+        target_weight: Decimal = sum(
+            (c.strategy_weight * c.signal.value for c in contributions),
             start=Decimal("0"),
         )
-        target_weight = weighted_notional / portfolio_value
 
         return PortfolioConstructionResult(
             asset=asset,
             target_weight=target_weight,
-            portfolio_value=portfolio_value,
             contributions=tuple(contributions),
         )

@@ -16,14 +16,12 @@ from sqlalchemy import text
 from quant_hub.domain.risk.entities import (
     PreTradeCheck,
     PreTradeRiskResult,
-    RiskAssessment,
     RiskLimit,
     RiskLimitAssessment,
     RiskMetrics,
 )
 from quant_hub.domain.risk.interfaces import (
     PreTradeRiskRepository,
-    RiskAssessmentRepository,
     RiskLimitRepository,
     RiskSnapshotRepository,
 )
@@ -167,20 +165,6 @@ class SQLAlchemyPreTradeRiskRepository(BaseRepository[object], PreTradeRiskRepos
             computation_latency_ns=row["computation_latency_ns"],
             assessed_at=row["assessed_at"],
         )
-
-
-class SQLAlchemyRiskAssessmentRepository(BaseRepository[object], RiskAssessmentRepository):
-    """Concrete repository for risk assessment artifacts — Doc 15 §11.5.13.
-
-    Assessments are immutable governed artifacts per P-2 and P-5.
-    Maps to analytics schema per Doc 09.
-    """
-
-    async def save(self, assessment: RiskAssessment) -> None:
-        pass  # stub
-
-    async def get_latest(self, portfolio_id: UUID) -> RiskAssessment | None:
-        return None  # stub
 
 
 def _metrics_to_json(metrics: RiskMetrics) -> dict:

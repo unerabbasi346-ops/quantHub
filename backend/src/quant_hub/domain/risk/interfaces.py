@@ -12,7 +12,6 @@ from uuid import UUID
 
 from quant_hub.domain.risk.entities import (
     PreTradeRiskResult,
-    RiskAssessment,
     RiskLimit,
     RiskLimitAssessment,
     RiskMetrics,
@@ -56,27 +55,14 @@ class RiskLimitRepository(ABC):
     async def save_limit(self, limit: RiskLimit) -> None: ...
 
 
-class RiskAssessmentRepository(ABC):
-    """Persistence contract for risk assessment artifacts — Doc 15 §11.5.13.
-
-    Assessments are immutable governed artifacts per P-2 and P-5 (audit trail).
-    """
-
-    @abstractmethod
-    async def save(self, assessment: RiskAssessment) -> None: ...
-
-    @abstractmethod
-    async def get_latest(self, portfolio_id: UUID) -> RiskAssessment | None: ...
-
-
 class PreTradeRiskRepository(ABC):
     """Persistence contract for pre-trade risk check records — Doc 14 §10.7.5.
 
     One record per gate evaluation of one proposed order (analytics.risk_assessments).
     Records are immutable audit artifacts per P-5 and §10.7.5 ("Rejection reason
     shall be recorded. Rejections shall not be silently swallowed"). Distinct
-    from RiskAssessmentRepository above, which persists the §11.5.13
-    portfolio-level RiskAssessment (a different artifact — see F-14).
+    from the §11.5.13 portfolio-level risk snapshot (RiskSnapshotRepository /
+    analytics.risk_snapshots — a different artifact; see F-14, RESOLVED).
     """
 
     @abstractmethod

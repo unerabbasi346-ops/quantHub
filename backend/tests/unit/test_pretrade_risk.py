@@ -220,7 +220,6 @@ def _service(limits: list[RiskLimit], *, raises: bool = False):
     svc = RiskService(
         risk_model=StubRiskModel(),
         limits=_FakeLimitRepo(limits, raises=raises),
-        assessments=None,  # unused by the paths under test
         snapshots=None,
         pretrade=pretrade,
     )

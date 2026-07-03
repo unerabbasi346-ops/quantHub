@@ -61,7 +61,7 @@ class PortfolioConstructionService:
         """
         by_asset: dict[tuple[str, str], list[StrategyContribution]] = {}
         for contribution in contributions:
-            asset = contribution.decision.asset
+            asset = contribution.signal.asset
             key = (asset.symbol, asset.exchange)
             by_asset.setdefault(key, []).append(contribution)
 

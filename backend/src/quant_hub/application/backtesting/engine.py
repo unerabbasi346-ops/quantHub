@@ -106,25 +106,34 @@ class BacktestEngine:
                 signals_generated += 1
                 recorded = await self._signal_recorder.record_signal(strategy_id, asset_id, signal)
 
-                # Step 3.1 Sizing -> Step 3.2 Construction (the real services).
-                sizing = self._sizing.size_position(
-                    self._sizer,
-                    SizingContext(signal=signal, portfolio_value=config.initial_capital),
-                    constraints,
-                )
+                # Step 3.2 Construction (weights) -> Step 3.1 Sizing (sizes),
+                # the real services in Doc 15 §11.3.1 order (Construction first,
+                # Sizing consumes its weight — the F-12 inversion).
                 cons = self._construction.construct_portfolio(
                     self._constructor,
-                    [StrategyContribution(strategy_id=strategy_id, strategy_weight=Decimal("1"), decision=sizing)],
+                    [StrategyContribution(strategy_id=strategy_id, strategy_weight=Decimal("1"), signal=signal)],
                 )[0]
+                sizing = self._sizing.size_position(
+                    self._sizer,
+                    SizingContext(asset=asset, target_weight=cons.target_weight, portfolio_value=config.initial_capital),
+                    constraints,
+                )
 
                 price = bar.close  # this step's market price = the bar close (no live tick)
                 current = await self._positions.get_by_portfolio_and_asset(portfolio_id, asset_id)
                 cur_qty = current.quantity if current is not None else _ZERO
 
-                # Step 3.3 Order Generation (the real service).
+                # Step 3.3 Order Generation (the real service) consumes the SIZED
+                # output (§11.3.7 -> §10.6.5). TargetPosition takes a weight, so
+                # the sized notional is expressed back as a post-sizing weight
+                # (target_notional / portfolio_value) — identity for N=1 (F-12).
+                order_target_weight = (
+                    sizing.target_notional / config.initial_capital
+                    if config.initial_capital > _ZERO else _ZERO
+                )
                 order = await self._order_gen.generate_order(
                     target=TargetPosition(
-                        asset=asset, target_weight=cons.target_weight,
+                        asset=asset, target_weight=order_target_weight,
                         portfolio_value=config.initial_capital, reference_price=price,
                     ),
                     current=CurrentPosition(asset=asset, quantity=cur_qty),

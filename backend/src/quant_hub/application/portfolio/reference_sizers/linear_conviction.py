@@ -20,13 +20,22 @@ from quant_hub.domain.portfolio.sizing import PositionSizer, SizingContext
 
 
 class LinearConvictionSizer(PositionSizer):
-    """Linear conviction sizing with optional volatility targeting — a reference methodology.
+    """Linear weight sizing with optional volatility targeting — a reference methodology.
 
-    Raw target notional = conviction × max_fraction × portfolio_value, where
-    conviction is Signal.value ∈ [-1, 1] (Step 2.2) and `max_fraction` (from
-    the opaque config, P-1) is the notional fraction of AUM targeted at full
-    conviction. This is §11.3.4's "Maximum Position ... as percentage of
-    portfolio value" applied linearly to conviction.
+    Raw target notional = target_weight × max_fraction × portfolio_value, where
+    `target_weight` is the portfolio construction OUTPUT (Step 3.2, §11.2.4 —
+    for the N=1 reference case it is the raw signed conviction, Signal.value ∈
+    [-1, 1]) and `max_fraction` (from the opaque config, P-1) is the notional
+    fraction of AUM this methodology targets per unit of weight. This is
+    §11.3.4's "Maximum Position ... as percentage of portfolio value" applied
+    linearly to the construction weight.
+
+    F-12 NOTE: the pre-inversion version of this methodology sized directly
+    from a raw Signal (conviction × max_fraction × PV). Post-inversion it sizes
+    from construction's target_weight (§11.3.1 — sizing consumes weights, not
+    signals). For the N=1, weight=1 reference case the two are numerically
+    identical (target_weight == conviction there), which is exactly the
+    behaviour-preservation the F-12 inversion was verified against.
 
     If the config carries `target_vol` AND the context supplies a `volatility`
     forecast, the raw size is scaled by (target_vol / volatility) — §11.3.4
@@ -46,9 +55,9 @@ class LinearConvictionSizer(PositionSizer):
     """
 
     def size(self, context: SizingContext) -> Decimal:
-        conviction = context.signal.value  # [-1, 1], signed
+        weight = context.target_weight  # signed portfolio target weight (§11.2.4)
         max_fraction = Decimal(str(context.config.get("max_fraction", "0.05")))
-        raw = conviction * max_fraction * context.portfolio_value
+        raw = weight * max_fraction * context.portfolio_value
 
         target_vol = context.config.get("target_vol")
         if target_vol is not None and context.volatility is not None and context.volatility > 0:

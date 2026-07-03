@@ -18,7 +18,6 @@ from quant_hub.infrastructure.risk_approval_adapter import RiskApprovalAdapter
 from quant_hub.infrastructure.risk_model import PositionExposureRiskModel
 from quant_hub.persistence.repositories.risk import (
     SQLAlchemyPreTradeRiskRepository,
-    SQLAlchemyRiskAssessmentRepository,
     SQLAlchemyRiskLimitRepository,
     SQLAlchemyRiskSnapshotRepository,
 )
@@ -40,7 +39,6 @@ def build_risk_service(session: AsyncSession) -> RiskService:
     return RiskService(
         risk_model=PositionExposureRiskModel(),
         limits=SQLAlchemyRiskLimitRepository(session),
-        assessments=SQLAlchemyRiskAssessmentRepository(session),
         snapshots=SQLAlchemyRiskSnapshotRepository(session),
         pretrade=SQLAlchemyPreTradeRiskRepository(session),
     )
