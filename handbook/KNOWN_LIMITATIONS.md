@@ -185,6 +185,19 @@ re-expand scope or re-derive a different boundary from Doc 11's text.
 
 ---
 
+## Phase 9 — Tooling Notes (Non-Blocking, Environment/Process)
+
+Notes about the development *environment* or *process* — not a code defect
+(Phase 7 F-series) and not a scope boundary (Phase 8 S-series). Tracked so
+a recurring workaround is a deliberate, revisit-when-convenient choice
+rather than something silently re-invented every time it comes up.
+
+| ID | Note | Recommendation |
+|----|------|-----------------|
+| T-1 | **Visual/browser verification in this environment has no standing tool.** Claude-in-Chrome is not connected, and Impeccable's `live` mode depends on that same (absent) browser connection — both Step 4.0 and Step 4.2 hit this. Step 4.2's workaround: install `puppeteer-core` ad hoc (`--no-save`, removed after use, 0 package-lock.json refs) to drive the system-installed Chrome headlessly for a real screenshot, then delete the throwaway script. This worked and caught a real bug (Lightweight Charts rejecting `hsl()` colors — see Step 4.2), but it is reinvented from scratch each time rather than being a standing capability. | **Not blocking** — each Phase 4 UI step so far has still gotten genuine visual verification. But Phase 4 has several more UI-heavy steps ahead (4.3–4.7). Before those, make a deliberate choice: (a) get Claude-in-Chrome properly connected in this environment (the durable fix — restores Impeccable's live mode too), or (b) formalize `puppeteer-core` as a real `devDependencies` entry with a small reusable screenshot script committed to the repo (e.g. `frontend/scripts/screenshot.mjs`), instead of writing and deleting an ad-hoc script per step. Either closes the gap; doing neither means Step 4.3+ pays the same one-off tax again. |
+
+---
+
 ## Implementation Decisions Deferred
 
 | Decision Category | Guidance | Constraint |
