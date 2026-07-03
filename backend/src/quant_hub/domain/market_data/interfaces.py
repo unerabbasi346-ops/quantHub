@@ -70,6 +70,18 @@ class OHLCVRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_bars_range(
+        self, asset_id: UUID, interval: str, start: object, end: object
+    ) -> list[OHLCVBar]:
+        """All bars for (asset_id, interval) with start <= ts <= end, oldest -> newest.
+
+        Added in Step 3.7 for the Backtesting Engine's historical replay
+        (Doc 14 §10.3.4): a bounded chronological window, distinct from
+        get_bars' "most recent N". `start`/`end` are timezone-aware datetimes.
+        """
+        ...
+
+    @abstractmethod
     async def upsert_bars(self, bars: list[OHLCVBar]) -> int:
         """Idempotently persist bars, returning the count written.
 

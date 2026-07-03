@@ -157,6 +157,46 @@ class SQLAlchemyOHLCVRepository(BaseRepository[object], OHLCVRepository):
             for row in reversed(rows)
         ]
 
+    async def get_bars_range(
+        self, asset_id: UUID, interval: str, start: object, end: object
+    ) -> list[OHLCVBar]:
+        """Bars in [start, end] for (asset_id, interval), oldest -> newest —
+        Step 3.7, the Backtesting Engine's chronological window (§10.3.4).
+        Unlike get_bars, this is a bounded range in ascending ts order (the
+        order a deterministic replay walks), so no reversal is needed.
+        """
+        result = await self._session.execute(
+            text(
+                """
+                SELECT asset_id, interval, ts, open, high, low, close, volume,
+                       vwap, trade_count, adjustment_factor, data_quality, source
+                FROM market_data.ohlcv_bars
+                WHERE asset_id = :asset_id AND interval = :interval
+                  AND ts >= :start AND ts <= :end
+                ORDER BY ts ASC
+                """
+            ),
+            {"asset_id": asset_id, "interval": interval, "start": start, "end": end},
+        )
+        return [
+            OHLCVBar(
+                asset_id=row["asset_id"],
+                interval=row["interval"],
+                ts=row["ts"],
+                open=row["open"],
+                high=row["high"],
+                low=row["low"],
+                close=row["close"],
+                volume=row["volume"],
+                vwap=row["vwap"],
+                trade_count=row["trade_count"],
+                adjustment_factor=row["adjustment_factor"],
+                data_quality=row["data_quality"],
+                source=row["source"],
+            )
+            for row in result.mappings().all()
+        ]
+
     async def upsert_bars(self, bars: list[OHLCVBar]) -> int:
         """Idempotently persist bars on ohlcv_bars_asset_interval_ts_uq — Doc 11 §2.
 
