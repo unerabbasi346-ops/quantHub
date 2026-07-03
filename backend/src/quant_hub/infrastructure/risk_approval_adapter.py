@@ -10,26 +10,47 @@ from __future__ import annotations
 
 from quant_hub.application.risk.service import RiskService
 from quant_hub.domain.execution.interfaces import RiskApprovalInterface, RiskDecision
+from quant_hub.domain.risk.entities import PreTradeRiskRequest
 
 
 class RiskApprovalAdapter(RiskApprovalInterface):
     """Infrastructure adapter: execution risk gate → Risk Engine service.
 
     Implements execution domain's RiskApprovalInterface by delegating to
-    RiskService (application/risk layer). This is the architectural bridge
-    that makes the Risk Engine the authoritative pre-trade gatekeeper per
-    Doc 02: "Risk Engine must approve every order."
+    RiskService.assess_pre_trade (application/risk layer). This is the
+    architectural bridge that makes the Risk Engine the authoritative
+    pre-trade gatekeeper per Doc 02: "Risk Engine must approve every order."
 
-    Replaces StubRiskApprovalService once the Risk Engine domain is wired.
-    StubRiskApprovalService remains available for test environments that
-    need to bypass risk evaluation entirely.
+    Step 3.4: the delegation is now REAL — assess_pre_trade evaluates the
+    order against governed limits and can REJECT (Doc 14 §10.7.5). This
+    adapter is the production gate; StubRiskApprovalService (always approves)
+    is retained for tests only and is never bound in production DI
+    (api/dependencies.provide_risk_gate) — the fail-safe posture.
+
+    Expects a PreTradeRiskRequest as the `order` (the §10.7.5 request carries
+    price and post-execution context a bare RecordedOrder lacks). A wrong
+    input type is a wiring error and is DENIED (fail-closed), not approved.
     """
 
     def __init__(self, risk_service: RiskService) -> None:
         self._risk_service = risk_service
 
     async def evaluate(self, order: object) -> RiskDecision:
-        approved = await self._risk_service.assess_pre_trade(order)
-        if approved:
-            return RiskDecision(approved=True, reason="risk engine: pre-trade assessment passed")
-        return RiskDecision(approved=False, reason="risk engine: pre-trade assessment rejected")
+        if not isinstance(order, PreTradeRiskRequest):
+            return RiskDecision(
+                approved=False,
+                reason=(
+                    "risk engine: unassessable order "
+                    f"(expected PreTradeRiskRequest, got {type(order).__name__})"
+                ),
+            )
+        result = await self._risk_service.assess_pre_trade(order)
+        if result.authorized:
+            return RiskDecision(
+                approved=True,
+                reason=f"risk engine: pre-trade check passed (check_id={result.check_id})",
+            )
+        return RiskDecision(
+            approved=False,
+            reason=result.rejection_reason or "risk engine: pre-trade check rejected",
+        )

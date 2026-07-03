@@ -8,7 +8,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from quant_hub.domain.risk.entities import RiskAssessment, RiskLimit, RiskMetrics
+from quant_hub.domain.risk.entities import (
+    PreTradeRiskResult,
+    RiskAssessment,
+    RiskLimit,
+    RiskMetrics,
+)
 
 
 class RiskModelInterface(ABC):
@@ -51,6 +56,23 @@ class RiskAssessmentRepository(ABC):
 
     @abstractmethod
     async def get_latest(self, portfolio_id: UUID) -> RiskAssessment | None: ...
+
+
+class PreTradeRiskRepository(ABC):
+    """Persistence contract for pre-trade risk check records — Doc 14 §10.7.5.
+
+    One record per gate evaluation of one proposed order (analytics.risk_assessments).
+    Records are immutable audit artifacts per P-5 and §10.7.5 ("Rejection reason
+    shall be recorded. Rejections shall not be silently swallowed"). Distinct
+    from RiskAssessmentRepository above, which persists the §11.5.13
+    portfolio-level RiskAssessment (a different artifact — see F-14).
+    """
+
+    @abstractmethod
+    async def save(self, result: PreTradeRiskResult) -> None: ...
+
+    @abstractmethod
+    async def get_by_order(self, order_id: UUID) -> PreTradeRiskResult | None: ...
 
 
 class RiskSnapshotRepository(ABC):
