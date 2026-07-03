@@ -46,7 +46,34 @@
       "Bash(grep -n \"sqlalchemy.url\\\\|script_location\" alembic.ini)",
       "Bash(grep -nE \"^#{1,4} |§10\\\\.\\(6|7\\)\" 14_Trading_Infrastructure.md)",
       "Bash(grep -nA40 \"core.orders\\\\|CREATE TABLE.*orders\\\\|orders \\(\" c3a8f2b91e4d_initial_schema.py)",
-      "Bash(grep -nA12 \"class AssetRef\")"
+      "Bash(grep -nA12 \"class AssetRef\")",
+      "Bash(xargs grep -l \"live.verif\\\\|live_verify\\\\|BacktestEngine\\\\|verify_step\")",
+      "Bash(env)",
+      "Bash(where python *)",
+      "Bash(where python3 *)",
+      "Bash(py --version)",
+      "Read(//c/Users/UNITECH/**)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m pytest tests/ -q -p no:cacheprovider)",
+      "Bash(DATABASE_URL=\"postgresql://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" python -m alembic upgrade head)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Projects-QuantHub\\\\eadc0b63-ed2a-4f36-9cba-00f74f25ab2f\\\\scratchpad\\\\regression_phase3a.py\")"
     ]
-  }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/hook.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Checking UI changes"
+          }
+        ]
+      }
+    ]
+  },
+  "description": "Impeccable design detector: runs after Edit/Write/MultiEdit on UI files and surfaces findings as system reminders."
 }
