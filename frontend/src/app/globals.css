@@ -1,5 +1,70 @@
-/* Governing specification: Doc 08 — Frontend Architecture (QH-008 v1.0) */
-/* Technology: Tailwind CSS — Doc 08 §Technology                          */
+/* Governing specification: Doc 06 — UI/UX Design System (QH-006 v1.0) */
+/*   §Visual Language: "Dark-first theme, optional light mode. Semantic  */
+/*   colors: green=profit, red=risk, blue=information, amber=warning."  */
+/* Technology: Tailwind CSS — Doc 08 §Technology                        */
+/* Per Doc 00 §14.11                                                    */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Doc 06 §Visual Language theme tokens — HSL triplets (no hsl() wrapper)
+ * so Tailwind's opacity modifiers (e.g. `bg-surface/60`) work on them.
+ * Dark is the default per "dark-first theme, optional light mode";
+ * `[data-theme='light']` overrides for the optional light mode, toggled
+ * by `useUIStore` (lib/store/ui.ts) setting the attribute on <html>.
+ *
+ * JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged): Doc 06 names four
+ * semantic hues — green=profit, red=risk, blue=info, amber=warning — and
+ * does NOT separately name "loss". A losing position/order is the most
+ * common red-in-trading-UI convention, but it is not a fifth hue: a loss
+ * is a realized instance of "risk" (Doc 06's own word), so it reuses the
+ * `--color-risk` token rather than inventing a second, indistinguishable
+ * red. Any P&L-sign display (e.g. a future `pnlToneClass` helper) should
+ * map negative -> `risk`/`danger`, never define its own "loss" hue.
+ */
+:root {
+  --color-bg: 222 26% 7%;
+  --color-surface: 222 22% 11%;
+  --color-surface-hover: 222 19% 15%;
+  --color-border: 222 15% 20%;
+  --color-fg: 210 20% 96%;
+  --color-fg-muted: 215 14% 63%;
+
+  --color-profit: 152 60% 42%;      /* green — Doc 06 "green=profit" */
+  --color-profit-soft: 152 45% 16%;
+  --color-risk: 4 72% 56%;          /* red — Doc 06 "red=risk" (and P&L loss, see above) */
+  --color-risk-soft: 4 55% 18%;
+  --color-info: 210 90% 62%;        /* blue — Doc 06 "blue=information" */
+  --color-info-soft: 210 60% 18%;
+  --color-warning: 38 92% 56%;      /* amber — Doc 06 "amber=warning" */
+  --color-warning-soft: 38 70% 18%;
+}
+
+[data-theme='light'] {
+  --color-bg: 0 0% 100%;
+  --color-surface: 210 20% 98%;
+  --color-surface-hover: 210 20% 94%;
+  --color-border: 214 16% 88%;
+  --color-fg: 222 24% 12%;
+  --color-fg-muted: 215 12% 40%;
+
+  --color-profit: 152 58% 30%;
+  --color-profit-soft: 152 60% 93%;
+  --color-risk: 4 68% 44%;
+  --color-risk-soft: 4 70% 94%;
+  --color-info: 210 85% 44%;
+  --color-info-soft: 210 70% 94%;
+  --color-warning: 38 85% 40%;
+  --color-warning-soft: 38 80% 92%;
+}
+
+html {
+  color-scheme: dark;
+}
+[data-theme='light'] {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-bg text-fg antialiased;
+}

@@ -57,7 +57,14 @@
       "Bash(git commit *)",
       "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python -m pytest tests/ -q -p no:cacheprovider)",
       "Bash(DATABASE_URL=\"postgresql://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" python -m alembic upgrade head)",
-      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Projects-QuantHub\\\\eadc0b63-ed2a-4f36-9cba-00f74f25ab2f\\\\scratchpad\\\\regression_phase3a.py\")"
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://quant_hub:tS246dPVBlV7LToIJH7xZ-mK@localhost:5432/quant_hub\" PYTHONPATH=src python \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Projects-QuantHub\\\\eadc0b63-ed2a-4f36-9cba-00f74f25ab2f\\\\scratchpad\\\\regression_phase3a.py\")",
+      "Bash(grep -rn \"G-AUTH\\\\|G-[A-Z]\\\\{3,\\\\}-[0-9]\" handbook/ docs/)",
+      "Bash(npm run *)",
+      "Bash(tee \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Projects-QuantHub\\\\eadc0b63-ed2a-4f36-9cba-00f74f25ab2f\\\\scratchpad\\\\nextdev.log\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/design-system)",
+      "Bash(curl -s http://localhost:3000/design-system)",
+      "Bash(npx eslint *)",
+      "Bash(taskkill //F //IM node.exe)"
     ]
   },
   "hooks": {
