@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from decimal import Decimal
 from uuid import UUID
 
 from quant_hub.domain.risk.entities import (
     PreTradeRiskResult,
     RiskAssessment,
     RiskLimit,
+    RiskLimitAssessment,
     RiskMetrics,
 )
 
@@ -27,8 +30,16 @@ class RiskModelInterface(ABC):
 
     @abstractmethod
     async def compute_metrics(
-        self, portfolio_id: UUID, positions: list[object]
-    ) -> RiskMetrics: ...
+        self, portfolio_id: UUID, positions: list[object], equity: Decimal
+    ) -> RiskMetrics:
+        """Compute portfolio risk metrics — Doc 15 §11.5.3.
+
+        `equity` is the capital base the leverage ratios are denominated
+        against — supplied by the caller because the platform has no NAV/cash
+        ledger yet (F-18), mirroring how the risk gate and sizing take
+        portfolio_value as an input.
+        """
+        ...
 
 
 class RiskLimitRepository(ABC):
@@ -78,11 +89,15 @@ class PreTradeRiskRepository(ABC):
 class RiskSnapshotRepository(ABC):
     """Persistence contract for analytics.risk_snapshots — Doc 07 §Implementation Rules.
 
-    Retained for real-time dashboard queries (Doc 15 §11.5.8 risk monitoring dashboards).
+    A snapshot is a persisted point-in-time RiskMetrics plus any limit breaches
+    (Doc 15 §11.5.3 / §11.5.8). Immutable audit artifact per P-5. Retained for
+    real-time dashboard queries (§11.5.8 risk monitoring dashboards).
     """
 
     @abstractmethod
-    async def get_latest(self, portfolio_id: UUID) -> object | None: ...
+    async def get_latest(self, portfolio_id: UUID) -> RiskMetrics | None: ...
 
     @abstractmethod
-    async def save(self, snapshot: object) -> None: ...
+    async def save(
+        self, metrics: RiskMetrics, breaches: Sequence[RiskLimitAssessment]
+    ) -> UUID: ...

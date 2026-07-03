@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from quant_hub.domain.risk.entities import (
@@ -134,15 +135,33 @@ class RiskService:
         return result
 
     async def compute_portfolio_metrics(
-        self, portfolio_id: UUID, positions: list[object]
+        self, portfolio_id: UUID, positions: list[object], equity: Decimal
     ) -> RiskMetrics:
         """Compute portfolio risk metrics — Doc 15 §11.5.3.
 
         Delegates to the configured RiskModelInterface per P-1 (model is config).
-        Deterministic per Port-3: same inputs produce same outputs.
-        Stub: delegates to StubRiskModel, returns zeroed metrics.
+        Deterministic per Port-3: same inputs produce same outputs. With the
+        real PositionExposureRiskModel (Step 3.6) this returns real exposure/
+        leverage; VaR/CVaR/volatility/drawdown/beta remain 0 pending return
+        history (F-18).
         """
-        return await self._model.compute_metrics(portfolio_id, positions)
+        return await self._model.compute_metrics(portfolio_id, positions, equity)
+
+    async def snapshot_portfolio_risk(
+        self, portfolio_id: UUID, positions: list[object], equity: Decimal
+    ) -> RiskMetrics:
+        """Compute + persist a portfolio risk snapshot — Doc 15 §11.5.3/§11.5.8.
+
+        Computes current metrics, evaluates them against active governed limits
+        (§11.5.8 monitoring — breaches recorded), and persists both to
+        analytics.risk_snapshots as an immutable point-in-time artifact (P-5).
+        Does not commit — caller owns the transaction. Returns the metrics.
+        """
+        metrics = await self._model.compute_metrics(portfolio_id, positions, equity)
+        assessments = await self.check_limits(portfolio_id, metrics)
+        breaches = tuple(a for a in assessments if a.status is RiskLimitStatus.BREACH)
+        await self._snapshots.save(metrics, breaches)
+        return metrics
 
     async def check_limits(
         self, portfolio_id: UUID, metrics: RiskMetrics

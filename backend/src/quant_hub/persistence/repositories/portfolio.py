@@ -24,6 +24,12 @@ class SQLAlchemyPortfolioRepository(BaseRepository[object], PortfolioRepository)
         return []  # stub
 
 
+_POSITION_COLS = (
+    "id, portfolio_id, asset_id, quantity, average_entry_price, market_value, "
+    "unrealized_pnl, realized_pnl_today, last_price, is_closed, sequence_number"
+)
+
+
 def _row_to_position(row: object) -> RecordedPosition:
     return RecordedPosition(
         id=row["id"],
@@ -31,6 +37,10 @@ def _row_to_position(row: object) -> RecordedPosition:
         asset_id=row["asset_id"],
         quantity=row["quantity"],
         average_entry_price=row["average_entry_price"],
+        market_value=row["market_value"],
+        unrealized_pnl=row["unrealized_pnl"],
+        realized_pnl_today=row["realized_pnl_today"],
+        last_price=row["last_price"],
         is_closed=row["is_closed"],
         sequence_number=row["sequence_number"],
     )
@@ -47,9 +57,8 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
     async def get_by_portfolio(self, portfolio_id: UUID) -> list[RecordedPosition]:
         result = await self._session.execute(
             text(
-                """
-                SELECT id, portfolio_id, asset_id, quantity, average_entry_price,
-                       is_closed, sequence_number
+                f"""
+                SELECT {_POSITION_COLS}
                 FROM core.positions
                 WHERE portfolio_id = :portfolio_id
                 ORDER BY asset_id
@@ -64,9 +73,8 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
     ) -> RecordedPosition | None:
         result = await self._session.execute(
             text(
-                """
-                SELECT id, portfolio_id, asset_id, quantity, average_entry_price,
-                       is_closed, sequence_number
+                f"""
+                SELECT {_POSITION_COLS}
                 FROM core.positions
                 WHERE portfolio_id = :portfolio_id AND asset_id = :asset_id
                 """
@@ -84,36 +92,42 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
         quantity: Decimal,
         average_entry_price: Decimal,
         market_value: Decimal,
+        unrealized_pnl: Decimal,
+        realized_pnl_delta: Decimal,
         last_price: Decimal,
         last_price_at: object,
         is_closed: bool,
     ) -> RecordedPosition:
-        """Write the next position snapshot — §10.6.6. INSERT ... ON CONFLICT
-        on the (portfolio_id, asset_id) natural key (positions_portfolio_asset_uq,
-        Step 1.1 schema), incrementing sequence_number on update. updated_at via
-        clock_timestamp(). Realized/unrealized P&L columns are left at their
-        defaults — deferred to Step 3.6 (F-17).
+        """Write the next position snapshot — §10.6.6 / §10.9.5. INSERT ... ON
+        CONFLICT on the (portfolio_id, asset_id) natural key
+        (positions_portfolio_asset_uq, Step 1.1 schema), incrementing
+        sequence_number on update. `unrealized_pnl` is SET (mark-to-market);
+        `realized_pnl_today` ACCUMULATES realized_pnl_delta in SQL (race-safe).
+        updated_at via clock_timestamp().
         """
         stmt = text(
-            """
+            f"""
             INSERT INTO core.positions
                 (portfolio_id, asset_id, quantity, average_entry_price, market_value,
-                 last_price, last_price_at, is_closed, sequence_number)
+                 unrealized_pnl, realized_pnl_today, last_price, last_price_at,
+                 is_closed, sequence_number)
             VALUES
                 (:portfolio_id, :asset_id, :quantity, :average_entry_price, :market_value,
-                 :last_price, :last_price_at, :is_closed, 1)
+                 :unrealized_pnl, :realized_pnl_delta, :last_price, :last_price_at,
+                 :is_closed, 1)
             ON CONFLICT (portfolio_id, asset_id)
             DO UPDATE SET
                 quantity            = EXCLUDED.quantity,
                 average_entry_price = EXCLUDED.average_entry_price,
                 market_value        = EXCLUDED.market_value,
+                unrealized_pnl      = EXCLUDED.unrealized_pnl,
+                realized_pnl_today  = core.positions.realized_pnl_today + :realized_pnl_delta,
                 last_price          = EXCLUDED.last_price,
                 last_price_at       = EXCLUDED.last_price_at,
                 is_closed           = EXCLUDED.is_closed,
                 sequence_number     = core.positions.sequence_number + 1,
                 updated_at          = clock_timestamp()
-            RETURNING id, portfolio_id, asset_id, quantity, average_entry_price,
-                      is_closed, sequence_number
+            RETURNING {_POSITION_COLS}
             """
         )
         result = await self._session.execute(
@@ -124,6 +138,8 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
                 "quantity": quantity,
                 "average_entry_price": average_entry_price,
                 "market_value": market_value,
+                "unrealized_pnl": unrealized_pnl,
+                "realized_pnl_delta": realized_pnl_delta,
                 "last_price": last_price,
                 "last_price_at": last_price_at,
                 "is_closed": is_closed,

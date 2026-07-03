@@ -41,13 +41,16 @@ class PositionRepository(ABC):
         quantity: Decimal,
         average_entry_price: Decimal,
         market_value: Decimal,
+        unrealized_pnl: Decimal,
+        realized_pnl_delta: Decimal,
         last_price: Decimal,
         last_price_at: object,
         is_closed: bool,
     ) -> RecordedPosition:
         """Write the next position snapshot — Doc 14 §10.6.6 (position updated
         on every fill). Upsert on the (portfolio_id, asset_id) natural key,
-        incrementing sequence_number. Does not commit (caller owns the
-        transaction boundary).
+        incrementing sequence_number. `unrealized_pnl` is set to the mark-to-
+        market value; `realized_pnl_delta` is ADDED to realized_pnl_today
+        (Step 3.6, §10.9.5). Does not commit (caller owns the transaction).
         """
         ...

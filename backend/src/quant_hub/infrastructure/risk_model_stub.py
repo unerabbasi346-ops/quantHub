@@ -24,7 +24,7 @@ class StubRiskModel(RiskModelInterface):
     """
 
     async def compute_metrics(
-        self, portfolio_id: UUID, positions: list[object]
+        self, portfolio_id: UUID, positions: list[object], equity: Decimal
     ) -> RiskMetrics:
         zero = Decimal("0")
         return RiskMetrics(
@@ -34,6 +34,8 @@ class StubRiskModel(RiskModelInterface):
             volatility_annualized=zero,
             max_drawdown=zero,
             beta=zero,
+            gross_exposure=zero,
+            net_exposure=zero,
             gross_leverage=zero,
             net_leverage=zero,
             computed_at=datetime.now(timezone.utc),

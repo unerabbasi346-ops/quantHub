@@ -177,6 +177,8 @@ class _FakePositionRepo:
         return RecordedPosition(
             id=uuid7(), portfolio_id=portfolio_id, asset_id=asset_id,
             quantity=kw["quantity"], average_entry_price=kw["average_entry_price"],
+            market_value=kw["market_value"], unrealized_pnl=kw["unrealized_pnl"],
+            realized_pnl_today=kw["realized_pnl_delta"], last_price=kw["last_price"],
             is_closed=kw["is_closed"], sequence_number=1,
         )
 
@@ -213,6 +215,9 @@ async def test_approved_order_fills_and_updates_position() -> None:
     assert positions.upserted["quantity"] == Decimal("0.05000000")
     assert positions.upserted["average_entry_price"] == Decimal("61000.00000000")
     assert positions.upserted["market_value"] == Decimal("3050.0000")
+    # opened at the fill price -> unrealized 0, no realized P&L on an open
+    assert positions.upserted["unrealized_pnl"] == Decimal("0.0000")
+    assert positions.upserted["realized_pnl_delta"] == Decimal("0.0000")
     assert outcome.position.quantity == Decimal("0.05000000")
 
 
@@ -239,6 +244,8 @@ async def test_second_buy_averages_into_existing_position() -> None:
     existing = RecordedPosition(
         id=uuid7(), portfolio_id=order.portfolio_id, asset_id=order.asset_id,
         quantity=Decimal("0.05"), average_entry_price=Decimal("60000"),
+        market_value=Decimal("3000"), unrealized_pnl=Decimal("0"),
+        realized_pnl_today=Decimal("0"), last_price=Decimal("60000"),
         is_closed=False, sequence_number=1,
     )
     svc, orders, executions, positions = _service(RiskDecision(approved=True), existing)

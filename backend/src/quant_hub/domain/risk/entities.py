@@ -24,17 +24,20 @@ class RiskMetrics:
     """
 
     portfolio_id: UUID
-    # VaR / CVaR — Doc 15 §11.5.3
+    # VaR / CVaR — Doc 15 §11.5.3 (DEFERRED: need return-series history, F-18)
     var_1d_99: Decimal           # Value at Risk, 1-day horizon, 99% confidence
     cvar_1d_99: Decimal          # Conditional VaR (Expected Shortfall) — tail risk
-    # Volatility — Doc 15 §11.5.3
+    # Volatility — Doc 15 §11.5.3 (DEFERRED: needs return series, F-18)
     volatility_annualized: Decimal
-    # Drawdown — Doc 15 §11.5.3
+    # Drawdown — Doc 15 §11.5.3 (DEFERRED: needs equity-curve history, F-18)
     max_drawdown: Decimal        # Peak-to-trough decline
-    # Exposure — Doc 15 §11.5.3
+    # Beta — Doc 15 §11.5.3 (DEFERRED: needs benchmark return history, F-18)
     beta: Decimal                # Market beta to primary benchmark
-    gross_leverage: Decimal      # Gross leverage
-    net_leverage: Decimal        # Net leverage
+    # Exposure / Leverage — Doc 15 §11.5.3 (COMPUTABLE NOW from positions)
+    gross_exposure: Decimal      # Σ |position market value| (currency)
+    net_exposure: Decimal        # Σ position market value, signed (currency)
+    gross_leverage: Decimal      # gross_exposure / equity
+    net_leverage: Decimal        # net_exposure / equity
     # Anchors determinism per Port-3
     computed_at: datetime
 

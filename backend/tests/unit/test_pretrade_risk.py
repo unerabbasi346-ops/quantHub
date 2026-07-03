@@ -268,6 +268,8 @@ def _metrics(**over) -> RiskMetrics:
         volatility_annualized=Decimal("0"),
         max_drawdown=Decimal("0"),
         beta=Decimal("0"),
+        gross_exposure=Decimal("0"),
+        net_exposure=Decimal("0"),
         gross_leverage=Decimal("0"),
         net_leverage=Decimal("0"),
         computed_at=datetime.now(timezone.utc),

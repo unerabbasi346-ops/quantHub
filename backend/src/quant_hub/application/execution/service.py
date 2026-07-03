@@ -135,12 +135,16 @@ class ExecutionService:
         update = apply_fill_to_position(cur_qty, cur_avg, fill.signed_quantity, fill.price)
         market_value = (update.quantity * fill.price).quantize(_MV_SCALE, rounding=ROUND_HALF_EVEN)
 
+        # Step 3.6 (§10.9.5): persist mark-to-market unrealized P&L and
+        # accumulate realized P&L from this fill (0 for pure opens/adds).
         position = await self._positions.upsert(
             order.portfolio_id,
             order.asset_id,
             quantity=update.quantity,
             average_entry_price=update.average_entry_price,
             market_value=market_value,
+            unrealized_pnl=update.unrealized_pnl,
+            realized_pnl_delta=update.realized_pnl,
             last_price=fill.price,
             last_price_at=executed_at,
             is_closed=update.is_closed,
