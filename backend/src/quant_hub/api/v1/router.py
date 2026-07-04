@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from quant_hub.api.v1 import execution, health, markets, portfolio
+from quant_hub.api.v1 import execution, health, markets, portfolio, strategies
 
 api_router = APIRouter()
 
@@ -28,3 +28,6 @@ api_router.include_router(portfolio.router)
 
 # Step 4.4: execution vertical slice — orders + executions (the blotter).
 api_router.include_router(execution.router)
+
+# Step 4.5: strategies vertical slice — strategies + signals + backtests.
+api_router.include_router(strategies.router)

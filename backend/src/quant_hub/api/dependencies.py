@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quant_hub.application.risk.service import RiskService
+from quant_hub.domain.backtesting.interfaces import BacktestRepository
 from quant_hub.domain.execution.interfaces import (
     ExecutionRepository,
     OrderRepository,
@@ -18,10 +19,12 @@ from quant_hub.domain.execution.interfaces import (
 )
 from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
 from quant_hub.domain.portfolio.interfaces import PortfolioRepository, PositionRepository
+from quant_hub.domain.strategy_engine.interfaces import SignalRepository, StrategyRepository
 from quant_hub.infrastructure.cache import get_redis
 from quant_hub.infrastructure.database import get_session
 from quant_hub.infrastructure.risk_approval_adapter import RiskApprovalAdapter
 from quant_hub.infrastructure.risk_model import PositionExposureRiskModel
+from quant_hub.persistence.repositories.backtesting import SQLAlchemyBacktestRepository
 from quant_hub.persistence.repositories.execution import (
     SQLAlchemyExecutionRepository,
     SQLAlchemyOrderRepository,
@@ -29,6 +32,10 @@ from quant_hub.persistence.repositories.execution import (
 from quant_hub.persistence.repositories.market_data import (
     SQLAlchemyAssetRepository,
     SQLAlchemyOHLCVRepository,
+)
+from quant_hub.persistence.repositories.strategy_engine import (
+    SQLAlchemySignalRepository,
+    SQLAlchemyStrategyRepository,
 )
 from quant_hub.persistence.repositories.portfolio import (
     SQLAlchemyPortfolioRepository,
@@ -90,6 +97,26 @@ def get_execution_repository(session: DbSession) -> ExecutionRepository:
 
 OrderRepo = Annotated[OrderRepository, Depends(get_order_repository)]
 ExecutionRepo = Annotated[ExecutionRepository, Depends(get_execution_repository)]
+
+
+# Strategy/signal/backtest read repositories — Step 4.5 (Strategies +
+# Backtests Vertical Slice). Reuse of Phase 2's Strategy/SignalRepository and
+# Phase 3.7's BacktestRepository — read-only, no write path on these endpoints.
+def get_strategy_repository(session: DbSession) -> StrategyRepository:
+    return SQLAlchemyStrategyRepository(session)
+
+
+def get_signal_repository(session: DbSession) -> SignalRepository:
+    return SQLAlchemySignalRepository(session)
+
+
+def get_backtest_repository(session: DbSession) -> BacktestRepository:
+    return SQLAlchemyBacktestRepository(session)
+
+
+StrategyRepo = Annotated[StrategyRepository, Depends(get_strategy_repository)]
+SignalRepo = Annotated[SignalRepository, Depends(get_signal_repository)]
+BacktestRepo = Annotated[BacktestRepository, Depends(get_backtest_repository)]
 
 
 def build_risk_service(session: AsyncSession) -> RiskService:

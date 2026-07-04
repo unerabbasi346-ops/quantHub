@@ -38,6 +38,16 @@ class StrategyRepository(ABC):
     @abstractmethod
     async def list_by_portfolio(self, portfolio_id: UUID) -> list[RegisteredStrategy]: ...
 
+    @abstractmethod
+    async def list_all(self) -> list[RegisteredStrategy]:
+        """All registered (non-soft-deleted) strategies, stably ordered.
+
+        Added in Step 4.5 (Strategies Vertical Slice), its first real consumer
+        (GET /v1/strategies — the strategy registry). list_by_portfolio scopes
+        to one portfolio; the registry shows every strategy.
+        """
+        ...
+
 
 class SignalRepository(ABC):
     """Persistence contract for core.signals — Doc 14 §10.6.4 Signal Recording (Step 2.2).
@@ -70,5 +80,16 @@ class SignalRepository(ABC):
 
         Consumed by Signal Validation's rate-of-change/consistency checks
         (domain/strategy_engine/validation.py) as the `previous` argument.
+        """
+        ...
+
+    @abstractmethod
+    async def list_by_strategy(self, strategy_id: UUID, limit: int) -> list[RecordedSignal]:
+        """Most-recent-first recorded signals for `strategy_id`, up to `limit`.
+
+        Added in Step 4.5 (the signals feed, GET /v1/strategies/{id}/signals).
+        A bounded recent window over the immutable event log — where
+        get_latest returns only the single newest across an (strategy, asset),
+        this returns the recent stream for the whole strategy for display.
         """
         ...

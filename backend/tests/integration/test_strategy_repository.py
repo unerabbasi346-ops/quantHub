@@ -99,6 +99,28 @@ async def test_list_by_portfolio_returns_registered_strategies(db_session: Async
     assert all(s.portfolio_id == portfolio_id for s in strategies)
 
 
+async def test_list_all_includes_registered_strategy_and_excludes_soft_deleted(
+    db_session: AsyncSession,
+) -> None:
+    from sqlalchemy import text
+
+    # The Step 4.5 registry feed: every non-soft-deleted strategy. The dev DB
+    # carries strategies from other committed sessions, so assert membership
+    # (present strategy included, soft-deleted one excluded), not exact count.
+    repo = SQLAlchemyStrategyRepository(db_session)
+    present_id = await repo.upsert(StrategyRef(name=_unique_name("strat"), version="1.0.0"))
+    deleted_id = await repo.upsert(StrategyRef(name=_unique_name("strat"), version="1.0.0"))
+    await db_session.execute(
+        text("UPDATE core.strategies SET deleted_at = clock_timestamp() WHERE id = :id"),
+        {"id": deleted_id},
+    )
+
+    ids = {s.id for s in await repo.list_all()}
+
+    assert present_id in ids
+    assert deleted_id not in ids
+
+
 async def test_opaque_config_round_trips_verbatim(db_session: AsyncSession) -> None:
     # P-1/T-2: the platform stores config verbatim, never interprets it —
     # verify nested/mixed-type JSON round-trips exactly.

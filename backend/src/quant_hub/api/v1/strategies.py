@@ -1,0 +1,222 @@
+# Governing specification: Doc 07 — Backend Architecture (QH-007 v1.0)
+#   §API Standards: REST/FastAPI, versioned, Pydantic validation, OpenAPI.
+# Doc 08 — Frontend Architecture (QH-008 v1.0) §API Layer: answers the
+#   strategies feature's existing GET /v1/strategies call (features/strategies).
+# Doc 10 — API Specification (QH-010 v1.0): shared ResponseEnvelope.
+# Doc 14 §10.2 Strategy Governance (§10.2.5 versioning), §10.6.4 Signal
+#   Recording, §10.3 Backtesting Engine — the read shapes this exposes.
+# Doc 15 §11.1.5 — signals feed position sizing (context for the value field).
+# Per Doc 00 §14.11
+#
+# Step 4.5, the Strategies + Backtests vertical slice: read endpoints over
+# Phase 2's core.strategies / core.signals and Phase 3.7's analytics.backtests
+# (all written by the real Signal->Order loop and backtest engine).
+#
+# JUDGMENT CALLS (Doc 00 §14.5/§14.7 — flagged):
+#  1. snake_case JSON + Decimal-as-string, identical to Steps 4.2–4.4. A
+#     signal's `value` is NUMERIC and a backtest's total_return/final_capital
+#     are NUMERIC, so they are STRINGS here. The Step 0.5 strategies types
+#     (camelCase, a speculative status union) are reconciled in the frontend.
+#  2. HONEST F-9 REPRESENTATION (versioning gap — called out explicitly). Doc
+#     14 §10.2.5 requires immutable version history + rollback, but the Step
+#     1.1 schema keys core.strategies on `name` alone with no version-history
+#     table, so re-registration OVERWRITES the prior version row in place
+#     (F-9). StrategyOut therefore exposes `version` as the CURRENT registered
+#     version ONLY — there is no history to list. This endpoint deliberately
+#     offers no "versions" collection and no per-version lookup, so it cannot
+#     imply a history that does not exist; the frontend annotates the version
+#     column to say so. `status` is a free-form VARCHAR (real rows carry
+#     'ACTIVE'; schema default 'INACTIVE') — typed as a plain string, not a
+#     fixed enum the data does not honor.
+#  3. OPAQUE PASSTHROUGH (P-1): a strategy's `config` and a signal's `metadata`
+#     are stored verbatim and never interpreted by the platform (P-1). They are
+#     passed through as JSON objects, not re-typed at the API boundary. A
+#     backtest's `results` is likewise passed through: it is the engine's own
+#     self-describing §10.3.7 summary (bars/fills/realized+unrealized P&L/
+#     determinism hash) whose Decimal figures are already stored as strings.
+#  4. SIGNAL FEED LIMIT: the signals feed is bounded (default 100, max 1000,
+#     most-recent-first) — a strategy can have hundreds of immutable signal
+#     events (481 per backtest strategy in the real Phase 3A data); an
+#     unbounded feed is neither useful nor safe to serialize wholesale.
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+from uuid import UUID
+
+from fastapi import APIRouter, Query, status
+from pydantic import BaseModel, field_serializer
+
+from quant_hub.api.dependencies import BacktestRepo, SignalRepo, StrategyRepo
+from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
+from quant_hub.domain.strategy_engine.entities import RecordedSignal, RegisteredStrategy
+
+router = APIRouter(tags=["strategies"])
+
+
+class StrategyOut(BaseModel):
+    """API shape of a core.strategies row — Doc 14 §10.2 / Doc 09 field names.
+
+    `version` is the CURRENT registered version only (F-9 — no version history
+    is retained by the schema; see module judgment call #2). `status` is a
+    free-form string. `config` is opaque (P-1), passed through verbatim.
+    """
+
+    id: UUID
+    name: str
+    description: str | None
+    version: str
+    status: str
+    config: dict[str, Any]
+    portfolio_id: UUID | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+    @classmethod
+    def from_registered(cls, strategy: RegisteredStrategy) -> "StrategyOut":
+        return cls(
+            id=strategy.id,
+            name=strategy.name,
+            description=strategy.description,
+            version=strategy.version,
+            status=strategy.status,
+            config=dict(strategy.config),
+            portfolio_id=strategy.portfolio_id,
+            created_at=strategy.created_at,
+            updated_at=strategy.updated_at,
+        )
+
+
+class SignalOut(BaseModel):
+    """API shape of a core.signals row — Doc 14 §10.6.4 (immutable signal
+    event). `value` (NUMERIC signed conviction, Doc 15 §11.1.5) renders as a
+    string; `metadata` is opaque (P-1), passed through verbatim."""
+
+    id: UUID
+    strategy_id: UUID
+    asset_id: UUID
+    value: Decimal
+    ts: datetime
+    validation_status: str
+    metadata: dict[str, Any]
+    created_at: datetime | None
+
+    @field_serializer("value", when_used="json")
+    def _serialize_decimal(self, value: Decimal) -> str:
+        return format(value, "f")
+
+    @classmethod
+    def from_recorded(cls, signal: RecordedSignal) -> "SignalOut":
+        return cls(
+            id=signal.id,
+            strategy_id=signal.strategy_id,
+            asset_id=signal.asset_id,
+            value=signal.value,
+            ts=signal.ts,
+            validation_status=signal.validation_status,
+            metadata=dict(signal.metadata),
+            created_at=signal.created_at,
+        )
+
+
+class BacktestOut(BaseModel):
+    """API shape of an analytics.backtests row — Doc 14 §10.3.
+
+    Promoted scalar columns plus the self-describing §10.3.7 `results` summary
+    (fills, realized/unrealized P&L, determinism hash). total_return/
+    trade_count/results/reproducibility_hash are null for a not-yet-COMPLETED
+    (RUNNING) backtest. Decimal scalars render as strings; `results` figures
+    are already strings inside the stored JSONB."""
+
+    id: UUID
+    strategy_id: UUID | None
+    name: str
+    status: str
+    total_return: Decimal | None
+    trade_count: int | None
+    final_capital: Decimal | None
+    reproducibility_hash: str | None
+    results: dict[str, Any] | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+
+    @field_serializer("total_return", "final_capital", when_used="json")
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
+
+
+def _serialize_backtest_row(row: dict[str, Any]) -> BacktestOut:
+    # The repo returns a plain dict (start_date/end_date etc. are not needed by
+    # the list view). model_validate maps the matching keys; extras ignored.
+    return BacktestOut.model_validate(row)
+
+
+@router.get(
+    "/strategies",
+    response_model=ResponseEnvelope[list[StrategyOut]],
+    summary="List all registered strategies (the registry)",
+)
+async def list_strategies(repo: StrategyRepo) -> ResponseEnvelope[list[StrategyOut]]:
+    strategies = await repo.list_all()
+    return ok([StrategyOut.from_registered(s) for s in strategies])
+
+
+@router.get(
+    "/strategies/{strategy_id}",
+    response_model=ResponseEnvelope[StrategyOut],
+    summary="Get a single strategy by id",
+)
+async def get_strategy(strategy_id: UUID, repo: StrategyRepo) -> ResponseEnvelope[StrategyOut]:
+    strategy = await repo.get_by_id(strategy_id)
+    if strategy is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} not found",
+        )
+    return ok(StrategyOut.from_registered(strategy))
+
+
+@router.get(
+    "/strategies/{strategy_id}/signals",
+    response_model=ResponseEnvelope[list[SignalOut]],
+    summary="Get the recent signal feed for a strategy",
+)
+async def get_strategy_signals(
+    strategy_id: UUID,
+    strategy_repo: StrategyRepo,
+    signal_repo: SignalRepo,
+    limit: int = Query(100, ge=1, le=1000, description="Max most-recent signals"),
+) -> ResponseEnvelope[list[SignalOut]]:
+    # 404 on an unknown strategy so a client distinguishes "no such strategy"
+    # from "strategy exists but has emitted no signals" (a legitimate empty).
+    if await strategy_repo.get_by_id(strategy_id) is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} not found",
+        )
+    signals = await signal_repo.list_by_strategy(strategy_id, limit)
+    return ok([SignalOut.from_recorded(s) for s in signals])
+
+
+@router.get(
+    "/strategies/{strategy_id}/backtests",
+    response_model=ResponseEnvelope[list[BacktestOut]],
+    summary="Get backtest results for a strategy",
+)
+async def get_strategy_backtests(
+    strategy_id: UUID,
+    strategy_repo: StrategyRepo,
+    backtest_repo: BacktestRepo,
+) -> ResponseEnvelope[list[BacktestOut]]:
+    if await strategy_repo.get_by_id(strategy_id) is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} not found",
+        )
+    rows = await backtest_repo.list_by_strategy(strategy_id)
+    return ok([_serialize_backtest_row(row) for row in rows])

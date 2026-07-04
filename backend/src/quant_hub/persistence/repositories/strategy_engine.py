@@ -44,6 +44,30 @@ def _row_to_strategy(row: object) -> RegisteredStrategy:
     )
 
 
+def _row_to_signal(row: object) -> RecordedSignal:
+    return RecordedSignal(
+        id=row["id"],
+        strategy_id=row["strategy_id"],
+        asset_id=row["asset_id"],
+        value=row["value"],
+        ts=row["ts"],
+        validation_status=row["validation_status"],
+        metadata=dict(row["metadata"] or {}),
+        created_at=row["created_at"],
+    )
+
+
+# core.strategies projection shared by every read (list_all/get_by_id/
+# list_by_portfolio) so the column set and _row_to_strategy never drift.
+_STRATEGY_COLS = (
+    "id, name, description, version, status, config, "
+    "portfolio_id, registered_by, created_at, updated_at"
+)
+
+# core.signals projection shared by get_latest/list_by_strategy.
+_SIGNAL_COLS = "id, strategy_id, asset_id, value, ts, validation_status, metadata, created_at"
+
+
 class SQLAlchemyStrategyRepository(BaseRepository[object], StrategyRepository):
     """Concrete repository for core.strategies — Step 2.3, Doc 09 (Step 1.1 schema)."""
 
@@ -113,12 +137,8 @@ class SQLAlchemyStrategyRepository(BaseRepository[object], StrategyRepository):
     async def get_by_id(self, strategy_id: UUID) -> RegisteredStrategy | None:
         result = await self._session.execute(
             text(
-                """
-                SELECT id, name, description, version, status, config,
-                       portfolio_id, registered_by, created_at, updated_at
-                FROM core.strategies
-                WHERE id = :id AND deleted_at IS NULL
-                """
+                f"SELECT {_STRATEGY_COLS} FROM core.strategies "
+                "WHERE id = :id AND deleted_at IS NULL"
             ),
             {"id": strategy_id},
         )
@@ -128,15 +148,23 @@ class SQLAlchemyStrategyRepository(BaseRepository[object], StrategyRepository):
     async def list_by_portfolio(self, portfolio_id: UUID) -> list[RegisteredStrategy]:
         result = await self._session.execute(
             text(
-                """
-                SELECT id, name, description, version, status, config,
-                       portfolio_id, registered_by, created_at, updated_at
-                FROM core.strategies
-                WHERE portfolio_id = :portfolio_id AND deleted_at IS NULL
-                ORDER BY created_at
-                """
+                f"SELECT {_STRATEGY_COLS} FROM core.strategies "
+                "WHERE portfolio_id = :portfolio_id AND deleted_at IS NULL "
+                "ORDER BY created_at, id"
             ),
             {"portfolio_id": portfolio_id},
+        )
+        return [_row_to_strategy(row) for row in result.mappings().all()]
+
+    async def list_all(self) -> list[RegisteredStrategy]:
+        # Every non-soft-deleted strategy — the registry feed (Step 4.5).
+        # Ordered (created_at, id) for a stable, deterministic list.
+        result = await self._session.execute(
+            text(
+                f"SELECT {_STRATEGY_COLS} FROM core.strategies "
+                "WHERE deleted_at IS NULL "
+                "ORDER BY created_at, id"
+            )
         )
         return [_row_to_strategy(row) for row in result.mappings().all()]
 
@@ -197,8 +225,8 @@ class SQLAlchemySignalRepository(BaseRepository[object], SignalRepository):
         Signal Validation's rate-of-change/consistency checks."""
         result = await self._session.execute(
             text(
-                """
-                SELECT id, strategy_id, asset_id, value, ts, validation_status, metadata, created_at
+                f"""
+                SELECT {_SIGNAL_COLS}
                 FROM core.signals
                 WHERE strategy_id = :strategy_id AND asset_id = :asset_id
                 ORDER BY ts DESC
@@ -208,15 +236,23 @@ class SQLAlchemySignalRepository(BaseRepository[object], SignalRepository):
             {"strategy_id": strategy_id, "asset_id": asset_id},
         )
         row = result.mappings().one_or_none()
-        if row is None:
-            return None
-        return RecordedSignal(
-            id=row["id"],
-            strategy_id=row["strategy_id"],
-            asset_id=row["asset_id"],
-            value=row["value"],
-            ts=row["ts"],
-            validation_status=row["validation_status"],
-            metadata=dict(row["metadata"] or {}),
-            created_at=row["created_at"],
+        return None if row is None else _row_to_signal(row)
+
+    async def list_by_strategy(self, strategy_id: UUID, limit: int) -> list[RecordedSignal]:
+        # Most-recent-first bounded window over the immutable signal log — the
+        # Step 4.5 signals feed. (ts DESC, id DESC) is stable when many signals
+        # share a ts (F-10: core.signals has no natural-key uniqueness, so a
+        # strategy can legitimately have multiple rows at the same ts).
+        result = await self._session.execute(
+            text(
+                f"""
+                SELECT {_SIGNAL_COLS}
+                FROM core.signals
+                WHERE strategy_id = :strategy_id
+                ORDER BY ts DESC, id DESC
+                LIMIT :limit
+                """
+            ),
+            {"strategy_id": strategy_id, "limit": limit},
         )
+        return [_row_to_signal(row) for row in result.mappings().all()]

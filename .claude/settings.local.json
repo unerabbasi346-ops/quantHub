@@ -113,7 +113,9 @@
       "Bash(echo started *)",
       "Bash(curl -s \"http://localhost:8000/v1/portfolios/019f2d67-90ef-7bf2-88b2-b213953acd20/orders\")",
       "Bash(awk '{print $5}')",
-      "Bash(xargs -r taskkill //F //PID)"
+      "Bash(xargs -r taskkill //F //PID)",
+      "Bash(curl -s -o /dev/null -w \"backend: %{http_code}\\\\n\" http://localhost:8000/v1/health)",
+      "Bash(curl -s -o /dev/null -w \"frontend /strategies: %{http_code}\\\\n\" http://localhost:3000/strategies)"
     ]
   },
   "hooks": {

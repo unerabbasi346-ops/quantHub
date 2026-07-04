@@ -127,6 +127,36 @@ async def test_get_latest_returns_none_when_no_signals_exist(db_session: AsyncSe
     assert result is None
 
 
+async def test_list_by_strategy_returns_recent_first_bounded(db_session: AsyncSession) -> None:
+    # The Step 4.5 signals feed: most-recent-first, bounded by `limit`, scoped
+    # to the strategy. Append three signals at increasing ts; expect the two
+    # newest back in descending-ts order.
+    assets = SQLAlchemyAssetRepository(db_session)
+    signals = SQLAlchemySignalRepository(db_session)
+    asset_ref = AssetRef(symbol=_unique_symbol("SIG"), exchange="test", asset_class="crypto")
+    asset_id = await assets.upsert(asset_ref)
+    strategy_id = await _make_strategy(db_session)
+    now = datetime.now(timezone.utc)
+
+    await signals.record(strategy_id, asset_id, _signal(asset_ref, value=Decimal("0.1"), ts=now - timedelta(minutes=20)), "VALID")
+    await signals.record(strategy_id, asset_id, _signal(asset_ref, value=Decimal("0.2"), ts=now - timedelta(minutes=10)), "VALID")
+    await signals.record(strategy_id, asset_id, _signal(asset_ref, value=Decimal("0.3"), ts=now), "VALID")
+
+    recent = await signals.list_by_strategy(strategy_id, limit=2)
+
+    assert len(recent) == 2
+    assert [s.value for s in recent] == [Decimal("0.30000000"), Decimal("0.20000000")]
+    assert all(s.strategy_id == strategy_id for s in recent)
+
+
+async def test_list_by_strategy_returns_empty_for_strategy_without_signals(
+    db_session: AsyncSession,
+) -> None:
+    signals = SQLAlchemySignalRepository(db_session)
+    strategy_id = await _make_strategy(db_session)
+    assert await signals.list_by_strategy(strategy_id, limit=100) == []
+
+
 async def test_invalid_signal_is_persisted_with_invalid_status(db_session: AsyncSession) -> None:
     # Doc 14 §10.6.4: every generated signal is recorded, including invalid
     # ones — verified here at the repository/schema level (no CHECK

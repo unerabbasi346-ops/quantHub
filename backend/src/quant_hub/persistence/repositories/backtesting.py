@@ -130,10 +130,18 @@ class SQLAlchemyBacktestRepository(BaseRepository[object], BacktestRepository):
         return None if row is None else dict(row)
 
     async def list_by_strategy(self, strategy_id: UUID) -> list[object]:
+        # Enriched in Step 4.5 (the backtests view, GET /v1/strategies/{id}/
+        # backtests): the summary columns plus the self-describing §10.3.7
+        # results JSONB (fills, realized/unrealized P&L, determinism hash) so
+        # the view renders a backtest fully without a per-row detail fetch.
+        # total_return/trade_count/results/hash are NULL for a not-yet-COMPLETED
+        # backtest (RUNNING) — the caller renders those as absent.
         result = await self._session.execute(
             text(
                 """
-                SELECT id, name, status, reproducibility_hash, created_at
+                SELECT id, strategy_id, name, status, total_return, trade_count,
+                       final_capital, reproducibility_hash, results,
+                       started_at, completed_at, created_at
                 FROM analytics.backtests
                 WHERE strategy_id = :strategy_id
                 ORDER BY created_at DESC

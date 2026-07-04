@@ -1,7 +1,16 @@
-// Doc 08 §API Layer: centralized client
+// Governing specification: Doc 08 — Frontend Architecture (QH-008 v1.0)
+// API Layer: all backend communication through centralized client — Doc 08 §API Layer
+// Per Doc 00 §14.11
 import { apiClient } from '@/lib/api/client'
-import type { Strategy } from '../types'
+import type { Backtest, Signal, Strategy } from '../types'
 
 export const strategiesService = {
+  // The registry — every registered strategy (api/v1/strategies.py, Step 4.5).
   getStrategies: () => apiClient.get<Strategy[]>('/v1/strategies'),
+  // Recent signal feed for a strategy (bounded, most-recent-first).
+  getSignals: (strategyId: string, limit = 100) =>
+    apiClient.get<Signal[]>(`/v1/strategies/${strategyId}/signals?limit=${limit}`),
+  // Backtest results for a strategy (fills, final P&L, determinism hash).
+  getBacktests: (strategyId: string) =>
+    apiClient.get<Backtest[]>(`/v1/strategies/${strategyId}/backtests`),
 }
