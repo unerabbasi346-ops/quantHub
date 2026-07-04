@@ -94,6 +94,31 @@ class SQLAlchemyRiskLimitRepository(BaseRepository[object], RiskLimitRepository)
         )
 
 
+# analytics.risk_assessments projection shared by get_by_order/list_by_portfolio
+# so the column set and _row_to_assessment never drift.
+_ASSESSMENT_COLS = (
+    "id, order_id, portfolio_id, authorized, rejection_reason, "
+    "individual_checks, computation_latency_ns, assessed_at"
+)
+
+
+def _row_to_assessment(row: object) -> PreTradeRiskResult:
+    checks = tuple(
+        PreTradeCheck(check_name=c["check_name"], passed=c["passed"], detail=c["detail"])
+        for c in (row["individual_checks"] or [])
+    )
+    return PreTradeRiskResult(
+        check_id=row["id"],
+        order_id=row["order_id"],
+        portfolio_id=row["portfolio_id"],
+        authorized=row["authorized"],
+        rejection_reason=row["rejection_reason"],
+        individual_checks=checks,
+        computation_latency_ns=row["computation_latency_ns"],
+        assessed_at=row["assessed_at"],
+    )
+
+
 class SQLAlchemyPreTradeRiskRepository(BaseRepository[object], PreTradeRiskRepository):
     """Concrete repository for pre-trade risk check records — Doc 14 §10.7.5.
 
@@ -135,9 +160,8 @@ class SQLAlchemyPreTradeRiskRepository(BaseRepository[object], PreTradeRiskRepos
     async def get_by_order(self, order_id: UUID) -> PreTradeRiskResult | None:
         result = await self._session.execute(
             text(
-                """
-                SELECT id, order_id, portfolio_id, authorized, rejection_reason,
-                       individual_checks, computation_latency_ns, assessed_at
+                f"""
+                SELECT {_ASSESSMENT_COLS}
                 FROM analytics.risk_assessments
                 WHERE order_id = :order_id
                 ORDER BY assessed_at DESC, id
@@ -147,24 +171,27 @@ class SQLAlchemyPreTradeRiskRepository(BaseRepository[object], PreTradeRiskRepos
             {"order_id": order_id},
         )
         row = result.mappings().one_or_none()
-        if row is None:
-            return None
-        checks = tuple(
-            PreTradeCheck(
-                check_name=c["check_name"], passed=c["passed"], detail=c["detail"]
-            )
-            for c in (row["individual_checks"] or [])
+        return None if row is None else _row_to_assessment(row)
+
+    async def list_by_portfolio(
+        self, portfolio_id: UUID, limit: int
+    ) -> list[PreTradeRiskResult]:
+        # The Step 4.6 pre-trade assessment history: most-recent-first, bounded.
+        # (assessed_at DESC, id) is stable when many assessments share a
+        # timestamp. Append-only immutable audit log — read only.
+        result = await self._session.execute(
+            text(
+                f"""
+                SELECT {_ASSESSMENT_COLS}
+                FROM analytics.risk_assessments
+                WHERE portfolio_id = :portfolio_id
+                ORDER BY assessed_at DESC, id
+                LIMIT :limit
+                """
+            ),
+            {"portfolio_id": portfolio_id, "limit": limit},
         )
-        return PreTradeRiskResult(
-            check_id=row["id"],
-            order_id=row["order_id"],
-            portfolio_id=row["portfolio_id"],
-            authorized=row["authorized"],
-            rejection_reason=row["rejection_reason"],
-            individual_checks=checks,
-            computation_latency_ns=row["computation_latency_ns"],
-            assessed_at=row["assessed_at"],
-        )
+        return [_row_to_assessment(row) for row in result.mappings().all()]
 
 
 def _metrics_to_json(metrics: RiskMetrics) -> dict:
@@ -249,3 +276,23 @@ class SQLAlchemyRiskSnapshotRepository(BaseRepository[object], RiskSnapshotRepos
             computed_at=row["snapshot_at"],
             **{f: Decimal(m.get(f, "0")) for f in _METRIC_FIELDS},
         )
+
+    async def get_latest_record(self, portfolio_id: UUID) -> dict | None:
+        # Raw persisted row for the Step 4.6 snapshot view — keeps the
+        # risk_metrics JSONB verbatim (incl. its own `deferred` list, F-18) and
+        # the recorded breaches, which get_latest drops when rebuilding a
+        # RiskMetrics for the service.
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, portfolio_id, snapshot_at, risk_metrics, breaches
+                FROM analytics.risk_snapshots
+                WHERE portfolio_id = :portfolio_id
+                ORDER BY snapshot_at DESC, id
+                LIMIT 1
+                """
+            ),
+            {"portfolio_id": portfolio_id},
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else dict(row)

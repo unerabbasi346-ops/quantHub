@@ -71,6 +71,18 @@ class PreTradeRiskRepository(ABC):
     @abstractmethod
     async def get_by_order(self, order_id: UUID) -> PreTradeRiskResult | None: ...
 
+    @abstractmethod
+    async def list_by_portfolio(
+        self, portfolio_id: UUID, limit: int
+    ) -> list[PreTradeRiskResult]:
+        """Most-recent-first pre-trade assessments for `portfolio_id`, up to `limit`.
+
+        Added in Step 4.6 (the pre-trade assessment history — approved/rejected
+        with reasons). A bounded recent window over the immutable §10.7.5 audit
+        log, where get_by_order returns only the single record for one order.
+        """
+        ...
+
 
 class RiskSnapshotRepository(ABC):
     """Persistence contract for analytics.risk_snapshots — Doc 07 §Implementation Rules.
@@ -82,6 +94,18 @@ class RiskSnapshotRepository(ABC):
 
     @abstractmethod
     async def get_latest(self, portfolio_id: UUID) -> RiskMetrics | None: ...
+
+    @abstractmethod
+    async def get_latest_record(self, portfolio_id: UUID) -> dict | None:
+        """Latest snapshot as its raw persisted row (or None) — Step 4.6.
+
+        Unlike get_latest (which reconstructs a RiskMetrics for the risk
+        service), this returns the row verbatim including the risk_metrics
+        JSONB's own `deferred` list and the recorded breaches — the honest
+        source of truth for the snapshot view, so DEFERRED metrics (F-18) are
+        named as recorded rather than reconstructed or shown as real zeros.
+        """
+        ...
 
     @abstractmethod
     async def save(

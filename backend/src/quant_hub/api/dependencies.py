@@ -19,6 +19,11 @@ from quant_hub.domain.execution.interfaces import (
 )
 from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
 from quant_hub.domain.portfolio.interfaces import PortfolioRepository, PositionRepository
+from quant_hub.domain.risk.interfaces import (
+    PreTradeRiskRepository,
+    RiskLimitRepository,
+    RiskSnapshotRepository,
+)
 from quant_hub.domain.strategy_engine.interfaces import SignalRepository, StrategyRepository
 from quant_hub.infrastructure.cache import get_redis
 from quant_hub.infrastructure.database import get_session
@@ -117,6 +122,37 @@ def get_backtest_repository(session: DbSession) -> BacktestRepository:
 StrategyRepo = Annotated[StrategyRepository, Depends(get_strategy_repository)]
 SignalRepo = Annotated[SignalRepository, Depends(get_signal_repository)]
 BacktestRepo = Annotated[BacktestRepository, Depends(get_backtest_repository)]
+
+
+# Risk read repositories — Step 4.6 (Risk Vertical Slice). Reuse of Phase 3.4's
+# RiskLimit/PreTradeRisk repositories and Phase 3.6's RiskSnapshotRepository —
+# read-only on these endpoints (no gate evaluation, no snapshot write).
+def get_risk_limit_repository(session: DbSession) -> RiskLimitRepository:
+    return SQLAlchemyRiskLimitRepository(session)
+
+
+def get_pretrade_risk_repository(session: DbSession) -> PreTradeRiskRepository:
+    return SQLAlchemyPreTradeRiskRepository(session)
+
+
+def get_risk_snapshot_repository(session: DbSession) -> RiskSnapshotRepository:
+    return SQLAlchemyRiskSnapshotRepository(session)
+
+
+RiskLimitRepo = Annotated[RiskLimitRepository, Depends(get_risk_limit_repository)]
+PreTradeRiskRepo = Annotated[PreTradeRiskRepository, Depends(get_pretrade_risk_repository)]
+RiskSnapshotRepo = Annotated[RiskSnapshotRepository, Depends(get_risk_snapshot_repository)]
+
+
+def get_risk_service(session: DbSession) -> RiskService:
+    """The real RiskService for read-side reuse (Step 4.6): the risk limits view
+    reuses RiskService.check_limits (Doc 15 §11.5.8) to compute utilization of
+    continuous-monitoring limits against the latest snapshot — the same
+    comparison logic the monitoring path uses, not a re-derivation."""
+    return build_risk_service(session)
+
+
+RiskServiceDep = Annotated[RiskService, Depends(get_risk_service)]
 
 
 def build_risk_service(session: AsyncSession) -> RiskService:
