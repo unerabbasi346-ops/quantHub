@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from decimal import Decimal
 from uuid import UUID
 
+from quant_hub.domain.portfolio.entities import Portfolio
 from quant_hub.domain.portfolio.positions import RecordedPosition
 
 
@@ -15,17 +16,36 @@ class PortfolioRepository(ABC):
     """Persistence contract for core.portfolios — Doc 07 §Implementation Rules."""
 
     @abstractmethod
-    async def get_by_id(self, portfolio_id: UUID) -> object | None: ...
+    async def get_by_id(self, portfolio_id: UUID) -> Portfolio | None:
+        """The persisted Portfolio for `portfolio_id`, or None if absent.
+
+        Return type tightened from `object` to `Portfolio` in Step 4.3, its
+        first real consumer (GET /v1/portfolios/{id}).
+        """
+        ...
 
     @abstractmethod
-    async def list_active(self) -> list[object]: ...
+    async def list_active(self) -> list[Portfolio]:
+        """All active (non-soft-deleted) portfolios, ordered stably.
+
+        Return type tightened from `list[object]` to `list[Portfolio]` in
+        Step 4.3, its first real consumer (GET /v1/portfolios).
+        """
+        ...
 
 
 class PositionRepository(ABC):
     """Persistence contract for core.positions — Doc 07 §Implementation Rules."""
 
     @abstractmethod
-    async def get_by_portfolio(self, portfolio_id: UUID) -> list[object]: ...
+    async def get_by_portfolio(self, portfolio_id: UUID) -> list[RecordedPosition]:
+        """All positions for `portfolio_id`, ordered by asset_id.
+
+        Return type tightened from `list[object]` to `list[RecordedPosition]`
+        in Step 4.3 (the concrete impl already returns RecordedPosition; the
+        contract now says so).
+        """
+        ...
 
     @abstractmethod
     async def get_by_portfolio_and_asset(

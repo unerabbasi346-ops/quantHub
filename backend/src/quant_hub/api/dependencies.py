@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from quant_hub.application.risk.service import RiskService
 from quant_hub.domain.execution.interfaces import RiskApprovalInterface
 from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
+from quant_hub.domain.portfolio.interfaces import PortfolioRepository, PositionRepository
 from quant_hub.infrastructure.cache import get_redis
 from quant_hub.infrastructure.database import get_session
 from quant_hub.infrastructure.risk_approval_adapter import RiskApprovalAdapter
@@ -20,6 +21,10 @@ from quant_hub.infrastructure.risk_model import PositionExposureRiskModel
 from quant_hub.persistence.repositories.market_data import (
     SQLAlchemyAssetRepository,
     SQLAlchemyOHLCVRepository,
+)
+from quant_hub.persistence.repositories.portfolio import (
+    SQLAlchemyPortfolioRepository,
+    SQLAlchemyPositionRepository,
 )
 from quant_hub.persistence.repositories.risk import (
     SQLAlchemyPreTradeRiskRepository,
@@ -48,6 +53,19 @@ def get_ohlcv_repository(session: DbSession) -> OHLCVRepository:
 
 AssetRepo = Annotated[AssetRepository, Depends(get_asset_repository)]
 OHLCVRepo = Annotated[OHLCVRepository, Depends(get_ohlcv_repository)]
+
+
+# Portfolio read repositories — Step 4.3 (Portfolio Vertical Slice).
+def get_portfolio_repository(session: DbSession) -> PortfolioRepository:
+    return SQLAlchemyPortfolioRepository(session)
+
+
+def get_position_repository(session: DbSession) -> PositionRepository:
+    return SQLAlchemyPositionRepository(session)
+
+
+PortfolioRepo = Annotated[PortfolioRepository, Depends(get_portfolio_repository)]
+PositionRepo = Annotated[PositionRepository, Depends(get_position_repository)]
 
 
 def build_risk_service(session: AsyncSession) -> RiskService:

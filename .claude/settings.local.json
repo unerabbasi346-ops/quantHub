@@ -93,7 +93,22 @@
       "Bash(sleep 2)",
       "Bash(node __shot-light.mjs __TRACKED_VAR__/markets-light.png)",
       "Bash(xargs echo \"lightweight-charts refs in lock:\")",
-      "Bash(npm remove *)"
+      "Bash(npm remove *)",
+      "Bash(echo \"tsc exit: $?\")",
+      "Bash(curl -s -o /dev/null -w \"frontend /portfolio: HTTP %{http_code}\\\\n\" http://localhost:3000/portfolio)",
+      "Bash(sleep 6)",
+      "Bash(node __shot-pf.mjs __TRACKED_VAR__/portfolio-red.png bt-pf-1)",
+      "Bash(node __shot-pf.mjs __TRACKED_VAR__/portfolio-green.png)",
+      "Bash(where uv *)",
+      "Bash(uv run *)",
+      "Bash(/c/Python314/python.exe -m pip list)",
+      "Bash(/c/Users/UNITECH/AppData/Local/Programs/Python/Python312/python.exe -m pip list)",
+      "Bash(export PYTHONPATH=src)",
+      "Bash(node *)",
+      "Bash(npm uninstall *)",
+      "Bash(cd /c/Projects/QuantHub/backend)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill *)"
     ]
   },
   "hooks": {

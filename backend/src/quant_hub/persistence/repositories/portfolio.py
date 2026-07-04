@@ -9,19 +9,60 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from quant_hub.domain.portfolio.entities import Portfolio
 from quant_hub.domain.portfolio.interfaces import PortfolioRepository, PositionRepository
 from quant_hub.domain.portfolio.positions import RecordedPosition
 from quant_hub.persistence.repositories.base import BaseRepository
 
+_PORTFOLIO_COLS = (
+    "id, name, description, base_currency, portfolio_type, is_active, created_at"
+)
+
+
+def _row_to_portfolio(row: object) -> Portfolio:
+    return Portfolio(
+        id=row["id"],
+        name=row["name"],
+        description=row["description"],
+        base_currency=row["base_currency"],
+        portfolio_type=row["portfolio_type"],
+        is_active=row["is_active"],
+        created_at=row["created_at"],
+    )
+
 
 class SQLAlchemyPortfolioRepository(BaseRepository[object], PortfolioRepository):
-    """Concrete repository for core.portfolios."""
+    """Concrete repository for core.portfolios.
 
-    async def get_by_id(self, portfolio_id: UUID) -> object | None:
-        return None  # stub — not needed by the Step 3.5 loop
+    get_by_id / list_active implemented in Step 4.3 (Portfolio Vertical
+    Slice), their first real consumer — previously stubbed (not needed by the
+    Step 3.5 write loop). Raw-SQL via text(), same approach as every other
+    repository here; does not commit (caller owns the transaction).
+    """
 
-    async def list_active(self) -> list[object]:
-        return []  # stub
+    async def get_by_id(self, portfolio_id: UUID) -> Portfolio | None:
+        result = await self._session.execute(
+            text(
+                f"SELECT {_PORTFOLIO_COLS} FROM core.portfolios "
+                "WHERE id = :portfolio_id AND deleted_at IS NULL"
+            ),
+            {"portfolio_id": portfolio_id},
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else _row_to_portfolio(row)
+
+    async def list_active(self) -> list[Portfolio]:
+        # is_active = TRUE AND deleted_at IS NULL: is_active is the explicit
+        # active flag, deleted_at the soft-delete tombstone. Ordered
+        # (created_at, id) for a stable, deterministic list.
+        result = await self._session.execute(
+            text(
+                f"SELECT {_PORTFOLIO_COLS} FROM core.portfolios "
+                "WHERE is_active = TRUE AND deleted_at IS NULL "
+                "ORDER BY created_at, id"
+            )
+        )
+        return [_row_to_portfolio(row) for row in result.mappings().all()]
 
 
 _POSITION_COLS = (
