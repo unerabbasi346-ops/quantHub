@@ -185,11 +185,23 @@ class OrderIntent:
 
 @dataclass(frozen=True)
 class RecordedOrder:
-    """A persisted order — the datastore-assigned view of an OrderIntent.
+    """A persisted order — the datastore-assigned current-state view.
 
-    Returned by OrderRepository.create. Echoes the intent plus the DB-assigned
-    id, status (CREATED this step), and created_at, so a caller (and Step 3.4
-    pre-trade risk) has the governed artifact's identity without re-reading.
+    Returned by OrderRepository.create AND by the lifecycle transitions
+    (mark_validated/mark_rejected/mark_filled), so it reflects the order's
+    CURRENT state, not only its creation. Echoes the intent plus the
+    DB-assigned id, status, and created_at.
+
+    FILL OUTCOME (`filled_quantity`, `average_price`) added in Step 4.4
+    (Execution Vertical Slice), the first READ consumer of core.orders
+    (GET /v1/portfolios/{id}/orders — the blotter). They are canonical §10.7.3
+    Order Model fields already persisted (Step 1.1 schema; quantity columns
+    NUMERIC after Step 3.0): `filled_quantity` is 0 and `average_price` is None
+    until a fill lands, then set by mark_filled (§10.8.6). Additive with
+    defaults so no existing constructor (the Step 3.3/3.5 write path) breaks —
+    this closes a latent gap where a mark_filled result could not express the
+    very fill price/quantity it had just written. Judgment call flagged in the
+    Step 4.4 report.
     """
 
     id: UUID
@@ -204,6 +216,8 @@ class RecordedOrder:
     status: OrderStatus
     signal_id: UUID | None
     created_at: object  # datetime; typed loosely to avoid a datetime import in the value layer
+    filled_quantity: Decimal = Decimal("0")  # units filled so far (§10.7.3); 0 until a fill
+    average_price: Decimal | None = None      # VWAP fill price (§10.7.3); None until a fill
 
 
 @dataclass(frozen=True)

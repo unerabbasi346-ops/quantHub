@@ -11,13 +11,21 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from quant_hub.application.risk.service import RiskService
-from quant_hub.domain.execution.interfaces import RiskApprovalInterface
+from quant_hub.domain.execution.interfaces import (
+    ExecutionRepository,
+    OrderRepository,
+    RiskApprovalInterface,
+)
 from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
 from quant_hub.domain.portfolio.interfaces import PortfolioRepository, PositionRepository
 from quant_hub.infrastructure.cache import get_redis
 from quant_hub.infrastructure.database import get_session
 from quant_hub.infrastructure.risk_approval_adapter import RiskApprovalAdapter
 from quant_hub.infrastructure.risk_model import PositionExposureRiskModel
+from quant_hub.persistence.repositories.execution import (
+    SQLAlchemyExecutionRepository,
+    SQLAlchemyOrderRepository,
+)
 from quant_hub.persistence.repositories.market_data import (
     SQLAlchemyAssetRepository,
     SQLAlchemyOHLCVRepository,
@@ -66,6 +74,22 @@ def get_position_repository(session: DbSession) -> PositionRepository:
 
 PortfolioRepo = Annotated[PortfolioRepository, Depends(get_portfolio_repository)]
 PositionRepo = Annotated[PositionRepository, Depends(get_position_repository)]
+
+
+# Execution read repositories — Step 4.4 (Execution Vertical Slice). Bind the
+# domain interfaces (Order/ExecutionRepository) to their SQLAlchemy impls over
+# the request-scoped session — the same read-only reuse of Phase 3.3/3.5's real
+# repositories, no risk gate / write path involved on the read endpoints.
+def get_order_repository(session: DbSession) -> OrderRepository:
+    return SQLAlchemyOrderRepository(session)
+
+
+def get_execution_repository(session: DbSession) -> ExecutionRepository:
+    return SQLAlchemyExecutionRepository(session)
+
+
+OrderRepo = Annotated[OrderRepository, Depends(get_order_repository)]
+ExecutionRepo = Annotated[ExecutionRepository, Depends(get_execution_repository)]
 
 
 def build_risk_service(session: AsyncSession) -> RiskService:

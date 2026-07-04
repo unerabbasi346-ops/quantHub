@@ -36,10 +36,13 @@ from quant_hub.domain.execution.interfaces import (
 )
 from quant_hub.persistence.repositories.base import BaseRepository
 
-# The core.orders columns _row_to_order needs, for RETURNING on transitions.
+# The single core.orders projection every read/RETURNING uses, so the column
+# set and _row_to_order never drift. Includes the fill-outcome columns
+# (filled_quantity, average_price) surfaced to RecordedOrder in Step 4.4.
 _ORDER_COLS = (
     "id, idempotency_key, portfolio_id, strategy_id, asset_id, "
-    "order_type, side, quantity, time_in_force, status, signal_id, created_at"
+    "order_type, side, quantity, filled_quantity, average_price, "
+    "time_in_force, status, signal_id, created_at"
 )
 _NET_SCALE = Decimal("0.0001")  # core.executions.net_amount NUMERIC(20,4)
 
@@ -58,6 +61,8 @@ def _row_to_order(row: object) -> RecordedOrder:
         status=OrderStatus(row["status"]),
         signal_id=row["signal_id"],
         created_at=row["created_at"],
+        filled_quantity=row["filled_quantity"],
+        average_price=row["average_price"],
     )
 
 
@@ -87,16 +92,14 @@ class SQLAlchemyOrderRepository(BaseRepository[object], OrderRepository):
         only, S-5). Does not commit.
         """
         stmt = text(
-            """
+            f"""
             INSERT INTO core.orders
                 (idempotency_key, signal_id, portfolio_id, strategy_id, asset_id,
                  order_type, side, quantity, time_in_force)
             VALUES
                 (:idempotency_key, :signal_id, :portfolio_id, :strategy_id, :asset_id,
                  :order_type, :side, :quantity, :time_in_force)
-            RETURNING id, idempotency_key, portfolio_id, strategy_id, asset_id,
-                      order_type, side, quantity, time_in_force, status,
-                      signal_id, created_at
+            RETURNING {_ORDER_COLS}
             """
         )
         result = await self._session.execute(
@@ -117,15 +120,7 @@ class SQLAlchemyOrderRepository(BaseRepository[object], OrderRepository):
 
     async def get_by_id(self, order_id: UUID) -> RecordedOrder | None:
         result = await self._session.execute(
-            text(
-                """
-                SELECT id, idempotency_key, portfolio_id, strategy_id, asset_id,
-                       order_type, side, quantity, time_in_force, status,
-                       signal_id, created_at
-                FROM core.orders
-                WHERE id = :id
-                """
-            ),
+            text(f"SELECT {_ORDER_COLS} FROM core.orders WHERE id = :id"),
             {"id": order_id},
         )
         row = result.mappings().one_or_none()
@@ -133,30 +128,22 @@ class SQLAlchemyOrderRepository(BaseRepository[object], OrderRepository):
 
     async def get_by_idempotency_key(self, key: UUID) -> RecordedOrder | None:
         result = await self._session.execute(
-            text(
-                """
-                SELECT id, idempotency_key, portfolio_id, strategy_id, asset_id,
-                       order_type, side, quantity, time_in_force, status,
-                       signal_id, created_at
-                FROM core.orders
-                WHERE idempotency_key = :key
-                """
-            ),
+            text(f"SELECT {_ORDER_COLS} FROM core.orders WHERE idempotency_key = :key"),
             {"key": key},
         )
         row = result.mappings().one_or_none()
         return None if row is None else _row_to_order(row)
 
-    async def list_by_portfolio(self, portfolio_id: UUID) -> list[object]:
+    async def list_by_portfolio(self, portfolio_id: UUID) -> list[RecordedOrder]:
+        # Ordered (created_at, id) for a stable, deterministic blotter feed —
+        # id breaks ties when two orders share a created_at (Step 4.4).
         result = await self._session.execute(
             text(
-                """
-                SELECT id, idempotency_key, portfolio_id, strategy_id, asset_id,
-                       order_type, side, quantity, time_in_force, status,
-                       signal_id, created_at
+                f"""
+                SELECT {_ORDER_COLS}
                 FROM core.orders
                 WHERE portfolio_id = :portfolio_id
-                ORDER BY created_at
+                ORDER BY created_at, id
                 """
             ),
             {"portfolio_id": portfolio_id},
