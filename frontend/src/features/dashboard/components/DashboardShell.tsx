@@ -522,7 +522,11 @@ function StrategiesSignalsWidget({ className }: { className?: string }) {
                     {latestSignal.validation_status}
                   </Badge>
                   <p className="text-xs text-fg-muted">{fmtTime(latestSignal.ts)}</p>
-                  <p className="text-xs text-fg-muted">{signals.length} signals total</p>
+                  {/* The signals feed is capped server-side (default 100, api/v1/
+                      strategies.py) — this is the most-recent fetched window, NOT
+                      the strategy's true lifetime signal count, so we don't claim
+                      "total" (honest-count discipline, same spirit as F-9/F-18). */}
+                  <p className="text-xs text-fg-muted">{signals.length} recent signals</p>
                 </div>
               )}
             </div>

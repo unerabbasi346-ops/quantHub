@@ -47,6 +47,7 @@
 | G-8 | "Decision attribution" methodology | Performance attribution | Methodology is portfolio-specific per P-1; platform provides Brinson and Factor attribution |
 | G-9 | Factor return computation source | Attribution | External per P-1; platform consumes factor returns as input; computation is strategy/governance scope |
 | G-10 | Strategy-specific parameters (signals, models, rules) | All domains | External configurations per P-1. Platform provides contract shapes; strategy logic is outside platform scope |
+| G-AUTH-1 | Real authentication deferred; `login` is a non-gating placeholder | `(app)` route group / auth | Single-user local platform: the `login` view renders but does **not** gate access, and the `(app)` route group is not actually protected (see `frontend/src/app/(app)/layout.tsx`). Real auth (OIDC 1.0 / SAML 2.0 / JWKS per the "Identity provider" row under *Implementation Decisions Deferred*) is deferred until the platform is multi-user. Referenced by S-6 as the auth-placeholder scope decision. **Added 2026-07-04 (Phase 4 regression pass): S-6 and the frontend layout both cited "G-AUTH-1" but no entry defined it — dangling reference, now defined.** |
 
 ---
 
