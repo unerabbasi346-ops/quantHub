@@ -15,6 +15,14 @@
 # (b) using each bar's close as the step's market price instead of a live tick.
 # There is no wall-clock dependency and no randomness, so replay is
 # deterministic per P-13 / §10.3.6.
+#
+# Step 5.1 — the per-bar body (Signal -> Construction -> Sizing -> Order -> Risk
+# -> Fill -> Position) is EXTRACTED into the shared TradingCycle so the paper
+# trading runner (5.2) drives byte-identical logic (T-3 parity). This engine
+# now owns only the backtest-specific shell: loading the historical bar range,
+# building the point-in-time view per bar, recording the backtest row, and the
+# §10.3.6 reproducibility hash. The constructor is unchanged — it still accepts
+# the same collaborators and assembles the TradingCycle internally.
 from __future__ import annotations
 
 import hashlib
@@ -24,18 +32,15 @@ from uuid import UUID
 
 from quant_hub.application.execution.service import ExecutionService
 from quant_hub.application.execution.order_generation_service import OrderGenerationService
-from quant_hub.application.portfolio.construction_service import PortfolioConstructionService
-from quant_hub.application.portfolio.sizing_service import PositionSizingService
 from quant_hub.application.strategy_engine.signal_recording_service import SignalRecordingService
+from quant_hub.application.trading.cycle import TradingCycle
 from quant_hub.domain.backtesting.entities import BacktestConfig, BacktestResult
 from quant_hub.domain.backtesting.interfaces import BacktestRepository
-from quant_hub.domain.execution.entities import CurrentPosition, OrderStatus, TargetPosition
 from quant_hub.domain.market_data.entities import AssetRef
 from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
-from quant_hub.domain.portfolio.construction import PortfolioConstructor, StrategyContribution
+from quant_hub.domain.portfolio.construction import PortfolioConstructor
 from quant_hub.domain.portfolio.interfaces import PositionRepository
-from quant_hub.domain.portfolio.sizing import PositionSizer, SizingConstraints, SizingContext
-from quant_hub.domain.risk.entities import PreTradeRiskRequest
+from quant_hub.domain.portfolio.sizing import PositionSizer, SizingConstraints
 from quant_hub.domain.strategy_engine.strategy import Strategy
 from quant_hub.infrastructure.backtesting.point_in_time_view import PointInTimeMarketDataView
 
@@ -69,15 +74,17 @@ class BacktestEngine:
         self._assets = assets
         self._positions = positions
         self._backtests = backtests
-        self._signal_recorder = signal_recorder
-        self._sizer = sizer
-        self._constructor = constructor
-        self._order_gen = order_gen
-        self._execution = execution
-        self._strategy = strategy_plugin
-        # Pure orchestrators — the real Step 3.1/3.2 services, instantiated here.
-        self._sizing = PositionSizingService()
-        self._construction = PortfolioConstructionService()
+        # The shared per-bar trade cycle (Step 5.1) — the same handler the paper
+        # trading runner drives, so backtest and paper logic cannot diverge (T-3).
+        self._cycle = TradingCycle(
+            strategy=strategy_plugin,
+            signal_recorder=signal_recorder,
+            sizer=sizer,
+            constructor=constructor,
+            order_gen=order_gen,
+            execution=execution,
+            positions=positions,
+        )
 
     async def run(
         self, config: BacktestConfig, *, strategy_id: UUID, portfolio_id: UUID
@@ -99,62 +106,26 @@ class BacktestEngine:
             bars_processed += 1
             bar = all_bars[i]
             # §10.3.4 point-in-time: strategy sees only bars at/before this one.
+            # Backtest-specific inputs to the shared cycle: the clamped view and
+            # the bar close as this step's market price (no live tick).
             view = PointInTimeMarketDataView(all_bars[: i + 1], asset, config.interval)
-            signals = await self._strategy.generate_signals(view, config.strategy_config)
-
-            for signal in signals:
-                signals_generated += 1
-                recorded = await self._signal_recorder.record_signal(strategy_id, asset_id, signal)
-
-                # Step 3.2 Construction (weights) -> Step 3.1 Sizing (sizes),
-                # the real services in Doc 15 §11.3.1 order (Construction first,
-                # Sizing consumes its weight — the F-12 inversion).
-                cons = self._construction.construct_portfolio(
-                    self._constructor,
-                    [StrategyContribution(strategy_id=strategy_id, strategy_weight=Decimal("1"), signal=signal)],
-                )[0]
-                sizing = self._sizing.size_position(
-                    self._sizer,
-                    SizingContext(asset=asset, target_weight=cons.target_weight, portfolio_value=config.initial_capital),
-                    constraints,
-                )
-
-                price = bar.close  # this step's market price = the bar close (no live tick)
-                current = await self._positions.get_by_portfolio_and_asset(portfolio_id, asset_id)
-                cur_qty = current.quantity if current is not None else _ZERO
-
-                # Step 3.3 Order Generation (the real service) consumes the SIZED
-                # output (§11.3.7 -> §10.6.5). TargetPosition takes a weight, so
-                # the sized notional is expressed back as a post-sizing weight
-                # (target_notional / portfolio_value) — identity for N=1 (F-12).
-                order_target_weight = (
-                    sizing.target_notional / config.initial_capital
-                    if config.initial_capital > _ZERO else _ZERO
-                )
-                order = await self._order_gen.generate_order(
-                    target=TargetPosition(
-                        asset=asset, target_weight=order_target_weight,
-                        portfolio_value=config.initial_capital, reference_price=price,
-                    ),
-                    current=CurrentPosition(asset=asset, quantity=cur_qty),
-                    portfolio_id=portfolio_id, strategy_id=strategy_id, signal_id=recorded.id,
-                )
-                if order is None:
-                    continue  # already at target — no order this step
-
-                orders_created += 1
-                # Step 3.4 Risk gate + Step 3.5 Fill/Position (the real service).
-                request = PreTradeRiskRequest(
-                    order_id=order.id, portfolio_id=portfolio_id, strategy_id=strategy_id,
-                    asset_id=asset_id, side=order.side, quantity=order.quantity, price=price,
-                    current_quantity=cur_qty, portfolio_value=config.initial_capital, timestamp=bar.ts,
-                )
-                outcome = await self._execution.process_order(order, request, bar.ts)
-                if outcome.terminal_status is OrderStatus.FILLED:
-                    orders_filled += 1
-                    fills.append((bar.ts.isoformat(), order.side.value, str(order.quantity), str(price)))
-                else:
-                    orders_rejected += 1
+            outcome = await self._cycle.run_step(
+                view=view,
+                asset=asset,
+                asset_id=asset_id,
+                price=bar.close,
+                timestamp=bar.ts,
+                strategy_id=strategy_id,
+                portfolio_id=portfolio_id,
+                portfolio_value=config.initial_capital,
+                strategy_config=config.strategy_config,
+                constraints=constraints,
+            )
+            signals_generated += outcome.signals_generated
+            orders_created += outcome.orders_created
+            orders_filled += outcome.orders_filled
+            orders_rejected += outcome.orders_rejected
+            fills.extend(outcome.fills)
 
         # Final marks from the position Step 3.6 maintains.
         final = await self._positions.get_by_portfolio_and_asset(portfolio_id, asset_id)
