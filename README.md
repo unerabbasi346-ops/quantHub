@@ -1,65 +1,100 @@
-# Quant Hub
+# QuantHub
 
-Modular quantitative research, analytics, execution, monitoring, and portfolio platform.
+A modular, multi-strategy quantitative trading platform — built from a 25-file engineering handbook, implemented phase by phase, with every architectural decision, scope boundary, and known limitation tracked and version-controlled.
 
-## Governance
+> **Status:** Active development. Phases 0–4 complete and regression-tested. Phase 5 (paper trading) in progress. See [Project Status](#project-status) below.
 
-This repository is governed by the Quant Hub Engineering Handbook v1.0.
+---
 
-- Governing constitution: Doc 00 — Project Constitution (APPROVED & FROZEN v1.0, ratified July 2026)
-- Repository structure: Doc 04 — Repository Structure (QH-004)
-- Technology stack: Doc 03 — Technology Stack (QH-003)
-- AI agent governance: Doc 00 §14 — AI Agent Governance
+## What this is
 
-Per Doc 00 §14.11: every implementation cites governing handbook document, section, and invariant.
+QuantHub is a platform for running, testing, and monitoring quantitative trading strategies — not a single trading bot. Strategies plug into the platform through a governed interface; the platform itself handles market data ingestion, risk management, order execution, and portfolio tracking identically regardless of which strategy is running.
 
-## Repository Structure
+It's built around a strict separation of concerns: strategy logic is never coupled to platform infrastructure. A reference moving-average-crossover strategy exists purely to prove the plugin interface works end-to-end — it is explicitly not intended to be economically meaningful.
 
-Per Doc 04 — Repository Structure (QH-004):
+**This project is a learning platform, not investment advice.** Nothing here should be used to make real trading decisions. See [Disclaimer](#disclaimer).
 
-| Directory | Purpose |
-|-----------|---------|
-| `docs/` | Engineering handbook and ADRs |
-| `backend/` | Core APIs and business services |
-| `frontend/` | Dashboard UI |
-| `data/` | Data ingestion and storage logic |
-| `strategies/` | Strategy plugins (Lancaster and future) |
-| `research/` | Experimental quantitative research |
-| `ml/` | Machine learning pipelines |
-| `infrastructure/` | Deployment and DevOps |
-| `scripts/` | Automation utilities |
-| `tests/` | Unit, integration and regression tests |
-| `configs/` | Configuration files |
-| `docker/` | Containers and compose files |
-| `logs/` | Runtime logs (gitignored) |
-| `assets/` | Icons, images and branding |
-| `notebooks/` | Exploratory research only |
-| `.github/` | GitHub workflows and templates |
+---
 
-Doc 04 naming conventions: directories use `lowercase_snake_case`, Python modules use `snake_case`, classes use `PascalCase`, functions use `snake_case`, constants use `UPPER_CASE`, configuration files use `descriptive lowercase`.
+## Why it's built this way
 
-## Technology Stack
 
-Per Doc 03 — Technology Stack (QH-003):
+**Backend:** Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis
+**Frontend:** Next.js, React, TypeScript, Tailwind CSS, TanStack Query, TradingView Lightweight Charts
+**Infrastructure:** Docker, Alembic-managed migrations, pytest
 
-| Component | Choice |
-|-----------|--------|
-| Language | Python 3.12 |
-| Backend Framework | FastAPI |
-| Frontend | Next.js + React + TypeScript |
-| Styling | Tailwind CSS |
-| Database | PostgreSQL |
-| Cache | Redis |
-| ORM | SQLAlchemy |
-| Data Validation | Pydantic |
-| Containerization | Docker |
+5-layer backend architecture (Presentation -> Application -> Domain -> Infrastructure -> Persistence), with a strict rule: the domain layer defines interfaces, infrastructure implements them, and nothing outside a strategy plugin ever assumes a specific strategy's logic.
 
-## Invariant Compliance
+---
 
-Architectural invariants governing this repository (per handbook/ARCHITECTURAL_INVARIANTS.md):
+## Project Status
 
-- P-1 Strategy Independence — platform never assumes any specific trading strategy
-- P-3 Technology Independence — architecture independent of storage engines, clouds, frameworks
-- P-9 Separation of Concerns — each directory owns exactly one architectural domain
-- P-14 Security by Design — no secrets committed to version control
-- P-17 Enterprise Governance — every asset governed; governance by default
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | Repo scaffold, dependencies, DB schema, backend/frontend skeletons, fail-safe risk gate | Complete |
+| 1 | Live market data ingestion (CCXT/yfinance), validation, quality scoring, error recovery, corporate actions | Complete |
+| 2 | Strategy plugin interface, Signal contract, strategy registry, reference strategy | Complete |
+| 3A | Full trade-execution loop: Sizing -> Construction -> Order -> Risk Gate -> Fill -> Position -> P&L -> Backtest | Complete |
+| 3B | ML Engineering + Research Engineering | Deliberately deferred - no runtime consumer yet (S-7) |
+| 4 | Dashboard - live market charts, portfolio, execution blotter, strategy/signal/backtest views, risk monitoring | Complete |
+| 5 | Paper trading validation gate | In progress |
+
+Every phase above was closed with a full regression pass: complete test suite, fresh-database migration from empty, and a live end-to-end run against real ingested market data - not mocks.
+
+---
+
+## Getting started
+
+**Prerequisites:** Python 3.12+, Node.js 20+, Docker, PostgreSQL 17 (via Docker)
+
+```bash
+# Clone
+git clone https://github.com/<your-username>/quanthub.git
+cd quanthub
+
+# Start Postgres + Redis
+cd docker && docker compose up -d && cd ..
+
+# Backend
+cd backend
+pip install -e . --break-system-packages
+alembic upgrade head
+PYTHONPATH=src uvicorn quant_hub.main:app --reload
+
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev
+```
+
+Visit `http://localhost:3000` for the dashboard, `http://localhost:8000/v1/health` to confirm the backend is running.
+
+Run the test suite:
+```bash
+cd backend
+PYTHONPATH=src pytest tests/
+```
+
+---
+
+## Known limitations
+
+This project tracks every scope decision, deferred requirement, and structural gap explicitly rather than hiding them. See [`handbook/KNOWN_LIMITATIONS.md`](handbook/KNOWN_LIMITATIONS.md) for the full, honestly-maintained list.
+
+If a limitation is listed there, it's a known, deliberate, tracked gap - not an oversight.
+
+---
+
+## Disclaimer
+
+QuantHub is an educational and portfolio project. It is **not financial advice**, is **not intended for live trading with real capital**, and makes **no claim of economic validity** for any strategy included in it, including the reference implementation. Trading involves substantial risk of loss. Nothing in this repository should be construed as a recommendation to buy, sell, or hold any financial instrument.
+
+---
+
+## About
+
+Built by a solo developer as a hands-on way to learn quantitative finance, systems architecture, and professional software engineering practices - from the ground up, one reviewed and verified phase at a time.
+
+## License
+
+MIT
