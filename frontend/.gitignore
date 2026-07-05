@@ -20,3 +20,7 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+
+# Ad-hoc screenshot output (scripts/screenshot.mjs) — not committed artifacts
+/*.png
+/screenshots/
