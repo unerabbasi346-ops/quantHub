@@ -115,7 +115,22 @@
       "Bash(awk '{print $5}')",
       "Bash(xargs -r taskkill //F //PID)",
       "Bash(curl -s -o /dev/null -w \"backend: %{http_code}\\\\n\" http://localhost:8000/v1/health)",
-      "Bash(curl -s -o /dev/null -w \"frontend /strategies: %{http_code}\\\\n\" http://localhost:3000/strategies)"
+      "Bash(curl -s -o /dev/null -w \"frontend /strategies: %{http_code}\\\\n\" http://localhost:3000/strategies)",
+      "Bash(export PYTHONPATH=/c/Projects/QuantHub/backend/src)",
+      "Bash(echo \"=== BEFORE run 1 ===\")",
+      "Bash(echo \"=== BEFORE run 2 \\(stability\\) ===\")",
+      "Bash(.venv/Scripts/python.exe -m pip list)",
+      "Bash(uv sync *)",
+      "Bash(.venv/Scripts/python.exe /tmp/probe.py)",
+      "Bash(\"/c/Program Files/Docker/Docker/Docker Desktop.exe\")",
+      "Bash(echo \"=== CLI import sanity ===\")",
+      "Bash(.venv/Scripts/python.exe -c \"import runpy,sys; sys.argv=['x','--help']; runpy.run_path\\('/c/Projects/QuantHub/scripts/run_paper_session.py', run_name='__main__'\\)\")",
+      "Bash(cd /c/Projects/QuantHub)",
+      "Bash(backend/.venv/Scripts/python.exe scripts/run_paper_session.py --help)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(export PYTHONUNBUFFERED=1)",
+      "Bash(backend/.venv/Scripts/python.exe -u scripts/run_paper_session.py --symbol BTC/USDT --exchange binance --interval 1m --short-window 5 --long-window 20 --poll-seconds 4 --max-bars 1 --duration-seconds 300)",
+      "Bash(backend/.venv/Scripts/python.exe scripts/run_ingestion.py --symbol BTC/USDT --exchange binance --interval 1m --limit 60)"
     ]
   },
   "hooks": {
