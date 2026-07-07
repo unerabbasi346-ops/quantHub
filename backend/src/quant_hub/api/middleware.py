@@ -33,7 +33,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
         try:
             response = await call_next(request)
-        finally:
-            response.headers[REQUEST_ID_HEADER] = request_id
+        except Exception:
             REQUEST_ID_CTX.reset(token)
+            raise
+        response.headers[REQUEST_ID_HEADER] = request_id
+        REQUEST_ID_CTX.reset(token)
         return response
