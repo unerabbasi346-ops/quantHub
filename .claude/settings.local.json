@@ -134,7 +134,10 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/unit/test_paper_trading_runner.py -q)",
       "Bash(.venv/Scripts/python.exe -u \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Projects-QuantHub\\\\e77f1d78-6b86-4bb7-a848-db6b943a129e\\\\scratchpad\\\\verify_5_3.py\")",
       "Bash(echo \"=== CLI --help \\(import sanity\\) ===\")",
-      "Bash(PYTHONPATH=/c/Projects/QuantHub/backend/src .venv/Scripts/python.exe -m pytest -q)"
+      "Bash(PYTHONPATH=/c/Projects/QuantHub/backend/src .venv/Scripts/python.exe -m pytest -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/unit/test_graduation.py -q)",
+      "Bash(echo \"=== graduation tests ===\")",
+      "Bash(.venv/Scripts/python.exe -m pytest -q)"
     ]
   },
   "hooks": {
