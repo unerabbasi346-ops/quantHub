@@ -174,7 +174,12 @@
       "Bash(.venv/Scripts/python.exe -m uvicorn quant_hub.main:app --host 127.0.0.1 --port 8000)",
       "Bash(sleep 4)",
       "Bash(tail -20 \"/c/Users/UNITECH/AppData/Local/Temp/claude/C--Projects-QuantHub/e77f1d78-6b86-4bb7-a848-db6b943a129e/scratchpad/backend_repro.log\")",
-      "Bash(echo \"--- request ---\")"
+      "Bash(echo \"--- request ---\")",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(unset DATABASE_URL PYTHONPATH)",
+      "Bash(cat \"/c/Users/UNITECH/AppData/Local/Temp/claude/C--Projects-QuantHub/e77f1d78-6b86-4bb7-a848-db6b943a129e/scratchpad/backend_envtest.log\")",
+      "Bash(echo \"--- request \\(DATABASE_URL NOT exported, relying solely on backend/.env\\) ---\")"
     ]
   },
   "hooks": {
