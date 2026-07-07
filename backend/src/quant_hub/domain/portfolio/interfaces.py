@@ -74,3 +74,20 @@ class PositionRepository(ABC):
         (Step 3.6, §10.9.5). Does not commit (caller owns the transaction).
         """
         ...
+
+    @abstractmethod
+    async def reset_realized_pnl_today(self, portfolio_id: UUID) -> Decimal:
+        """Zero realized_pnl_today for every position in `portfolio_id` at a
+        day boundary (the F-20 daily reset), returning the SUM that was zeroed —
+        the completed day's realized P&L, for the caller to fold into a
+        lifetime figure that survives the reset.
+
+        F-20 (Step 3.6 finding): realized_pnl_today previously accumulated
+        indefinitely with no reset, silently drifting into a
+        cumulative-since-inception figure. Step 5.3 introduces this real reset,
+        driven at UTC-midnight day boundaries by the paper trading session
+        lifecycle (Doc 14 §10.5.7). Does not commit (caller owns the
+        transaction — the reset is part of the same per-bar unit of work as the
+        step that crossed the boundary).
+        """
+        ...

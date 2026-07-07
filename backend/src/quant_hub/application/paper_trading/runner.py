@@ -1,12 +1,14 @@
 # Governing specification: Doc 14 §10.5 (Paper Trading Architecture)
 #   §10.5.4 (Paper-Live Parity / Same Signal Pipeline), §10.5.5 (Real-Time
 #   Market Data Consumption), §10.5.7 (Paper Trading Monitoring — running P&L
-#   and per-bar state).
+#   and per-bar state), §10.5.8 (Paper vs Backtest Comparison), §10.5.10 (Paper
+#   Trading Artifacts).
 # Layer: Application — Doc 07 §Layers (orchestration only; no SQL, no session
 #   construction of its own — collaborators are injected).
 # Invariants: T-3 (Paper-Live Parity), P-13 (deterministic per-bar processing).
 # Scope: handbook/KNOWN_LIMITATIONS.md — Phase 5 (paper trading); F-19 (no NAV
-#   ledger); F-20 daily reset is NOT here (Step 5.3).
+#   ledger — static portfolio_value); F-20 (realized_pnl_today daily reset,
+#   RESOLVED for the paper path here).
 # Per Doc 00 §14.11
 #
 # Step 5.2 — the Continuous Paper Trading Runner: the live-market analogue of
@@ -18,18 +20,31 @@
 # the backtest drives, so paper and backtest logic cannot diverge (T-3, §10.5.4
 # "Same Signal Pipeline"). It commits per bar and keeps the governing
 # analytics.paper_trading_sessions record (Step 5.0) updated with running state.
+#
+# Step 5.3 — adds the session lifecycle pieces that build on that loop:
+#   (1) F-20 daily reset — at each UTC-midnight day boundary the runner folds
+#       the completed day's realized_pnl_today into a session-LIFETIME carry and
+#       zeroes the daily figure (PositionRepository.reset_realized_pnl_today),
+#       so the session's realized_pnl keeps accumulating correctly across days
+#       while core.positions.realized_pnl_today reflects only "today" again.
+#   (2) Paper-vs-backtest comparison (§10.5.8) — a single total-return deviation
+#       figure between the session and its linked backtest_id, computed at stop.
+#   (3) Session artifacts (§10.5.10) — the final results JSONB captures the
+#       P&L, activity, reset, and comparison figures a Step 5.4 graduation check
+#       (§10.5.9) will read.
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
 from quant_hub.application.trading.cycle import TradingCycle
+from quant_hub.domain.backtesting.interfaces import BacktestRepository
 from quant_hub.domain.market_data.entities import AssetRef
 from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
 from quant_hub.domain.paper_trading.interfaces import PaperTradingSessionRepository
@@ -59,7 +74,8 @@ SessionFactory = Callable[[], AbstractAsyncContextManager[UnitOfWork]]
 class PaperCycleContext:
     """The wired collaborators for ONE unit of work, all bound to the same
     session. `cycle` and `positions` share the same PositionRepository instance
-    so the runner can read the P&L the cycle just wrote (§10.5.7). Built by the
+    so the runner can read the P&L the cycle just wrote (§10.5.7). `backtests`
+    is read-only, used once at stop for the §10.5.8 comparison. Built by the
     injected `wire` callable — the runner constructs no repository itself."""
 
     cycle: TradingCycle
@@ -67,13 +83,41 @@ class PaperCycleContext:
     bars: OHLCVRepository
     assets: AssetRepository
     positions: PositionRepository
+    backtests: BacktestRepository
     view: MarketDataView
+
+
+@dataclass
+class _RunState:
+    """Mutable per-invocation accounting — created fresh in each run() call so
+    the runner is re-entrant. `realized_carried` (C) is the realized P&L folded
+    from all COMPLETED days; the session-lifetime realized is always C + the
+    current day's live realized_pnl_today, so it survives the F-20 daily reset.
+    `current_day` is the UTC calendar day currently open (bar-timestamp driven,
+    not wall-clock)."""
+
+    totals: dict[str, int] = field(
+        default_factory=lambda: {
+            "bars_processed": 0,
+            "signals_generated": 0,
+            "orders_created": 0,
+            "orders_filled": 0,
+            "orders_rejected": 0,
+        }
+    )
+    current_day: date | None = None
+    realized_carried: Decimal = _ZERO
+    daily_resets: int = 0
+    realized_lifetime: Decimal = _ZERO  # C + today's realized (last marked)
+    unrealized: Decimal = _ZERO  # last marked mark-to-market
+    last_bar_ts: datetime | None = None
 
 
 @dataclass(frozen=True)
 class PaperRunSummary:
-    """Terminal tally of a runner invocation — the return value the CLI prints
-    and the shape mirrored into the session's `results` JSONB (§10.5.10)."""
+    """Terminal tally of a runner invocation — the return value the CLI prints;
+    the fuller shape is mirrored into the session's `results` JSONB (§10.5.10).
+    Decimal-valued fields are stringified so the summary is JSON-clean."""
 
     session_id: UUID
     bars_processed: int
@@ -81,6 +125,11 @@ class PaperRunSummary:
     orders_created: int
     orders_filled: int
     orders_rejected: int
+    daily_resets: int
+    realized_pnl: str
+    unrealized_pnl: str
+    paper_total_return: str
+    total_return_deviation: str | None
     last_bar_ts: str | None
     stop_reason: str
 
@@ -90,55 +139,74 @@ class PaperTradingRunner:
 
     JUDGMENT CALLS (Doc 00 §14.5/§14.7 — flagged, not silently decided):
 
-    - POLLING MECHANISM (design Q1): the runner learns a new bar has arrived by
-      reading the latest bar timestamp from the governed market_data.ohlcv_bars
-      table (OHLCVRepository.get_latest_ts) — NOT by coupling to Phase 1's
-      ingestion process. A "new bar" is the max ts advancing past the last ts
-      this runner processed. This reads the same governed store §10.5.5 says
-      paper trading consumes ("real-time market data through Doc 11 governed
-      infrastructure"), needs no message bus / callback, and lets ingestion and
-      paper trading run as independent processes at independent cadences.
+    - POLLING MECHANISM (Step 5.2, design Q1): the runner learns a new bar has
+      arrived by reading the latest bar timestamp from the governed
+      market_data.ohlcv_bars table (OHLCVRepository.get_latest_ts) — NOT by
+      coupling to Phase 1's ingestion process. A "new bar" is the max ts
+      advancing past the last ts this runner processed. This reads the same
+      governed store §10.5.5 names, needs no message bus, and lets ingestion
+      and paper trading run as independent processes at independent cadences.
 
-    - PROCESS MODEL (design Q2): a single long-running asyncio poll loop, one
-      run_step per new bar — deliberately NOT a job-scheduling system
+    - PROCESS MODEL (Step 5.2, design Q2): a single long-running asyncio poll
+      loop, one run_step per new bar — deliberately NOT a job-scheduling system
       (proportionate to a solo-developer platform per S-6/S-8). Start/stop is a
       thin CLI (scripts/run_paper_session.py), mirroring run_ingestion.py.
 
     - PER-BAR TRANSACTION (unit of work): each processed bar is one fresh
-      session -> run_step -> session-runtime update -> commit, exactly the
-      "the paper runner commits per bar" boundary the Step 5.0 migration and
-      the TradingCycle docstring anticipate. This mirrors run_ingestion.py's
-      one-session-per-unit-of-work and avoids one hours-long
-      idle-in-transaction connection. Polling reads use their own short-lived
-      unit of work. The injected `wire` builds collaborators per unit of work;
-      this runner owns only the loop, the poll, and the transaction boundary.
+      session -> [day-boundary reset] -> run_step -> session-runtime update ->
+      commit, the "the paper runner commits per bar" boundary. A day-boundary
+      reset (below) is part of the SAME unit of work as the bar that crossed it,
+      so the zeroing and the new day's first step commit atomically. The
+      injected `wire` builds collaborators per unit of work; this runner owns
+      only the loop, the poll, the reset boundary, and the transaction.
 
     - LATEST-BAR-ONLY (live semantics): on each new-bar detection the runner
       processes ONLY the newest bar; it never back-fills bars that closed while
-      it was between polls. Trading a bar that already closed in the past is
-      the backtest's job (historical replay), not live paper trading's — this
-      is the T-3 boundary between the two drivers of the shared cycle.
+      it was between polls — the T-3 boundary between paper (live) and backtest
+      (historical replay).
 
-    - STARTUP WATERMARK: the watermark is seeded to the latest already-closed
-      bar at start, so a session trades only bars that ARRIVE AFTER it starts,
-      never retroactively trading the last bar that closed before it began.
+    - STARTUP WATERMARK: seeded to the latest already-closed bar at start, so a
+      session trades only bars that ARRIVE AFTER it starts.
 
-    - GAP HANDLING (design Q4): no bar yet, unregistered asset, or ts not
-      advanced -> no-op, sleep, re-poll. The loop never raises on an absent or
-      unchanged bar; a data gap affects paper trading by producing no step,
-      exactly as it would stall live trading (§10.5.5, T-3).
+    - GAP HANDLING (Step 5.2, design Q4): no bar yet, unregistered asset, or ts
+      not advanced -> no-op, sleep, re-poll. The loop never raises on an absent
+      or unchanged bar (§10.5.5, T-3).
 
-    - PORTFOLIO VALUE (F-19): a static per-step portfolio_value (the session's
-      initial_capital), identical to the backtest engine. There is no
-      authoritative NAV/cash ledger yet (F-19, Doc 15 §11.4); leverage-based
-      sizing is only as correct as this input.
+    - F-20 DAILY RESET (Step 5.3) + RESET CONVENTION: realized_pnl_today is
+      reset at a **UTC-midnight** day boundary. UTC is chosen over an
+      exchange-session boundary per the platform's existing UTC-normalization
+      convention (Doc 11 §4, Step 1.5 — all bar timestamps are UTC), and because
+      the reference instrument (crypto, BTC/USDT) trades 24/7 with no session
+      close to anchor to. The boundary is **bar-timestamp driven** (bar.ts's UTC
+      date), not wall-clock: a new bar whose UTC date exceeds the open
+      accounting day folds the completed day's realized_pnl_today into a
+      session-lifetime carry, zeroes the daily figure across the portfolio, and
+      advances last_pnl_reset_at to that day's UTC midnight — BEFORE the day's
+      first step runs. Session realized_pnl (lifetime) = carry + today's live
+      realized, so it is continuous across the reset instant.
 
-    - SESSION P&L (§10.5.7): after each step the runner marks the session's
-      realized/unrealized P&L from the position the cycle just maintained.
-      Pre-F-20 (the daily reset is Step 5.3), positions.realized_pnl_today has
-      not yet been reset, so it equals the session-lifetime realized figure;
-      Step 5.3 introduces the reset and the lifetime/daily split the Step 5.0
-      migration's realized_pnl column was sized for.
+    - F-19 INTERACTION WITH THE RESET (flagged): the daily reset touches ONLY
+      the P&L figure realized_pnl_today; it does NOT feed back into
+      portfolio_value, which stays static at initial_capital every step (F-19 —
+      no authoritative NAV/cash ledger). With a real ledger the day's realized
+      P&L would roll into equity and the next day's sizing would see a changed
+      portfolio_value; here the two are decoupled, so the reset is a pure
+      P&L-accounting reset with no equity feedback. Leverage/sizing figures
+      remain only as correct as the static initial_capital input (F-19).
+
+    - PAPER-VS-BACKTEST COMPARISON (Step 5.3, §10.5.8): a SINGLE total-return
+      deviation figure (paper_total_return - backtest_total_return), computed at
+      stop against the session's linked backtest_id. Full distribution / same-
+      period comparison stays deferred (original scoping decision). The runner
+      does NOT verify the linked backtest is for the same strategy/period — the
+      backtest_id is a caller-supplied baseline; that alignment is a §10.5.9
+      graduation-gate concern (Step 5.4). If no backtest is linked, the figure
+      is null (honest — no baseline), never fabricated.
+
+    - PORTFOLIO-WIDE P&L (§10.5.7): realized/unrealized are summed across ALL
+      the portfolio's positions, not just the traded asset — a session's P&L is
+      portfolio-wide (identical to the single-asset case for the reference
+      strategy, but correct for a multi-asset session).
     """
 
     def __init__(
@@ -165,32 +233,24 @@ class PaperTradingRunner:
         asset: AssetRef,
         interval: str,
         portfolio_value: Decimal,
+        initial_capital: Decimal,
         strategy_config: Mapping[str, object],
         constraints: SizingConstraints,
+        backtest_id: UUID | None = None,
         max_bars: int | None = None,
         max_polls: int | None = None,
         stop_event: asyncio.Event | None = None,
     ) -> PaperRunSummary:
-        """Drive the session until a stop condition, then transition it to
-        STOPPED. Stop conditions: `stop_event` set (user stop / SIGINT),
-        `max_bars` bars processed, `max_polls` poll iterations elapsed, or an
-        interrupt. `max_bars`/`max_polls` bound finite/test runs; an indefinite
-        session (§10.5.3 "indefinite sessions permitted") passes neither and
-        stops via `stop_event`.
-        """
-        totals = {
-            "bars_processed": 0,
-            "signals_generated": 0,
-            "orders_created": 0,
-            "orders_filled": 0,
-            "orders_rejected": 0,
-        }
-        last_bar_ts: datetime | None = None
+        """Drive the session until a stop condition, then finalize it (STOPPED +
+        §10.5.8 comparison + §10.5.10 artifacts). Stop conditions: `stop_event`
+        set (user stop / SIGINT), `max_bars` bars processed, `max_polls` poll
+        iterations elapsed, or an interrupt. `portfolio_value` is the per-step
+        sizing input; `initial_capital` is the return denominator — the two
+        coincide under F-19 (static equity). `backtest_id` is the §10.5.8
+        baseline (optional)."""
+        state = _RunState()
         stop_reason = "stopped"
 
-        # Resolve the asset and seed the watermark to the current latest bar,
-        # read-only. asset_id may be None (nothing ingested yet) — a valid
-        # start; the loop resolves it once a later ingestion registers the asset.
         asset_id, watermark = await self._seed(asset, interval)
 
         polls = 0
@@ -209,15 +269,13 @@ class PaperTradingRunner:
 
                 latest = await self._latest_ts(asset_id, interval) if asset_id is not None else None
 
-                # Gap / no advance -> wait and re-poll (never errors). A first
-                # bar appearing while watermark is None is NOT a gap: it falls
-                # through to processing below.
                 if latest is None or (watermark is not None and latest <= watermark):
                     await self._sleep(self._poll_interval)
                     continue
 
                 assert asset_id is not None  # implied by latest is not None
                 processed = await self._process_new_bar(
+                    state=state,
                     session_id=session_id,
                     strategy_id=strategy_id,
                     portfolio_id=portfolio_id,
@@ -227,33 +285,40 @@ class PaperTradingRunner:
                     portfolio_value=portfolio_value,
                     strategy_config=strategy_config,
                     constraints=constraints,
-                    totals=totals,
                 )
                 if processed is None:
-                    # The MAX(ts) advanced but the row could not be fetched
-                    # (e.g. deleted between the two reads) — treat as a gap.
                     await self._sleep(self._poll_interval)
                     continue
 
-                last_bar_ts = processed
                 watermark = processed
-                if max_bars is not None and totals["bars_processed"] >= max_bars:
+                if max_bars is not None and state.totals["bars_processed"] >= max_bars:
                     stop_reason = "max_bars"
                     break
         except (KeyboardInterrupt, asyncio.CancelledError):
-            # Ctrl-C during an await (or task cancellation) is a graceful stop,
-            # not a crash — fall through to the STOPPED transition below.
             stop_reason = "interrupted"
 
-        await self._mark_stopped(session_id, totals, last_bar_ts, stop_reason)
+        comparison = await self._finalize(
+            session_id=session_id,
+            backtest_id=backtest_id,
+            initial_capital=initial_capital,
+            state=state,
+            stop_reason=stop_reason,
+        )
         return PaperRunSummary(
             session_id=session_id,
-            bars_processed=totals["bars_processed"],
-            signals_generated=totals["signals_generated"],
-            orders_created=totals["orders_created"],
-            orders_filled=totals["orders_filled"],
-            orders_rejected=totals["orders_rejected"],
-            last_bar_ts=last_bar_ts.isoformat() if last_bar_ts is not None else None,
+            bars_processed=state.totals["bars_processed"],
+            signals_generated=state.totals["signals_generated"],
+            orders_created=state.totals["orders_created"],
+            orders_filled=state.totals["orders_filled"],
+            orders_rejected=state.totals["orders_rejected"],
+            daily_resets=state.daily_resets,
+            realized_pnl=str(state.realized_lifetime),
+            unrealized_pnl=str(state.unrealized),
+            paper_total_return=str(self._total_return(state, initial_capital)),
+            total_return_deviation=(
+                None if comparison is None else comparison["total_return_deviation"]
+            ),
+            last_bar_ts=state.last_bar_ts.isoformat() if state.last_bar_ts is not None else None,
             stop_reason=stop_reason,
         )
 
@@ -283,6 +348,7 @@ class PaperTradingRunner:
     async def _process_new_bar(
         self,
         *,
+        state: _RunState,
         session_id: UUID,
         strategy_id: UUID,
         portfolio_id: UUID,
@@ -292,23 +358,34 @@ class PaperTradingRunner:
         portfolio_value: Decimal,
         strategy_config: Mapping[str, object],
         constraints: SizingConstraints,
-        totals: dict[str, int],
     ) -> datetime | None:
-        """Process exactly one step against the newest bar, update the session's
-        running state, and commit — the per-bar unit of work. Returns the bar ts
-        processed, or None if the newest bar could not be fetched."""
+        """The per-bar unit of work: (optional) day-boundary reset -> one step
+        against the newest bar -> session running-state update -> commit.
+        Returns the bar ts processed, or None if the newest bar vanished."""
         async with self._session_factory() as uow:
             ctx = self._wire(uow)
             newest = await ctx.bars.get_bars(asset_id, interval, limit=1)
             if not newest:
                 return None
             bar = newest[-1]
+            bar_day = bar.ts.astimezone(timezone.utc).date()
+
+            # F-20 UTC-midnight reset (§10.5.7): a bar whose UTC date exceeds the
+            # open accounting day folds the completed day's realized into the
+            # lifetime carry and zeroes today's figure BEFORE the day's first
+            # step — all within this same committed unit of work.
+            reset_at: datetime | None = None
+            if state.current_day is not None and bar_day > state.current_day:
+                folded = await ctx.positions.reset_realized_pnl_today(portfolio_id)
+                state.realized_carried += folded
+                state.daily_resets += 1
+                reset_at = datetime(bar_day.year, bar_day.month, bar_day.day, tzinfo=timezone.utc)
+            state.current_day = bar_day
 
             # The paper step's market context is the newest bar's close + ts —
             # the live analogue of the backtest's (bar.close, bar.ts). The
-            # strategy reads history through the LIVE view (latest N bars), not a
-            # point-in-time historical slice: that view difference and this
-            # market context are the ONLY per-driver differences (§10.5.4, T-3).
+            # strategy reads history through the LIVE view: that view difference
+            # and this market context are the ONLY per-driver differences (T-3).
             outcome = await ctx.cycle.run_step(
                 view=ctx.view,
                 asset=asset,
@@ -321,57 +398,125 @@ class PaperTradingRunner:
                 strategy_config=strategy_config,
                 constraints=constraints,
             )
-            totals["bars_processed"] += 1
-            totals["signals_generated"] += outcome.signals_generated
-            totals["orders_created"] += outcome.orders_created
-            totals["orders_filled"] += outcome.orders_filled
-            totals["orders_rejected"] += outcome.orders_rejected
+            state.totals["bars_processed"] += 1
+            state.totals["signals_generated"] += outcome.signals_generated
+            state.totals["orders_created"] += outcome.orders_created
+            state.totals["orders_filled"] += outcome.orders_filled
+            state.totals["orders_rejected"] += outcome.orders_rejected
+            state.last_bar_ts = bar.ts
 
-            # §10.5.7 running state: mark-to-market P&L from the position the
-            # cycle just maintained + per-bar monitoring counters in results.
-            pos = await ctx.positions.get_by_portfolio_and_asset(portfolio_id, asset_id)
-            realized = pos.realized_pnl_today if pos is not None else _ZERO
-            unrealized = pos.unrealized_pnl if pos is not None else _ZERO
+            # §10.5.7 running state: portfolio-wide mark-to-market. Lifetime
+            # realized = carry (completed days) + today's live realized, so it is
+            # unbroken across the reset above.
+            realized_today, unrealized = await self._read_portfolio_pnl(ctx, portfolio_id)
+            state.realized_lifetime = state.realized_carried + realized_today
+            state.unrealized = unrealized
             await ctx.sessions.update_runtime(
                 session_id,
-                realized_pnl=realized,
-                unrealized_pnl=unrealized,
-                results=self._results(totals, bar.ts),
+                realized_pnl=state.realized_lifetime,
+                unrealized_pnl=state.unrealized,
+                last_pnl_reset_at=reset_at,
+                results=self._results(state),
             )
             await uow.commit()
             return bar.ts
 
-    async def _mark_stopped(
+    async def _finalize(
         self,
+        *,
         session_id: UUID,
-        totals: dict[str, int],
-        last_bar_ts: datetime | None,
+        backtest_id: UUID | None,
+        initial_capital: Decimal,
+        state: _RunState,
         stop_reason: str,
-    ) -> None:
-        """Transition the session to STOPPED with ended_at set and the final
-        results snapshot — the §10.5 lifecycle close for this step (GRADUATED /
-        the promotion gate is Step 5.4)."""
+    ) -> dict | None:
+        """Transition the session to STOPPED with ended_at, the §10.5.8
+        comparison (if a backtest is linked), and the §10.5.10 artifact snapshot
+        a Step 5.4 graduation check reads. Returns the comparison dict or None."""
         async with self._session_factory() as uow:
             ctx = self._wire(uow)
+            comparison = await self._compare_to_backtest(
+                ctx, backtest_id, initial_capital, state
+            )
             await ctx.sessions.update_runtime(
                 session_id,
                 status="STOPPED",
                 ended_at=self._now(),
-                results=self._results(totals, last_bar_ts, stop_reason=stop_reason),
+                results=self._results(
+                    state,
+                    stop_reason=stop_reason,
+                    initial_capital=initial_capital,
+                    comparison=comparison,
+                ),
             )
             await uow.commit()
+            return comparison
+
+    async def _compare_to_backtest(
+        self,
+        ctx: PaperCycleContext,
+        backtest_id: UUID | None,
+        initial_capital: Decimal,
+        state: _RunState,
+    ) -> dict | None:
+        """§10.5.8 single-number comparison: paper_total_return minus the linked
+        backtest's total_return. None if unlinked or the backtest has no
+        recorded total_return (not yet COMPLETED)."""
+        if backtest_id is None:
+            return None
+        row = await ctx.backtests.get_by_id(backtest_id)
+        if row is None or row.get("total_return") is None:
+            return None
+        backtest_return = Decimal(str(row["total_return"]))
+        paper_return = self._total_return(state, initial_capital)
+        return {
+            "backtest_id": str(backtest_id),
+            "backtest_total_return": str(backtest_return),
+            "paper_total_return": str(paper_return),
+            "total_return_deviation": str(paper_return - backtest_return),
+        }
 
     @staticmethod
+    async def _read_portfolio_pnl(
+        ctx: PaperCycleContext, portfolio_id: UUID
+    ) -> tuple[Decimal, Decimal]:
+        positions = await ctx.positions.get_by_portfolio(portfolio_id)
+        realized = sum((p.realized_pnl_today for p in positions), _ZERO)
+        unrealized = sum((p.unrealized_pnl for p in positions), _ZERO)
+        return realized, unrealized
+
+    @staticmethod
+    def _total_return(state: _RunState, initial_capital: Decimal) -> Decimal:
+        """Paper total return = session-lifetime P&L / initial_capital. Under
+        F-19 initial_capital is the static equity denominator (no NAV ledger)."""
+        if initial_capital <= _ZERO:
+            return _ZERO
+        return (state.realized_lifetime + state.unrealized) / initial_capital
+
     def _results(
-        totals: dict[str, int],
-        last_bar_ts: datetime | None,
+        self,
+        state: _RunState,
         *,
         stop_reason: str | None = None,
+        initial_capital: Decimal | None = None,
+        comparison: dict | None = None,
     ) -> dict:
-        """JSON-serializable running-state snapshot for the session `results`
-        JSONB (§10.5.7 per-bar counters, §10.5.10 artifacts)."""
-        snapshot: dict = dict(totals)
-        snapshot["last_bar_ts"] = last_bar_ts.isoformat() if last_bar_ts is not None else None
+        """JSON-serializable running-state / artifact snapshot for the session
+        `results` JSONB (§10.5.7 per-bar counters + live P&L; §10.5.10 final
+        artifacts + §10.5.8 comparison a Step 5.4 graduation check reads). All
+        Decimals are stringified — the repository json.dumps() this dict."""
+        snapshot: dict = dict(state.totals)
+        snapshot["last_bar_ts"] = (
+            state.last_bar_ts.isoformat() if state.last_bar_ts is not None else None
+        )
+        snapshot["realized_pnl"] = str(state.realized_lifetime)
+        snapshot["unrealized_pnl"] = str(state.unrealized)
+        snapshot["realized_pnl_carried"] = str(state.realized_carried)
+        snapshot["daily_resets"] = state.daily_resets
         if stop_reason is not None:
             snapshot["stop_reason"] = stop_reason
+        if initial_capital is not None:
+            snapshot["initial_capital"] = str(initial_capital)
+            snapshot["paper_total_return"] = str(self._total_return(state, initial_capital))
+        snapshot["comparison"] = comparison  # None when unlinked (§10.5.8)
         return snapshot

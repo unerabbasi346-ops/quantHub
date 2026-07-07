@@ -130,7 +130,11 @@
       "Bash(.venv/Scripts/python.exe -c ' *)",
       "Bash(export PYTHONUNBUFFERED=1)",
       "Bash(backend/.venv/Scripts/python.exe -u scripts/run_paper_session.py --symbol BTC/USDT --exchange binance --interval 1m --short-window 5 --long-window 20 --poll-seconds 4 --max-bars 1 --duration-seconds 300)",
-      "Bash(backend/.venv/Scripts/python.exe scripts/run_ingestion.py --symbol BTC/USDT --exchange binance --interval 1m --limit 60)"
+      "Bash(backend/.venv/Scripts/python.exe scripts/run_ingestion.py --symbol BTC/USDT --exchange binance --interval 1m --limit 60)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/unit/test_paper_trading_runner.py -q)",
+      "Bash(.venv/Scripts/python.exe -u \"C:\\\\Users\\\\UNITECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Projects-QuantHub\\\\e77f1d78-6b86-4bb7-a848-db6b943a129e\\\\scratchpad\\\\verify_5_3.py\")",
+      "Bash(echo \"=== CLI --help \\(import sanity\\) ===\")",
+      "Bash(PYTHONPATH=/c/Projects/QuantHub/backend/src .venv/Scripts/python.exe -m pytest -q)"
     ]
   },
   "hooks": {

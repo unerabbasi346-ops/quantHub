@@ -187,3 +187,30 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
             },
         )
         return _row_to_position(result.mappings().one())
+
+    async def reset_realized_pnl_today(self, portfolio_id: UUID) -> Decimal:
+        """F-20 daily reset — Doc 14 §10.5.7 / §10.9.5. Sum the portfolio's
+        current realized_pnl_today (the completed day's realized P&L), then zero
+        it on every position, returning that sum for the caller to fold into a
+        session-lifetime figure. Two statements (SUM then UPDATE) so the caller
+        gets the pre-reset total; the UPDATE skips already-zero rows so it does
+        not bump updated_at / sequence on untouched positions. Does not commit.
+        """
+        total = (
+            await self._session.execute(
+                text(
+                    "SELECT COALESCE(SUM(realized_pnl_today), 0) "
+                    "FROM core.positions WHERE portfolio_id = :portfolio_id"
+                ),
+                {"portfolio_id": portfolio_id},
+            )
+        ).scalar_one()
+        await self._session.execute(
+            text(
+                "UPDATE core.positions "
+                "SET realized_pnl_today = 0, updated_at = clock_timestamp() "
+                "WHERE portfolio_id = :portfolio_id AND realized_pnl_today <> 0"
+            ),
+            {"portfolio_id": portfolio_id},
+        )
+        return total

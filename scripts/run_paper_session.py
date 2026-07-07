@@ -69,6 +69,9 @@ from quant_hub.infrastructure.database import AsyncSessionLocal, engine  # noqa:
 from quant_hub.infrastructure.strategy_engine.market_data_view import (  # noqa: E402
     RepositoryBackedMarketDataView,
 )
+from quant_hub.persistence.repositories.backtesting import (  # noqa: E402
+    SQLAlchemyBacktestRepository,
+)
 from quant_hub.persistence.repositories.execution import (  # noqa: E402
     SQLAlchemyExecutionRepository,
     SQLAlchemyOrderRepository,
@@ -121,6 +124,7 @@ def _wire(session: AsyncSession) -> PaperCycleContext:
         bars=bars,
         assets=assets,
         positions=positions,
+        backtests=SQLAlchemyBacktestRepository(session),
         view=RepositoryBackedMarketDataView(assets, bars, ticks),
     )
 
@@ -163,10 +167,11 @@ async def _ensure_paper_portfolio(session: AsyncSession, name: str) -> UUID:
 
 async def _bootstrap(
     symbol: str, exchange: str, interval: str, short_window: int, long_window: int,
-    initial_capital: Decimal,
+    initial_capital: Decimal, backtest_id: UUID | None,
 ) -> tuple[UUID, UUID, UUID, dict]:
     """Register the strategy, ensure the PAPER portfolio, and open the RUNNING
-    session record — all in one committed unit of work. Returns
+    session record (linking backtest_id as the §10.5.8 comparison baseline if
+    given) — all in one committed unit of work. Returns
     (session_id, strategy_id, portfolio_id, strategy_config)."""
     strategy_config = {
         "symbol": symbol,
@@ -196,7 +201,8 @@ async def _bootstrap(
             name=f"paper {symbol}@{exchange} {interval}",
             config=strategy_config,
             initial_capital=initial_capital,
-            description="Step 5.2 continuous paper trading session",
+            description="Step 5.2/5.3 continuous paper trading session",
+            backtest_id=backtest_id,
         )
         await session.commit()
     return session_id, strategy_id, portfolio_id, strategy_config
@@ -204,12 +210,13 @@ async def _bootstrap(
 
 async def run(args: argparse.Namespace) -> None:
     initial_capital = Decimal(str(args.initial_capital))
+    backtest_id = UUID(args.backtest_id) if args.backtest_id else None
     session_id, strategy_id, portfolio_id, strategy_config = await _bootstrap(
         args.symbol, args.exchange, args.interval,
-        args.short_window, args.long_window, initial_capital,
+        args.short_window, args.long_window, initial_capital, backtest_id,
     )
     print(f"session started: id={session_id} strategy_id={strategy_id} portfolio_id={portfolio_id}")
-    print(f"config: {strategy_config} initial_capital={initial_capital}")
+    print(f"config: {strategy_config} initial_capital={initial_capital} backtest_id={backtest_id}")
 
     # Graceful stop: SIGINT/SIGTERM set an asyncio.Event so the runner closes
     # the session (STOPPED + ended_at) rather than dying mid-bar. Windows'
@@ -240,8 +247,10 @@ async def run(args: argparse.Namespace) -> None:
             asset=asset,
             interval=args.interval,
             portfolio_value=initial_capital,
+            initial_capital=initial_capital,
             strategy_config=strategy_config,
             constraints=SizingConstraints(max_position_pct=Decimal(str(args.max_position_pct))),
+            backtest_id=backtest_id,
             max_bars=args.max_bars,
             stop_event=stop_event,
         )
@@ -252,7 +261,11 @@ async def run(args: argparse.Namespace) -> None:
         f"session stopped: id={summary.session_id} reason={summary.stop_reason} "
         f"bars_processed={summary.bars_processed} signals={summary.signals_generated} "
         f"orders_created={summary.orders_created} filled={summary.orders_filled} "
-        f"rejected={summary.orders_rejected} last_bar_ts={summary.last_bar_ts}"
+        f"rejected={summary.orders_rejected} daily_resets={summary.daily_resets} "
+        f"realized_pnl={summary.realized_pnl} unrealized_pnl={summary.unrealized_pnl} "
+        f"paper_total_return={summary.paper_total_return} "
+        f"total_return_deviation={summary.total_return_deviation} "
+        f"last_bar_ts={summary.last_bar_ts}"
     )
 
 
@@ -273,6 +286,10 @@ def main() -> None:
     parser.add_argument(
         "--duration-seconds", type=float, default=None,
         help="stop after this many wall-clock seconds (default: run until stopped)",
+    )
+    parser.add_argument(
+        "--backtest-id", default=None,
+        help="link a backtest as the §10.5.8 paper-vs-backtest comparison baseline",
     )
     asyncio.run(run(parser.parse_args()))
 
