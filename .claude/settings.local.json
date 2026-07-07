@@ -179,7 +179,12 @@
       "Bash(echo \"exit code: $?\")",
       "Bash(unset DATABASE_URL PYTHONPATH)",
       "Bash(cat \"/c/Users/UNITECH/AppData/Local/Temp/claude/C--Projects-QuantHub/e77f1d78-6b86-4bb7-a848-db6b943a129e/scratchpad/backend_envtest.log\")",
-      "Bash(echo \"--- request \\(DATABASE_URL NOT exported, relying solely on backend/.env\\) ---\")"
+      "Bash(echo \"--- request \\(DATABASE_URL NOT exported, relying solely on backend/.env\\) ---\")",
+      "Bash(.venv/Scripts/python.exe -m pip install -e .)",
+      "Bash(uv --version)",
+      "Bash(uv pip *)",
+      "Bash(unset PYTHONPATH DATABASE_URL)",
+      "Bash(.venv/Scripts/python.exe -c \"import quant_hub; print\\('quant_hub importable at:', quant_hub.__file__\\)\")"
     ]
   },
   "hooks": {
