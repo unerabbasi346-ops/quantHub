@@ -16,6 +16,10 @@ export interface Portfolio {
   base_currency: string
   portfolio_type: string
   is_active: boolean
+  // Operator-set capital figure (migration a7d2e1f04b93). Null when never
+  // configured. Display/config only — has NO backing NAV ledger and does not
+  // feed leverage/risk math (F-19 remains open).
+  configured_capital: string | null
 }
 
 export interface Position {

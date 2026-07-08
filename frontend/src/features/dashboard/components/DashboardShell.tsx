@@ -1,34 +1,28 @@
 // Governing specification: Doc 06 — UI/UX Design System (QH-006 v1.0)
-//   §Layout: "responsive grid, modular widgets"; §Dashboards: widgets for
-//   "portfolio, positions, orders, signals, watchlists, risk metrics".
-// Doc 08 — Frontend Architecture (QH-008 v1.0)
-//   §Architecture: the dashboard COMPOSES presentation from the shared design
-//   system + the five vertical slices' feature hooks — it does NOT reimplement
-//   any data logic (this is assembly, Step 4.7); §State Management: TanStack Query.
+//   §Layout: "responsive grid, modular widgets"; §Dashboards.
+// Doc 08 — Frontend Architecture (QH-008 v1.0) §Architecture: the dashboard
+//   COMPOSES the five slices' hooks — no data logic is reimplemented here.
 // Per Doc 00 §14.11
 //
-// SCOPE (S-6): FIXED widget layout — customizable/draggable widgets are
-// deferred. This is a responsive CSS grid of modular Card widgets, not a
-// user-arrangeable dashboard.
-//
-// JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged): the portfolio-scoped widgets
-// (summary, executions, risk) follow ONE active portfolio — the first active
-// portfolio (portfolios[0]), the same "default to the first item" convention
-// every other shell uses (MarketsShell's assets[0], etc.). A portfolio switcher
-// on the dashboard would be a new interaction, not assembly, so it is deferred;
-// the active portfolio's name is shown in the header so the context is explicit,
-// never hidden. Markets and strategies widgets are global (not portfolio-scoped).
+// REDESIGN (owner push): a top KPI strip anchors the page; primary widgets
+// (portfolio, executions) read as ELEVATED, secondary ones (risk, watchlist)
+// flatter — a real visual hierarchy. The watchlist gains crypto icons + inline
+// sparklines. Data logic is unchanged (assembly only, S-6 fixed layout).
 'use client'
 
+import { LayoutDashboard } from 'lucide-react'
 import {
   Badge,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
+  CryptoIcon,
   EmptyState,
   ErrorState,
-  LoadingState,
+  PageHeader,
+  Sparkline,
+  StatCard,
   Table,
   TableBody,
   TableCell,
@@ -36,11 +30,9 @@ import {
   TableHeader,
   TableRow,
   pnlBadgeVariant,
+  type BadgeVariant,
 } from '@/components/ui'
-import type { BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-// Reuse the REAL feature hooks/types from all five vertical slices — no new
-// data logic is introduced here (Doc 08 §Architecture; Step 4.7 = assembly).
 import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio } from '@/features/portfolio/types'
 import { useOrders } from '@/features/execution/hooks/useExecution'
@@ -50,327 +42,110 @@ import { useStrategies, useSignals } from '@/features/strategies/hooks/useStrate
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
 import type { Asset } from '@/features/markets/types'
 
-// ── display formatting (Doc 06 §Data Visualization: consistent formatting) ──
-// The authoritative precise values are the API's Decimal strings; these helpers
-// are for readable presentation only — nothing downstream consumes them.
-function fmtMoney(value: string | null): string {
-  if (value == null) return '—'
-  return Number.parseFloat(value).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-}
-
-function fmtSignedMoney(value: string): string {
-  const n = Number.parseFloat(value)
-  const sign = n > 0 ? '+' : ''
-  return sign + fmtMoney(value)
-}
-
-function fmtQty(value: string): string {
-  return Number.parseFloat(value).toLocaleString(undefined, {
-    maximumFractionDigits: 8,
-  })
-}
-
-// Leverage keeps fine precision (matches the Risk slice's fmtLeverage) so a
-// small-but-nonzero ratio like 0.000252 is NOT rounded to a misleading 0.00.
-function fmtLeverage(value: string): string {
-  return `${Number.parseFloat(value).toLocaleString(undefined, { maximumFractionDigits: 6 })}×`
-}
-
-function fmtTime(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-// A small labelled metric, reused across the summary widgets (Doc 06
-// §Components — consistent metric presentation).
-function Stat({ label, value, variant }: { label: string; value: string; variant?: BadgeVariant }) {
-  const tone =
-    variant === 'profit'
-      ? 'text-profit'
-      : variant === 'risk'
-        ? 'text-risk'
-        : 'text-fg'
-  return (
-    <div>
-      <div className="text-xs uppercase tracking-wide text-fg-muted">{label}</div>
-      <div className={cn('mt-0.5 text-lg font-semibold tabular-nums', tone)}>{value}</div>
-    </div>
-  )
-}
+const fmtMoney = (v: string | null) =>
+  v == null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtSigned = (v: number) => (v > 0 ? '+' : '') + fmtMoney(String(v))
+const fmtQty = (v: string) => Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 8 })
+const fmtLeverage = (v: string) => `${Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 6 })}×`
+const fmtTime = (iso: string | null) =>
+  !iso ? '—' : new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 export function DashboardShell() {
   const portfoliosQuery = usePortfolios()
   const portfolios = portfoliosQuery.data ?? []
-  // Default to the first active portfolio (see JUDGMENT CALL header note).
   const activePortfolio: Portfolio | null = portfolios[0] ?? null
   const portfolioId = activePortfolio?.id ?? ''
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-fg">Dashboard</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          Live overview across markets, portfolio, execution, strategies, and risk
-          {activePortfolio && (
-            <>
-              {' '}
-              — portfolio <span className="font-medium text-fg">{activePortfolio.name}</span>
-            </>
-          )}
-          .
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        icon={<LayoutDashboard size={18} />}
+        title="Dashboard"
+        subtitle={
+          activePortfolio ? (
+            <>Live overview across markets, portfolio, execution, strategies & risk — portfolio <span className="font-medium text-fg">{activePortfolio.name}</span>.</>
+          ) : (
+            'Live overview across markets, portfolio, execution, strategies & risk.'
+          )
+        }
+      />
 
-      {portfoliosQuery.isLoading && (
-        <Card>
-          <CardContent>
-            <LoadingState label="Loading portfolios…" />
-          </CardContent>
-        </Card>
-      )}
+      {portfoliosQuery.isLoading && <div className="skeleton h-24 w-full" />}
       {portfoliosQuery.isError && (
-        <Card>
-          <CardContent>
-            <ErrorState
-              description="Could not load portfolios."
-              onRetry={() => portfoliosQuery.refetch()}
-            />
-          </CardContent>
-        </Card>
+        <ErrorState description="Could not load portfolios." onRetry={() => portfoliosQuery.refetch()} />
       )}
       {portfoliosQuery.isSuccess && portfolios.length === 0 && (
-        <Card>
-          <CardContent>
-            <EmptyState
-              title="No portfolios"
-              description="No portfolios exist yet — nothing to summarize."
-            />
-          </CardContent>
-        </Card>
+        <EmptyState icon={<LayoutDashboard size={20} />} title="No portfolios" description="No portfolios exist yet — nothing to summarize." />
       )}
 
-      {/* Fixed responsive grid of modular widgets (Doc 06 §Layout / §Dashboards;
-          draggable arrangement deferred per S-6). */}
       {portfoliosQuery.isSuccess && activePortfolio && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <PortfolioSummaryWidget portfolioId={portfolioId} className="lg:col-span-2" />
-          <RiskSnapshotWidget portfolioId={portfolioId} />
-          <RecentExecutionsWidget portfolioId={portfolioId} className="lg:col-span-2" />
-          <MarketsWatchlistWidget />
-          <StrategiesSignalsWidget className="lg:col-span-3" />
-        </div>
+        <>
+          <KpiStrip portfolioId={portfolioId} />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <PortfolioSummaryWidget portfolioId={portfolioId} className="lg:col-span-2" />
+            <RiskSnapshotWidget portfolioId={portfolioId} />
+            <RecentExecutionsWidget portfolioId={portfolioId} className="lg:col-span-2" />
+            <MarketsWatchlistWidget />
+            <StrategiesSignalsWidget className="lg:col-span-3" />
+          </div>
+        </>
       )}
     </div>
   )
 }
 
-// ── Widget: portfolio summary (positions + P&L) — Doc 06 §Dashboards ────────
-function PortfolioSummaryWidget({
-  portfolioId,
-  className,
-}: {
-  portfolioId: string
-  className?: string
-}) {
-  const query = usePositions(portfolioId)
-  const positions = query.data ?? []
-  const open = positions.filter((p) => !p.is_closed)
+function KpiStrip({ portfolioId }: { portfolioId: string }) {
+  const positionsQuery = usePositions(portfolioId)
+  const riskQuery = useRiskSnapshot(portfolioId)
+  const open = (positionsQuery.data ?? []).filter((p) => !p.is_closed)
+  const unrealized = open.reduce((s, p) => s + Number.parseFloat(p.unrealized_pnl), 0)
+  const realized = open.reduce((s, p) => s + Number.parseFloat(p.realized_pnl_today), 0)
+  const snap = riskQuery.data
 
-  // Aggregate P&L from the real position rows (parse the Decimal strings only
-  // for the readable total; the per-row strings stay authoritative).
-  const totalUnrealized = open.reduce((s, p) => s + Number.parseFloat(p.unrealized_pnl), 0)
-  const totalRealizedToday = open.reduce(
-    (s, p) => s + Number.parseFloat(p.realized_pnl_today),
-    0,
-  )
-  const topPositions = [...open]
-    .sort((a, b) => a.sequence_number - b.sequence_number)
-    .slice(0, 5)
+  if (positionsQuery.isLoading) return <div className="grid grid-cols-2 gap-4 sm:grid-cols-4"><div className="skeleton h-20" /><div className="skeleton h-20" /><div className="skeleton h-20" /><div className="skeleton h-20" /></div>
 
   return (
-    <Card className={className}>
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <StatCard label="Unrealized P&L" value={fmtSigned(unrealized)} tone={unrealized >= 0 ? 'profit' : 'risk'} />
+      <StatCard label="Realized today" value={fmtSigned(realized)} tone={realized >= 0 ? 'profit' : 'risk'} />
+      <StatCard label="Gross exposure" value={snap ? fmtMoney(snap.gross_exposure) : '—'} hint={snap ? `lev ${fmtLeverage(snap.gross_leverage)}` : undefined} />
+      <StatCard label="Open positions" value={open.length} />
+    </div>
+  )
+}
+
+function PortfolioSummaryWidget({ portfolioId, className }: { portfolioId: string; className?: string }) {
+  const query = usePositions(portfolioId)
+  const open = (query.data ?? []).filter((p) => !p.is_closed)
+  const top = [...open].sort((a, b) => a.sequence_number - b.sequence_number).slice(0, 5)
+
+  return (
+    <Card elevation="elevated" className={className}>
       <CardHeader>
         <CardTitle>Portfolio summary</CardTitle>
         {query.isSuccess && <Badge variant="neutral">{open.length} open</Badge>}
       </CardHeader>
-      <CardContent className="space-y-4">
-        {query.isLoading && <LoadingState label="Loading positions…" />}
-        {query.isError && (
-          <ErrorState description="Could not load positions." onRetry={() => query.refetch()} />
-        )}
-        {query.isSuccess && open.length === 0 && (
-          <EmptyState title="No open positions" description="This portfolio holds no open positions." />
-        )}
-        {query.isSuccess && open.length > 0 && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              <Stat
-                label="Unrealized P&L"
-                value={fmtSignedMoney(totalUnrealized.toString())}
-                variant={pnlBadgeVariant(totalUnrealized)}
-              />
-              <Stat
-                label="Realized today"
-                value={fmtSignedMoney(totalRealizedToday.toString())}
-                variant={pnlBadgeVariant(totalRealizedToday)}
-              />
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Symbol</TableHead>
-                  <TableHead>Qty</TableHead>
-                  <TableHead>Market value</TableHead>
-                  <TableHead>Unrealized</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {topPositions.map((p) => {
-                  const pnl = Number.parseFloat(p.unrealized_pnl)
-                  return (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium text-fg">{p.symbol ?? '—'}</TableCell>
-                      <TableCell numeric>{fmtQty(p.quantity)}</TableCell>
-                      <TableCell numeric>{fmtMoney(p.market_value)}</TableCell>
-                      <TableCell numeric>
-                        <Badge variant={pnlBadgeVariant(pnl)}>{fmtSignedMoney(p.unrealized_pnl)}</Badge>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ── Widget: risk snapshot (exposure/leverage + honest deferred F-18) ────────
-function RiskSnapshotWidget({ portfolioId }: { portfolioId: string }) {
-  const query = useRiskSnapshot(portfolioId)
-  const snapshot = query.data ?? null
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Risk snapshot</CardTitle>
-        {snapshot && snapshot.breaches.length > 0 && (
-          <Badge variant="risk">{snapshot.breaches.length} breach</Badge>
-        )}
-        {snapshot && snapshot.breaches.length === 0 && <Badge variant="profit">OK</Badge>}
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {query.isLoading && <LoadingState label="Loading risk snapshot…" />}
-        {query.isError && (
-          <ErrorState description="Could not load risk snapshot." onRetry={() => query.refetch()} />
-        )}
-        {query.isSuccess && !snapshot && (
-          <EmptyState
-            title="No snapshot"
-            description="No risk snapshot has been computed for this portfolio yet."
-          />
-        )}
-        {snapshot && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              <Stat label="Gross exposure" value={fmtMoney(snapshot.gross_exposure)} />
-              <Stat label="Net exposure" value={fmtMoney(snapshot.net_exposure)} />
-              <Stat label="Gross leverage" value={fmtLeverage(snapshot.gross_leverage)} />
-              <Stat label="Net leverage" value={fmtLeverage(snapshot.net_leverage)} />
-            </div>
-            {/* Honest F-18 representation: the deferred §11.5.3 metrics are NAMED
-                as not-yet-computed, never fabricated as a real 0. */}
-            <div>
-              <div className="text-xs uppercase tracking-wide text-fg-muted">
-                Deferred metrics (F-18)
-              </div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {snapshot.deferred_metrics.map((m) => (
-                  <Badge key={m.name} variant="warning" title={m.reason}>
-                    {m.name}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            <p className="text-xs text-fg-muted">As of {fmtTime(snapshot.snapshot_at)}</p>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ── Widget: recent executions (order blotter excerpt) — Doc 06 §Dashboards ──
-function orderStatusVariant(status: Order['status']): BadgeVariant {
-  if (status === 'FILLED') return 'profit'
-  if (status === 'REJECTED') return 'risk'
-  return 'info' // CREATED / VALIDATED
-}
-
-function RecentExecutionsWidget({
-  portfolioId,
-  className,
-}: {
-  portfolioId: string
-  className?: string
-}) {
-  const query = useOrders(portfolioId)
-  const orders = query.data ?? []
-  // Most recent first — this is a blotter EXCERPT (Doc 06 §Dashboards "orders");
-  // the full blotter lives in the Execution slice.
-  const recent = [...orders]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 6)
-
-  return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle>Recent executions</CardTitle>
-        {query.isSuccess && <Badge variant="neutral">{orders.length} orders</Badge>}
-      </CardHeader>
       <CardContent>
-        {query.isLoading && <LoadingState label="Loading orders…" />}
-        {query.isError && (
-          <ErrorState description="Could not load orders." onRetry={() => query.refetch()} />
-        )}
-        {query.isSuccess && orders.length === 0 && (
-          <EmptyState title="No orders" description="No orders have been placed for this portfolio." />
-        )}
-        {query.isSuccess && recent.length > 0 && (
+        {query.isLoading && <div className="skeleton h-32 w-full" />}
+        {query.isError && <ErrorState description="Could not load positions." onRetry={() => query.refetch()} />}
+        {query.isSuccess && open.length === 0 && <EmptyState title="No open positions" description="This portfolio holds no open positions." />}
+        {query.isSuccess && open.length > 0 && (
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Side</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Avg price</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
+              <TableRow><TableHead>Symbol</TableHead><TableHead>Qty</TableHead><TableHead>Market value</TableHead><TableHead>Unrealized</TableHead></TableRow>
             </TableHeader>
             <TableBody>
-              {recent.map((o) => (
-                <TableRow key={o.id}>
-                  <TableCell>{fmtTime(o.created_at)}</TableCell>
-                  <TableCell className="font-medium text-fg">{o.symbol ?? '—'}</TableCell>
+              {top.map((p) => (
+                <TableRow key={p.id}>
                   <TableCell>
-                    <Badge variant="neutral">{o.side}</Badge>
+                    <div className="flex items-center gap-2">
+                      <CryptoIcon symbol={p.symbol ?? '?'} size={20} />
+                      <span className="font-medium text-fg">{p.symbol ?? '—'}</span>
+                    </div>
                   </TableCell>
-                  <TableCell numeric>{fmtQty(o.quantity)}</TableCell>
-                  <TableCell numeric>{fmtMoney(o.average_price)}</TableCell>
-                  <TableCell>
-                    <Badge variant={orderStatusVariant(o.status)}>{o.status}</Badge>
-                  </TableCell>
+                  <TableCell numeric>{fmtQty(p.quantity)}</TableCell>
+                  <TableCell numeric>{fmtMoney(p.market_value)}</TableCell>
+                  <TableCell numeric><Badge variant={pnlBadgeVariant(Number.parseFloat(p.unrealized_pnl))}>{fmtSigned(Number.parseFloat(p.unrealized_pnl))}</Badge></TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -381,152 +156,183 @@ function RecentExecutionsWidget({
   )
 }
 
-// ── Widget: markets watchlist — Doc 06 §Dashboards "watchlists" ─────────────
-function MarketsWatchlistWidget() {
-  const query = useAssets()
-  const assets = query.data ?? []
-
+function RiskSnapshotWidget({ portfolioId }: { portfolioId: string }) {
+  const query = useRiskSnapshot(portfolioId)
+  const snap = query.data ?? null
   return (
-    <Card>
+    <Card elevation="flat">
       <CardHeader>
-        <CardTitle>Watchlist</CardTitle>
-        {query.isSuccess && <Badge variant="neutral">{assets.length}</Badge>}
+        <CardTitle>Risk snapshot</CardTitle>
+        {snap && (snap.breaches.length > 0 ? <Badge variant="risk">{snap.breaches.length} breach</Badge> : <Badge variant="profit">OK</Badge>)}
       </CardHeader>
-      <CardContent className="p-2">
-        {query.isLoading && <LoadingState label="Loading assets…" />}
-        {query.isError && (
-          <ErrorState description="Could not load assets." onRetry={() => query.refetch()} />
+      <CardContent className="space-y-4">
+        {query.isLoading && <div className="skeleton h-28 w-full" />}
+        {query.isError && <ErrorState description="Could not load risk snapshot." onRetry={() => query.refetch()} />}
+        {query.isSuccess && !snap && <EmptyState title="No snapshot" description="No risk snapshot computed yet." />}
+        {snap && (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <div><div className="text-[11px] uppercase tracking-wide text-fg-subtle">Gross exp.</div><div className="mt-0.5 font-mono text-lg font-semibold tabular-nums text-fg">{fmtMoney(snap.gross_exposure)}</div></div>
+              <div><div className="text-[11px] uppercase tracking-wide text-fg-subtle">Gross lev.</div><div className="mt-0.5 font-mono text-lg font-semibold tabular-nums text-fg">{fmtLeverage(snap.gross_leverage)}</div></div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-fg-subtle">Deferred (F-18)</div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {snap.deferred_metrics.map((m) => (<Badge key={m.name} variant="warning" title={m.reason}>{m.name}</Badge>))}
+              </div>
+            </div>
+            <p className="text-xs text-fg-subtle">As of {fmtTime(snap.snapshot_at)}</p>
+          </>
         )}
-        {query.isSuccess && assets.length === 0 && (
-          <EmptyState title="No assets" description="No tradable assets are registered." />
-        )}
-        {query.isSuccess &&
-          assets.map((asset) => <WatchlistRow key={asset.id} asset={asset} />)}
       </CardContent>
     </Card>
   )
 }
 
-// One watchlist row owns its own bars query (each asset = its own component, so
-// the hook is called unconditionally). Reuses the Markets slice's 1h price path.
+function orderStatusVariant(status: Order['status']): BadgeVariant {
+  if (status === 'FILLED') return 'profit'
+  if (status === 'REJECTED') return 'risk'
+  return 'info'
+}
+
+function RecentExecutionsWidget({ portfolioId, className }: { portfolioId: string; className?: string }) {
+  const query = useOrders(portfolioId)
+  const recent = [...(query.data ?? [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 6)
+  return (
+    <Card elevation="elevated" className={className}>
+      <CardHeader>
+        <CardTitle>Recent executions</CardTitle>
+        {query.isSuccess && <Badge variant="neutral">{(query.data ?? []).length} orders</Badge>}
+      </CardHeader>
+      <CardContent>
+        {query.isLoading && <div className="skeleton h-32 w-full" />}
+        {query.isError && <ErrorState description="Could not load orders." onRetry={() => query.refetch()} />}
+        {query.isSuccess && recent.length === 0 && <EmptyState title="No orders" description="No orders placed for this portfolio." />}
+        {query.isSuccess && recent.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead>Time</TableHead><TableHead>Symbol</TableHead><TableHead>Side</TableHead><TableHead>Qty</TableHead><TableHead>Avg price</TableHead><TableHead>Status</TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {recent.map((o) => (
+                <TableRow key={o.id}>
+                  <TableCell className="whitespace-nowrap text-fg-muted">{fmtTime(o.created_at)}</TableCell>
+                  <TableCell className="font-medium text-fg">{o.symbol ?? '—'}</TableCell>
+                  <TableCell><span className={cn('font-medium', o.side === 'BUY' ? 'text-profit' : 'text-risk')}>{o.side}</span></TableCell>
+                  <TableCell numeric>{fmtQty(o.quantity)}</TableCell>
+                  <TableCell numeric>{fmtMoney(o.average_price)}</TableCell>
+                  <TableCell><Badge variant={orderStatusVariant(o.status)}>{o.status}</Badge></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function MarketsWatchlistWidget() {
+  const query = useAssets()
+  const assets = query.data ?? []
+  return (
+    <Card elevation="flat">
+      <CardHeader>
+        <CardTitle>Watchlist</CardTitle>
+        {query.isSuccess && <Badge variant="neutral">{assets.length}</Badge>}
+      </CardHeader>
+      <CardContent className="space-y-1 p-2">
+        {query.isLoading && <div className="skeleton h-28 w-full" />}
+        {query.isError && <ErrorState description="Could not load assets." onRetry={() => query.refetch()} />}
+        {query.isSuccess && assets.length === 0 && <EmptyState title="No assets" description="No tradable assets registered." />}
+        {query.isSuccess && assets.map((asset) => <WatchlistRow key={asset.id} asset={asset} />)}
+      </CardContent>
+    </Card>
+  )
+}
+
 function WatchlistRow({ asset }: { asset: Asset }) {
   const barsQuery = useBars(asset.id, '1h')
   const bars = barsQuery.data ?? []
-  const last = bars.length > 0 ? bars[bars.length - 1] : null
-  const prev = bars.length > 1 ? bars[bars.length - 2] : null
-  const change =
-    last && prev ? Number.parseFloat(last.close) - Number.parseFloat(prev.close) : null
-  const changePct =
-    change != null && prev ? (change / Number.parseFloat(prev.close)) * 100 : null
+  const closes = bars.slice(-24).map((b) => Number.parseFloat(b.close))
+  const last = bars.at(-1)
+  const prev = bars.at(-2)
+  const change = last && prev ? Number.parseFloat(last.close) - Number.parseFloat(prev.close) : null
+  const changePct = change != null && prev ? (change / Number.parseFloat(prev.close)) * 100 : null
 
   return (
-    <div className="flex items-center justify-between rounded-md px-3 py-2">
-      <div>
-        <div className="text-sm font-medium text-fg">{asset.symbol}</div>
-        <div className="text-xs uppercase text-fg-muted">{asset.exchange}</div>
+    <div className="flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-surface-hover/50">
+      <CryptoIcon symbol={asset.symbol} size={24} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-fg">{asset.symbol}</div>
+        <div className="text-[11px] uppercase text-fg-subtle">{asset.exchange}</div>
       </div>
+      {closes.length > 1 && <Sparkline data={closes} width={56} height={22} />}
       <div className="text-right">
-        {barsQuery.isLoading && <span className="text-xs text-fg-muted">…</span>}
-        {barsQuery.isSuccess && !last && <span className="text-xs text-fg-muted">no bars</span>}
-        {last && (
+        {last ? (
           <>
-            <div className="text-sm font-semibold tabular-nums text-fg">{fmtMoney(last.close)}</div>
-            {change != null && changePct != null && (
-              <Badge variant={pnlBadgeVariant(change)}>
-                {change >= 0 ? '+' : ''}
-                {changePct.toFixed(2)}%
-              </Badge>
+            <div className="font-mono text-sm font-semibold tabular-nums text-fg">{fmtMoney(last.close)}</div>
+            {changePct != null && (
+              <div className={cn('font-mono text-[11px] tabular-nums', change! >= 0 ? 'text-profit' : 'text-risk')}>
+                {change! >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+              </div>
             )}
           </>
-        )}
+        ) : <span className="text-xs text-fg-subtle">…</span>}
       </div>
     </div>
   )
 }
 
-// ── Widget: strategies + signals — Doc 06 §Dashboards "signals" ─────────────
 function StrategiesSignalsWidget({ className }: { className?: string }) {
   const query = useStrategies()
   const strategies = query.data ?? []
-  // Latest signal is shown for the first strategy as a live sample of the
-  // §10.3 signal stream (the full per-strategy view lives in the Strategies slice).
-  const firstStrategyId = strategies[0]?.id ?? ''
-  const signalsQuery = useSignals(firstStrategyId)
+  const firstId = strategies[0]?.id ?? ''
+  const signalsQuery = useSignals(firstId)
   const signals = signalsQuery.data ?? []
-  const latestSignal =
-    signals.length > 0
-      ? [...signals].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0]
-      : null
+  const latest = signals.length > 0 ? [...signals].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0] : null
 
   return (
-    <Card className={className}>
+    <Card elevation="raised" className={className}>
       <CardHeader>
         <CardTitle>Strategies &amp; signals</CardTitle>
         {query.isSuccess && <Badge variant="neutral">{strategies.length}</Badge>}
       </CardHeader>
-      <CardContent className="space-y-4">
-        {query.isLoading && <LoadingState label="Loading strategies…" />}
-        {query.isError && (
-          <ErrorState description="Could not load strategies." onRetry={() => query.refetch()} />
-        )}
-        {query.isSuccess && strategies.length === 0 && (
-          <EmptyState title="No strategies" description="No strategies are registered yet." />
-        )}
+      <CardContent>
+        {query.isLoading && <div className="skeleton h-28 w-full" />}
+        {query.isError && <ErrorState description="Could not load strategies." onRetry={() => query.refetch()} />}
+        {query.isSuccess && strategies.length === 0 && <EmptyState title="No strategies" description="No strategies registered yet." />}
         {query.isSuccess && strategies.length > 0 && (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Strategy</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Version</TableHead>
-                  </TableRow>
+                  <TableRow><TableHead>Strategy</TableHead><TableHead>Status</TableHead><TableHead>Version</TableHead></TableRow>
                 </TableHeader>
                 <TableBody>
                   {strategies.slice(0, 6).map((s) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-medium text-fg">{s.name}</TableCell>
-                      <TableCell>
-                        <Badge variant={s.status === 'ACTIVE' ? 'profit' : 'neutral'}>
-                          {s.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{s.version}</TableCell>
+                      <TableCell><Badge variant={s.status === 'ACTIVE' ? 'profit' : 'neutral'}>{s.status}</Badge></TableCell>
+                      <TableCell className="font-mono">{s.version}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-              {/* Honest F-9 representation: `version` is the CURRENT registration
-                  only — no version history exists, so we don't imply one. */}
-              <p className="mt-2 text-xs text-fg-muted opacity-70">
-                Version shown is the current registration only — no version history (F-9).
-              </p>
+              <p className="mt-2 text-xs text-fg-subtle">Version shown is the current registration only — no history (F-9).</p>
             </div>
-            <div className="rounded-md border border-border bg-surface-hover/40 p-3">
-              <div className="text-xs uppercase tracking-wide text-fg-muted">
-                Latest signal · {strategies[0]?.name}
-              </div>
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <div className="text-[11px] uppercase tracking-wide text-fg-subtle">Latest signal · {strategies[0]?.name}</div>
               {signalsQuery.isLoading && <p className="mt-2 text-sm text-fg-muted">Loading…</p>}
-              {signalsQuery.isSuccess && !latestSignal && (
-                <p className="mt-2 text-sm text-fg-muted">No signals generated yet.</p>
-              )}
-              {latestSignal && (
+              {signalsQuery.isSuccess && !latest && <p className="mt-2 text-sm text-fg-muted">No signals yet.</p>}
+              {latest && (
                 <div className="mt-2 space-y-1">
-                  <div className="text-2xl font-semibold tabular-nums text-fg">
-                    {Number.parseFloat(latestSignal.value).toLocaleString(undefined, {
-                      maximumFractionDigits: 4,
-                    })}
+                  <div className="font-mono text-2xl font-semibold tabular-nums text-fg">
+                    {Number.parseFloat(latest.value).toLocaleString(undefined, { maximumFractionDigits: 4 })}
                   </div>
-                  <Badge variant={latestSignal.validation_status === 'VALID' ? 'profit' : 'warning'}>
-                    {latestSignal.validation_status}
-                  </Badge>
-                  <p className="text-xs text-fg-muted">{fmtTime(latestSignal.ts)}</p>
-                  {/* The signals feed is capped server-side (default 100, api/v1/
-                      strategies.py) — this is the most-recent fetched window, NOT
-                      the strategy's true lifetime signal count, so we don't claim
-                      "total" (honest-count discipline, same spirit as F-9/F-18). */}
-                  <p className="text-xs text-fg-muted">{signals.length} recent signals</p>
+                  <Badge variant={latest.validation_status === 'VALID' ? 'profit' : 'warning'}>{latest.validation_status}</Badge>
+                  <p className="text-xs text-fg-muted">{fmtTime(latest.ts)}</p>
+                  <p className="text-xs text-fg-subtle">{signals.length} recent signals</p>
                 </div>
               )}
             </div>

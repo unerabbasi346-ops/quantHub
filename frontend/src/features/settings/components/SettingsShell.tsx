@@ -1,9 +1,20 @@
 // Doc 08 §Architecture: feature-specific component inside feature directory
+// Doc 06 §Interaction Standards: intentional "planned" state (not a bare
+// sentence in a void). Settings is deferred per S-6 (single-user local
+// platform — no real auth/user prefs to configure yet, G-AUTH-1).
+'use client'
+
+import { Settings } from 'lucide-react'
+import { ComingSoon } from '@/components/ui'
+
 export function SettingsShell() {
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
-      <p className="mt-1 text-sm text-gray-500">User settings — implemented in Doc 06 phase.</p>
-    </div>
+    <ComingSoon
+      icon={<Settings size={30} strokeWidth={1.75} />}
+      title="Settings"
+      description="Workspace and account preferences will live here once the platform grows beyond a single local operator."
+      note="Deferred per S-6 · real auth/accounts per G-AUTH-1"
+      planned={['Theme & display density', 'Default portfolio & base currency', 'API keys & data sources']}
+    />
   )
 }

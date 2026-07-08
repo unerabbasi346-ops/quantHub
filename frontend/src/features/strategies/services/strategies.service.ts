@@ -13,4 +13,8 @@ export const strategiesService = {
   // Backtest results for a strategy (fills, final P&L, determinism hash).
   getBacktests: (strategyId: string) =>
     apiClient.get<Backtest[]>(`/v1/strategies/${strategyId}/backtests`),
+  // Write: governed Activate/Deactivate lifecycle transition (Doc 14 §10.2.6;
+  // api/v1/strategies.py PATCH /strategies/{id}/status). The first real write.
+  setStatus: (strategyId: string, status: 'ACTIVE' | 'INACTIVE') =>
+    apiClient.patch<Strategy>(`/v1/strategies/${strategyId}/status`, { status }),
 }

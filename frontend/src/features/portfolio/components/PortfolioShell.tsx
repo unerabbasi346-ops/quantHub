@@ -6,53 +6,56 @@
 //   §Architecture: feature module composes the shared design system + hooks;
 //   §State Management: TanStack Query.
 // Per Doc 00 §14.11
+//
+// REDESIGN (owner feedback): fixed the dead space below the old positions
+// table by leading with a KPI stat strip (aggregate market value / P&L /
+// count) and structuring the workspace with Sections + thin dividers rather
+// than nesting tables inside bordered cards inside a grid. The capital-
+// configuration control (F-19-honest) is composed here from the sibling
+// CapitalConfig component.
 'use client'
 
 import { useState } from 'react'
+import { Wallet } from 'lucide-react'
 import {
   Badge,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   EmptyState,
   ErrorState,
-  LoadingState,
+  PageHeader,
+  Section,
+  SkeletonStats,
+  SkeletonTable,
+  StatCard,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  CryptoIcon,
   pnlBadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { usePortfolios, usePositions } from '../hooks/usePortfolio'
 import type { Portfolio, Position } from '../types'
+import { CapitalConfig } from './CapitalConfig'
 
 // Display formatters. The authoritative precise values are the API's Decimal
 // strings; these are display-only (nothing downstream consumes them).
-function fmtMoney(value: string): string {
-  return Number.parseFloat(value).toLocaleString(undefined, {
+function fmtMoney(value: string | number): string {
+  return Number(value).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
 }
 
 function fmtQty(value: string): string {
-  return Number.parseFloat(value).toLocaleString(undefined, {
-    maximumFractionDigits: 8,
-  })
+  return Number.parseFloat(value).toLocaleString(undefined, { maximumFractionDigits: 8 })
 }
 
-// P&L keeps up to 4 decimals so a small non-zero value (e.g. -0.0087) is not
-// rounded away to 0.00 and mis-signed.
-function fmtPnl(value: string): string {
-  const n = Number.parseFloat(value)
-  const formatted = n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  })
+function fmtPnl(value: string | number): string {
+  const n = Number(value)
+  const formatted = n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
   return n > 0 ? `+${formatted}` : formatted
 }
 
@@ -65,35 +68,62 @@ export function PortfolioShell() {
   const activePortfolio = portfolios.find((p) => p.id === activeId) ?? null
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-fg">Portfolio</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          Positions and P&amp;L — Phase 3 recorded positions.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        icon={<Wallet size={18} />}
+        title="Portfolio"
+        subtitle="Positions, P&L and configured capital — Phase 3 recorded state."
+        actions={
+          activePortfolio && (
+            <Badge variant="neutral" className="gap-1.5">
+              {activePortfolio.portfolio_type} · {activePortfolio.base_currency}
+            </Badge>
+          )
+        }
+      />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[18rem_1fr]">
-        <PortfolioList
-          query={portfoliosQuery}
-          portfolios={portfolios}
-          activeId={activeId}
-          onSelect={setSelectedId}
-        />
-        <div className="min-w-0">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[16rem_1fr]">
+        {/* Portfolio switcher — a plain list, not a boxed card */}
+        <Section title="Portfolios" actions={portfoliosQuery.isSuccess ? <Badge variant="neutral">{portfolios.length}</Badge> : null}>
+          {portfoliosQuery.isLoading && <div className="skeleton h-24 w-full" />}
+          {portfoliosQuery.isError && (
+            <ErrorState description="Could not load portfolios." onRetry={() => portfoliosQuery.refetch()} />
+          )}
+          {portfoliosQuery.isSuccess && portfolios.length === 0 && (
+            <EmptyState icon={<Wallet size={20} />} title="No portfolios" description="No active portfolios exist yet." />
+          )}
+          <div className="space-y-1">
+            {portfolios.map((portfolio) => {
+              const selected = portfolio.id === activeId
+              return (
+                <button
+                  key={portfolio.id}
+                  onClick={() => setSelectedId(portfolio.id)}
+                  aria-current={selected ? 'true' : undefined}
+                  className={cn(
+                    'flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
+                    selected
+                      ? 'border-info/40 bg-info-soft text-info'
+                      : 'border-transparent text-fg-muted hover:bg-surface-hover hover:text-fg',
+                  )}
+                >
+                  <span className="truncate text-sm font-medium">{portfolio.name}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-fg-subtle">
+                    {portfolio.portfolio_type} · {portfolio.base_currency}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </Section>
+
+        <div className="min-w-0 space-y-8">
           {activePortfolio ? (
-            <Positions portfolio={activePortfolio} />
+            <PortfolioDetail portfolio={activePortfolio} />
           ) : (
             !portfoliosQuery.isLoading &&
             !portfoliosQuery.isError && (
-              <Card>
-                <CardContent>
-                  <EmptyState
-                    title="No portfolio selected"
-                    description="Select a portfolio to view its positions."
-                  />
-                </CardContent>
-              </Card>
+              <EmptyState icon={<Wallet size={20} />} title="No portfolio selected" description="Select a portfolio to view its positions." />
             )
           )}
         </div>
@@ -102,117 +132,91 @@ export function PortfolioShell() {
   )
 }
 
-function PortfolioList({
-  query,
-  portfolios,
-  activeId,
-  onSelect,
-}: {
-  query: ReturnType<typeof usePortfolios>
-  portfolios: Portfolio[]
-  activeId: string
-  onSelect: (id: string) => void
-}) {
-  return (
-    <Card className="h-fit">
-      <CardHeader>
-        <CardTitle>Portfolios</CardTitle>
-        {query.isSuccess && <Badge variant="neutral">{portfolios.length}</Badge>}
-      </CardHeader>
-      <CardContent className="p-2">
-        {query.isLoading && <LoadingState label="Loading portfolios…" />}
-        {query.isError && (
-          <ErrorState description="Could not load portfolios." onRetry={() => query.refetch()} />
-        )}
-        {query.isSuccess && portfolios.length === 0 && (
-          <EmptyState title="No portfolios" description="No active portfolios exist yet." />
-        )}
-        {query.isSuccess &&
-          portfolios.map((portfolio) => {
-            const selected = portfolio.id === activeId
-            return (
-              <button
-                key={portfolio.id}
-                onClick={() => onSelect(portfolio.id)}
-                aria-current={selected ? 'true' : undefined}
-                className={cn(
-                  'flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left transition-colors',
-                  selected
-                    ? 'bg-info-soft text-info'
-                    : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
-                )}
-              >
-                <span className="truncate text-sm font-medium">{portfolio.name}</span>
-                <span className="text-xs uppercase tracking-wide text-fg-muted">
-                  {portfolio.portfolio_type} · {portfolio.base_currency}
-                </span>
-              </button>
-            )
-          })}
-      </CardContent>
-    </Card>
-  )
-}
-
-function Positions({ portfolio }: { portfolio: Portfolio }) {
+function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
   const positionsQuery = usePositions(portfolio.id)
   const positions = positionsQuery.data ?? []
+  const open = positions.filter((p) => !p.is_closed)
+
+  const totalMarketValue = open.reduce((s, p) => s + Number.parseFloat(p.market_value), 0)
+  const totalUnrealized = open.reduce((s, p) => s + Number.parseFloat(p.unrealized_pnl), 0)
+  const totalRealizedToday = open.reduce((s, p) => s + Number.parseFloat(p.realized_pnl_today), 0)
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {portfolio.name}
-          <span className="ml-2 font-normal text-fg-muted">Positions</span>
-        </CardTitle>
-        {positionsQuery.isSuccess && <Badge variant="neutral">{positions.length}</Badge>}
-      </CardHeader>
-      <CardContent>
-        {positionsQuery.isLoading && <LoadingState label="Loading positions…" />}
-        {positionsQuery.isError && (
-          <ErrorState
-            description="Could not load positions."
-            onRetry={() => positionsQuery.refetch()}
+    <>
+      {/* KPI strip — fills the top of the workspace and anchors the page */}
+      {positionsQuery.isLoading ? (
+        <SkeletonStats count={4} />
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <StatCard label="Market value" value={fmtMoney(totalMarketValue)} hint={`${portfolio.base_currency}`} />
+          <StatCard
+            label="Unrealized P&L"
+            value={fmtPnl(totalUnrealized)}
+            tone={totalUnrealized >= 0 ? 'profit' : 'risk'}
           />
+          <StatCard
+            label="Realized today"
+            value={fmtPnl(totalRealizedToday)}
+            tone={totalRealizedToday >= 0 ? 'profit' : 'risk'}
+          />
+          <StatCard label="Open positions" value={open.length} hint={`${positions.length} total`} />
+        </div>
+      )}
+
+      {/* Capital configuration (honest F-19 labeling) */}
+      <CapitalConfig portfolio={portfolio} />
+
+      <Section
+        title="Positions"
+        actions={positionsQuery.isSuccess ? <Badge variant="neutral">{positions.length}</Badge> : null}
+      >
+        {positionsQuery.isLoading && <SkeletonTable rows={4} cols={6} />}
+        {positionsQuery.isError && (
+          <ErrorState description="Could not load positions." onRetry={() => positionsQuery.refetch()} />
         )}
         {positionsQuery.isSuccess && positions.length === 0 && (
-          <EmptyState
-            title="No positions"
-            description="This portfolio holds no positions."
-          />
+          <EmptyState icon={<Wallet size={20} />} title="No positions" description="This portfolio holds no positions." />
         )}
         {positionsQuery.isSuccess && positions.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Asset</TableHead>
-                <TableHead>Quantity</TableHead>
-                <TableHead>Avg Entry</TableHead>
-                <TableHead>Market Value</TableHead>
-                <TableHead>Unrealized P&amp;L</TableHead>
-                <TableHead>Realized P&amp;L (today)</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {positions.map((position) => (
-                <PositionRow key={position.id} position={position} />
-              ))}
-            </TableBody>
-          </Table>
+          <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Asset</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Avg Entry</TableHead>
+                  <TableHead>Market Value</TableHead>
+                  <TableHead>Unrealized P&amp;L</TableHead>
+                  <TableHead>Realized P&amp;L (today)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {positions.map((position) => (
+                  <PositionRow key={position.id} position={position} />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         )}
-      </CardContent>
-    </Card>
+      </Section>
+    </>
   )
 }
 
 function PositionRow({ position }: { position: Position }) {
+  const symbol = position.symbol ?? position.asset_id
   return (
     <TableRow>
       <TableCell>
-        <span className="font-medium text-fg">{position.symbol ?? position.asset_id}</span>
-        {position.exchange && (
-          <span className="ml-2 text-xs uppercase text-fg-muted">{position.exchange}</span>
-        )}
+        <div className="flex items-center gap-2.5">
+          <CryptoIcon symbol={symbol} size={22} />
+          <div className="min-w-0">
+            <div className="font-medium text-fg">{symbol}</div>
+            {position.exchange && (
+              <div className="text-[11px] uppercase tracking-wide text-fg-subtle">{position.exchange}</div>
+            )}
+          </div>
+        </div>
       </TableCell>
       <TableCell numeric>{fmtQty(position.quantity)}</TableCell>
       <TableCell numeric>{fmtMoney(position.average_entry_price)}</TableCell>

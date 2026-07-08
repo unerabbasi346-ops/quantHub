@@ -18,3 +18,10 @@ export function useBars(assetId: string, interval: string) {
     enabled: Boolean(assetId),
   })
 }
+
+export function useCorrelation(interval = '1h') {
+  return useQuery({
+    queryKey: ['correlation', interval],
+    queryFn: () => marketsService.getCorrelation(interval),
+  })
+}

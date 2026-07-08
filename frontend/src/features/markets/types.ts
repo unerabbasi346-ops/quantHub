@@ -35,3 +35,19 @@ export interface OHLCVBar {
   data_quality: string
   source: string | null
 }
+
+// Price-return correlation (api/v1/markets.py GET /markets/correlation).
+// A DESCRIPTIVE price-return correlation between instruments — NOT a portfolio
+// risk metric, and unrelated to F-18's deferred VaR/CVaR/beta. `matrix[i][j]`
+// is the Pearson correlation of returns; null where undefined (constant series).
+export interface CorrelationAsset {
+  id: UUID
+  symbol: string
+}
+
+export interface CorrelationMatrix {
+  interval: string
+  sample_size: number
+  assets: CorrelationAsset[]
+  matrix: (number | null)[][]
+}

@@ -16,12 +16,20 @@ import {
   CrosshairMode,
   IChartApi,
   ISeriesApi,
+  SeriesMarker,
+  Time,
   UTCTimestamp,
   createChart,
 } from 'lightweight-charts'
 import { useEffect, useRef } from 'react'
 import { useUIStore } from '@/lib/store/ui'
 import type { OHLCVBar } from '../types'
+
+// A real fill to overlay on the candles (owner request: BUY/SELL fill markers).
+export interface FillMarker {
+  time: number // unix seconds
+  side: 'BUY' | 'SELL'
+}
 
 // Resolve a Doc 06 theme token (an HSL triplet CSS var, e.g. "152 60% 42%")
 // to a concrete color Lightweight Charts can render. LWC renders to <canvas>
@@ -82,7 +90,7 @@ function seriesColors() {
   }
 }
 
-export function PriceChart({ bars }: { bars: OHLCVBar[] }) {
+export function PriceChart({ bars, markers = [] }: { bars: OHLCVBar[]; markers?: FillMarker[] }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -123,6 +131,24 @@ export function PriceChart({ bars }: { bars: OHLCVBar[] }) {
     series.setData(data)
     chartRef.current?.timeScale().fitContent()
   }, [bars])
+
+  // Overlay real BUY/SELL fill markers (Doc 06 green=profit/red=risk):
+  // a BUY sits below its bar with an up-arrow, a SELL above with a down-arrow.
+  useEffect(() => {
+    const series = seriesRef.current
+    if (!series) return
+    const up = token('--color-profit', '#16a34a')
+    const down = token('--color-risk', '#dc2626')
+    const sorted = [...markers].sort((a, b) => a.time - b.time)
+    const seriesMarkers: SeriesMarker<Time>[] = sorted.map((m) => ({
+      time: m.time as UTCTimestamp,
+      position: m.side === 'BUY' ? 'belowBar' : 'aboveBar',
+      color: m.side === 'BUY' ? up : down,
+      shape: m.side === 'BUY' ? 'arrowUp' : 'arrowDown',
+      text: m.side === 'BUY' ? 'B' : 'S',
+    }))
+    series.setMarkers(seriesMarkers)
+  }, [markers, theme])
 
   // Re-apply resolved colors when the app theme toggles (dark <-> light).
   useEffect(() => {

@@ -3,7 +3,7 @@
 // Doc 10 envelope's `.data`, Step 4.2) — Doc 08 §API Layer.
 // Per Doc 00 §14.11
 import { apiClient } from '@/lib/api/client'
-import type { Asset, OHLCVBar } from '../types'
+import type { Asset, CorrelationMatrix, OHLCVBar } from '../types'
 
 // Default bar window for the chart. The backend caps `limit` at 1000
 // (api/v1/markets.py); 500 covers the full currently-ingested BTC/USDT 1h
@@ -17,4 +17,7 @@ export const marketsService = {
     apiClient.get<OHLCVBar[]>(
       `/v1/assets/${assetId}/bars?interval=${encodeURIComponent(interval)}&limit=${limit}`,
     ),
+  // Price-return correlation matrix across ingested instruments (NOT risk).
+  getCorrelation: (interval = '1h') =>
+    apiClient.get<CorrelationMatrix>(`/v1/markets/correlation?interval=${encodeURIComponent(interval)}`),
 }
