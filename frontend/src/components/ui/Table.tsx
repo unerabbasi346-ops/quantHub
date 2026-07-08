@@ -10,29 +10,34 @@ import { cn } from '@/lib/utils/cn'
 // Doc 08 §Architecture: stateless presentation components.
 export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="w-full overflow-x-auto rounded-lg border border-border">
+    <div className="w-full overflow-x-auto">
       <table className={cn('w-full border-collapse text-sm', className)} {...props} />
     </div>
   )
 }
 
 export function TableHeader({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn('bg-surface', className)} {...props} />
+  return <thead className={className} {...props} />
 }
 
 export function TableBody({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
-  return <tbody className={cn('divide-y divide-border', className)} {...props} />
+  return <tbody className={cn('divide-y divide-border/70', className)} {...props} />
 }
 
 export function TableRow({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
-  return <tr className={cn('hover:bg-surface-hover', className)} {...props} />
+  return (
+    <tr
+      className={cn('transition-colors duration-150 hover:bg-surface-hover/60', className)}
+      {...props}
+    />
+  )
 }
 
 export function TableHead({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
       className={cn(
-        'border-b border-border px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-fg-muted',
+        'border-b border-border px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-fg-subtle',
         className,
       )}
       {...props}
@@ -51,8 +56,8 @@ export function TableCell({
   return (
     <td
       className={cn(
-        'px-4 py-2 text-fg',
-        numeric && 'text-right tabular-nums',
+        'px-4 py-2.5 text-fg',
+        numeric && 'text-right tabular-nums font-mono',
         className,
       )}
       {...props}

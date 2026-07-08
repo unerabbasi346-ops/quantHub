@@ -49,8 +49,13 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-md font-medium',
-        'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+        'inline-flex items-center justify-center gap-2 rounded-lg font-medium',
+        // Doc 06 §Interaction Standards — subtle hover micro-animation
+        // (brightness lift + press-scale), ≤150ms, disabled below via the
+        // global prefers-reduced-motion guard in globals.css.
+        'transition-[background-color,filter,transform,box-shadow] duration-150 ease-out',
+        'hover:enabled:brightness-110 active:enabled:scale-[0.97]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
         'disabled:opacity-50 disabled:pointer-events-none',
         VARIANT_CLASSES[variant],
         SIZE_CLASSES[size],

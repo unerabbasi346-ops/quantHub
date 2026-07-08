@@ -30,15 +30,21 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
 interface EmptyStateProps {
   title: string
   description?: string
+  icon?: ReactNode
   action?: ReactNode
 }
 
-export function EmptyState({ title, description, action }: EmptyStateProps) {
+export function EmptyState({ title, description, icon, action }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+    <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-center">
+      {icon && (
+        <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-surface text-fg-subtle">
+          {icon}
+        </div>
+      )}
       <p className="text-sm font-medium text-fg">{title}</p>
       {description && <p className="max-w-sm text-sm text-fg-muted">{description}</p>}
-      {action}
+      {action && <div className="mt-2">{action}</div>}
     </div>
   )
 }

@@ -27,7 +27,7 @@ export default function AppLayout({
             responsive grid, modular widgets"; the optional contextual
             panel (ContextPanel) is composed by individual feature pages,
             not force-mounted here (see its own docstring). */}
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <main className="flex-1 overflow-auto px-6 py-6 lg:px-8">{children}</main>
       </div>
     </div>
   )

@@ -22,13 +22,20 @@ const config: Config = {
   darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)'],
+      },
       colors: {
         bg: themeColor('--color-bg'),
         surface: themeColor('--color-surface'),
+        'surface-raised': themeColor('--color-surface-raised'),
         'surface-hover': themeColor('--color-surface-hover'),
         border: themeColor('--color-border'),
+        'border-strong': themeColor('--color-border-strong'),
         fg: themeColor('--color-fg'),
         'fg-muted': themeColor('--color-fg-muted'),
+        'fg-subtle': themeColor('--color-fg-subtle'),
         // Doc 06 §Visual Language: "green=profit, red=risk, blue=information,
         // amber=warning" — the platform's four semantic hues. `risk` also
         // covers P&L loss (see globals.css judgment-call comment) rather
@@ -52,6 +59,25 @@ const config: Config = {
       },
       borderColor: {
         DEFAULT: themeColor('--color-border'),
+      },
+      boxShadow: {
+        // Elevation ramp (globals.css --shadow-*) — the visual-hierarchy
+        // system: raised/primary content casts a real shadow, secondary
+        // content stays flat with a hairline border.
+        sm: 'var(--shadow-sm)',
+        md: 'var(--shadow-md)',
+        lg: 'var(--shadow-lg)',
+      },
+      keyframes: {
+        'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'fade-in-up': {
+          from: { opacity: '0', transform: 'translateY(6px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 180ms ease-out both',
+        'fade-in-up': 'fade-in-up 220ms cubic-bezier(0.22,1,0.36,1) both',
       },
     },
   },
