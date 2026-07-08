@@ -26,7 +26,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 // visually via the `risk` token, same reuse as the P&L judgment call in
 // globals.css: no separate "danger" hue is invented beyond `risk`).
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'bg-info text-white hover:bg-info/90 focus-visible:ring-info',
+  primary: 'bg-accent text-accent-fg hover:bg-accent/90 focus-visible:ring-accent',
   secondary:
     'bg-surface text-fg border border-border hover:bg-surface-hover focus-visible:ring-border',
   ghost: 'bg-transparent text-fg hover:bg-surface-hover focus-visible:ring-border',

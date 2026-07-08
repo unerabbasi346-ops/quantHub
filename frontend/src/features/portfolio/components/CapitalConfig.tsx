@@ -98,7 +98,7 @@ export function CapitalConfig({ portfolio }: { portfolio: Portfolio }) {
                   }}
                   placeholder="100000"
                   aria-label="Capital amount"
-                  className="h-9 w-40 rounded-lg border border-border bg-surface pl-12 pr-3 font-mono text-sm text-fg tabular-nums focus:border-info focus:outline-none"
+                  className="h-9 w-40 rounded-lg border border-border bg-surface pl-12 pr-3 font-mono text-sm text-fg tabular-nums focus:border-accent focus:outline-none"
                 />
               </div>
               <Button size="sm" variant="primary" onClick={submit} disabled={mutation.isPending}>

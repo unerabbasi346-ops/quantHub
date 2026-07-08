@@ -103,7 +103,7 @@ export function PortfolioShell() {
                   className={cn(
                     'flex w-full flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
                     selected
-                      ? 'border-info/40 bg-info-soft text-info'
+                      ? 'border-accent/40 bg-accent-soft text-accent'
                       : 'border-transparent text-fg-muted hover:bg-surface-hover hover:text-fg',
                   )}
                 >

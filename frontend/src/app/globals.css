@@ -50,37 +50,60 @@
   --color-warning: 38 92% 56%;      /* amber — Doc 06 "amber=warning" */
   --color-warning-soft: 38 70% 14%;
 
+  /* BRAND ACCENT (owner decision) — a violet/indigo hue deliberately held
+   * OFF all four semantic hues (green 152 / red 4 / blue 210 / amber 38) so
+   * "brand" (logo, active nav, primary CTA, focus ring) can never be
+   * misread as a P&L/status signal. It is NOT a fifth semantic — nothing
+   * data-driven maps to it. Same violet identity in both themes for a
+   * consistent brand; only its lightness shifts for legibility per surface. */
+  --color-accent: 255 86% 74%;      /* violet — brand on dark charcoal */
+  --color-accent-soft: 255 42% 20%; /* active-nav / selected tint on dark */
+  --color-accent-fg: 0 0% 100%;     /* text/icon on a solid accent fill */
+
   /* Elevation — dark UIs read depth from soft shadow + a faint top
    * highlight (light from above), not from heavy borders. */
   --shadow-sm: 0 1px 2px 0 hsl(220 40% 2% / 0.5);
   --shadow-md: 0 4px 12px -2px hsl(220 40% 2% / 0.55), 0 2px 4px -2px hsl(220 40% 2% / 0.4);
   --shadow-lg: 0 12px 32px -6px hsl(220 40% 1% / 0.6), 0 4px 8px -4px hsl(220 40% 2% / 0.45);
-  --ring-accent: 210 90% 62%;
+  --ring-accent: 255 86% 74%;
 }
 
+/* LIGHT MODE (owner decision) — a fully REPLACED palette, not an inverted
+ * dark theme. The neutral ramp is TRUE graphite/gray: hue held at 250 but
+ * saturation kept at 3–6% so surfaces read as warm-neutral paper/graphite,
+ * NOT the old blue-tinted (hue 220, higher-sat) light theme. The brand
+ * accent is a DEEP indigo-violet (same violet family as dark, darkened for
+ * contrast on white) used only for brand chrome — logo, active nav, primary
+ * CTA, focus ring. The four semantic hues (green/red/blue/amber) are
+ * unchanged in meaning; only lightness is tuned for a light surface. */
 [data-theme='light'] {
-  --color-bg: 220 20% 98%;
-  --color-surface: 0 0% 100%;
+  --color-bg: 250 6% 95%;              /* light graphite base (near-neutral) */
+  --color-surface: 0 0% 100%;          /* clean white cards */
   --color-surface-raised: 0 0% 100%;
-  --color-surface-hover: 220 16% 95%;
-  --color-border: 220 14% 89%;
-  --color-border-strong: 220 14% 80%;
-  --color-fg: 220 28% 12%;
-  --color-fg-muted: 220 12% 40%;
-  --color-fg-subtle: 220 10% 55%;
+  --color-surface-hover: 250 6% 93%;
+  --color-border: 250 6% 88%;
+  --color-border-strong: 250 5% 78%;
+  --color-fg: 250 12% 12%;             /* graphite ink */
+  --color-fg-muted: 250 5% 38%;
+  --color-fg-subtle: 250 4% 54%;
 
   --color-profit: 152 58% 30%;
-  --color-profit-soft: 152 60% 93%;
+  --color-profit-soft: 152 55% 92%;
   --color-risk: 4 68% 44%;
   --color-risk-soft: 4 70% 94%;
   --color-info: 210 85% 44%;
-  --color-info-soft: 210 70% 94%;
+  --color-info-soft: 210 65% 93%;
   --color-warning: 38 85% 40%;
-  --color-warning-soft: 38 80% 92%;
+  --color-warning-soft: 38 80% 91%;
 
-  --shadow-sm: 0 1px 2px 0 hsl(220 30% 40% / 0.08);
-  --shadow-md: 0 4px 12px -2px hsl(220 30% 40% / 0.1), 0 2px 4px -2px hsl(220 30% 40% / 0.06);
-  --shadow-lg: 0 12px 32px -6px hsl(220 30% 40% / 0.14), 0 4px 8px -4px hsl(220 30% 40% / 0.08);
+  --color-accent: 256 64% 52%;         /* deep indigo-violet brand on white */
+  --color-accent-soft: 256 72% 95%;    /* active-nav / selected tint on light */
+  --color-accent-fg: 0 0% 100%;
+  --ring-accent: 256 64% 52%;
+
+  --shadow-sm: 0 1px 2px 0 hsl(250 20% 30% / 0.07);
+  --shadow-md: 0 4px 12px -2px hsl(250 20% 30% / 0.09), 0 2px 4px -2px hsl(250 20% 30% / 0.06);
+  --shadow-lg: 0 12px 32px -6px hsl(250 20% 30% / 0.13), 0 4px 8px -4px hsl(250 20% 30% / 0.08);
 }
 
 html {
@@ -108,8 +131,10 @@ body {
   background-attachment: fixed;
 }
 [data-theme='light'] body {
+  /* Neutral graphite wash with the faintest violet-brand whisper up top —
+   * ties the surface to the accent without reintroducing a blue tint. */
   background-image:
-    radial-gradient(1200px 600px at 50% -10%, hsl(210 40% 90% / 0.6), transparent 70%);
+    radial-gradient(1200px 600px at 50% -10%, hsl(256 30% 92% / 0.55), transparent 70%);
 }
 
 /* Tabular numerals everywhere financial figures render (utility helper). */

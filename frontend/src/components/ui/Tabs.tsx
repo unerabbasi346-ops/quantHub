@@ -45,9 +45,9 @@ export function Tabs({ items, defaultValue, className }: TabsProps) {
               onClick={() => setActive(item.value)}
               className={cn(
                 'border-b-2 px-3 py-2 text-sm font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
                 selected
-                  ? 'border-info text-fg'
+                  ? 'border-accent text-fg'
                   : 'border-transparent text-fg-muted hover:text-fg',
               )}
             >

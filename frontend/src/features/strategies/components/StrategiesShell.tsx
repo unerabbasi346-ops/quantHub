@@ -128,7 +128,7 @@ export function StrategiesShell() {
                   className={cn(
                     'flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
                     selected
-                      ? 'border-info/40 bg-info-soft text-info'
+                      ? 'border-accent/40 bg-accent-soft text-accent'
                       : 'border-transparent text-fg-muted hover:bg-surface-hover hover:text-fg',
                   )}
                 >
@@ -198,7 +198,7 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
             )}
           >
             {t.label}
-            {tab === t.key && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-info" />}
+            {tab === t.key && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />}
           </button>
         ))}
       </div>

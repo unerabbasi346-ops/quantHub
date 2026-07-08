@@ -97,7 +97,7 @@ export function TopBar() {
           title="Local operator — real accounts deferred (G-AUTH-1)"
           className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-surface-hover"
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-info to-profit text-xs font-semibold text-white">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-accent to-info text-xs font-semibold text-accent-fg">
             QH
           </span>
           <span className="hidden text-sm font-medium text-fg-muted lg:inline">Operator</span>

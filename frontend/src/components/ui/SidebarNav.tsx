@@ -82,7 +82,7 @@ export function SidebarNav() {
         <BrandMark size={26} />
         {open && (
           <span className="text-[15px] font-semibold tracking-tight text-fg">
-            Quant<span className="text-info">Hub</span>
+            Quant<span className="text-accent">Hub</span>
           </span>
         )}
       </div>
@@ -110,7 +110,7 @@ export function SidebarNav() {
                     className={cn(
                       'group relative flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150',
                       active
-                        ? 'bg-info-soft text-info font-medium'
+                        ? 'bg-accent-soft text-accent font-medium'
                         : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
                       !open && 'justify-center px-0',
                     )}
@@ -118,7 +118,7 @@ export function SidebarNav() {
                     {active && (
                       <span
                         aria-hidden
-                        className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-info"
+                        className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-accent"
                       />
                     )}
                     <Icon size={18} strokeWidth={2} className="shrink-0" />

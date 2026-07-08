@@ -56,6 +56,14 @@ const config: Config = {
           DEFAULT: themeColor('--color-warning'),
           soft: themeColor('--color-warning-soft'),
         },
+        // Brand accent (violet/indigo) — deliberately NOT one of the four
+        // semantic hues (see globals.css). Used only for brand chrome: logo,
+        // active nav, primary CTA, focus ring. Never data-driven.
+        accent: {
+          DEFAULT: themeColor('--color-accent'),
+          soft: themeColor('--color-accent-soft'),
+          fg: themeColor('--color-accent-fg'),
+        },
       },
       borderColor: {
         DEFAULT: themeColor('--color-border'),

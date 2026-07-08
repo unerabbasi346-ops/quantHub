@@ -22,7 +22,7 @@ export function PageHeader({ title, subtitle, icon, actions, className }: PageHe
     <header className={cn('flex items-start justify-between gap-4', className)}>
       <div className="flex items-start gap-3">
         {icon && (
-          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-raised text-info shadow-sm">
+          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-raised text-accent shadow-sm">
             {icon}
           </span>
         )}

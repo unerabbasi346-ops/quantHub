@@ -136,12 +136,12 @@ function AssetRow({ asset, selected, onSelect }: { asset: Asset; selected: boole
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
-        selected ? 'border-info/40 bg-info-soft' : 'border-transparent hover:bg-surface-hover',
+        selected ? 'border-accent/40 bg-accent-soft' : 'border-transparent hover:bg-surface-hover',
       )}
     >
       <CryptoIcon symbol={asset.symbol} size={26} />
       <div className="min-w-0 flex-1">
-        <div className={cn('truncate text-sm font-medium', selected ? 'text-info' : 'text-fg')}>{asset.symbol}</div>
+        <div className={cn('truncate text-sm font-medium', selected ? 'text-accent' : 'text-fg')}>{asset.symbol}</div>
         <div className="text-[11px] uppercase tracking-wide text-fg-subtle">{asset.exchange}</div>
       </div>
       {closes.length > 1 && <Sparkline data={closes} width={64} height={24} />}
@@ -204,7 +204,7 @@ function AssetDetail({ asset }: { asset: Asset }) {
                 onClick={() => setTf(t)}
                 className={cn(
                   'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                  tf === t ? 'bg-info text-white' : 'text-fg-muted hover:text-fg',
+                  tf === t ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg',
                 )}
               >
                 {t}

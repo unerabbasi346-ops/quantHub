@@ -75,7 +75,7 @@ export function ExecutionShell() {
                   onClick={() => setSelectedId(p.id)}
                   className={cn(
                     'flex w-full flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
-                    selected ? 'border-info/40 bg-info-soft text-info' : 'border-transparent text-fg-muted hover:bg-surface-hover hover:text-fg',
+                    selected ? 'border-accent/40 bg-accent-soft text-accent' : 'border-transparent text-fg-muted hover:bg-surface-hover hover:text-fg',
                   )}
                 >
                   <span className="truncate text-sm font-medium">{p.name}</span>

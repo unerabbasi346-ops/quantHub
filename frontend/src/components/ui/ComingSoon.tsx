@@ -26,9 +26,9 @@ export function ComingSoon({ icon, title, description, note, planned }: ComingSo
       <div className="relative mb-6">
         <div
           aria-hidden
-          className="absolute inset-0 -z-10 rounded-full bg-info/20 blur-2xl"
+          className="absolute inset-0 -z-10 rounded-full bg-accent/20 blur-2xl"
         />
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border-strong bg-surface-raised text-info shadow-lg">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border-strong bg-surface-raised text-accent shadow-lg">
           {icon}
         </div>
       </div>
@@ -45,7 +45,7 @@ export function ComingSoon({ icon, title, description, note, planned }: ComingSo
               key={item}
               className="flex items-center gap-2.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm text-fg-muted"
             >
-              <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-info" />
+              <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
               {item}
             </li>
           ))}
