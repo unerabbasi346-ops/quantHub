@@ -48,6 +48,21 @@ class StrategyRepository(ABC):
         """
         ...
 
+    @abstractmethod
+    async def set_status(self, strategy_id: UUID, status: str) -> RegisteredStrategy | None:
+        """Transition a strategy's lifecycle `status` (Doc 14 §10.2.6 —
+        "State transitions shall be governed with explicit approval"), returning
+        the updated row or None if no such strategy exists.
+
+        This is the deliberate, separate lifecycle-write that `upsert`
+        intentionally does NOT perform (upsert excludes status from its SET
+        clause so resolve-or-register never silently flips lifecycle state).
+        The "explicit approval" §10.2.6 requires is the operator invoking this
+        via the Activate/Deactivate control — the first real write action in
+        the dashboard. Does not commit (caller owns the transaction).
+        """
+        ...
+
 
 class SignalRepository(ABC):
     """Persistence contract for core.signals — Doc 14 §10.6.4 Signal Recording (Step 2.2).

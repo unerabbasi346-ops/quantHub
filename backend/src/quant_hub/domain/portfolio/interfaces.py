@@ -33,6 +33,20 @@ class PortfolioRepository(ABC):
         """
         ...
 
+    @abstractmethod
+    async def set_configured_capital(
+        self, portfolio_id: UUID, amount: Decimal
+    ) -> Portfolio | None:
+        """Set the operator-configured capital figure, returning the updated
+        Portfolio or None if absent (migration a7d2e1f04b93).
+
+        F-19 (flagged): configured_capital has NO backing NAV/cash ledger and
+        does NOT feed leverage/risk math — it is a display/config value only.
+        This is the write behind the dashboard's capital-configuration control.
+        Does not commit (caller owns the transaction).
+        """
+        ...
+
 
 class PositionRepository(ABC):
     """Persistence contract for core.positions — Doc 07 §Implementation Rules."""

@@ -33,7 +33,7 @@ from uuid import UUID
 from fastapi import APIRouter, status
 from pydantic import BaseModel, field_serializer
 
-from quant_hub.api.dependencies import AssetRepo, PortfolioRepo, PositionRepo
+from quant_hub.api.dependencies import AssetRepo, DbSession, PortfolioRepo, PositionRepo
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
 from quant_hub.domain.market_data.entities import Asset
 from quant_hub.domain.portfolio.entities import Portfolio
@@ -43,7 +43,11 @@ router = APIRouter(tags=["portfolio"])
 
 
 class PortfolioOut(BaseModel):
-    """API shape of a core.portfolios row — Doc 09 field names (snake_case)."""
+    """API shape of a core.portfolios row — Doc 09 field names (snake_case).
+
+    `configured_capital` (Decimal-as-string, or null when never configured) is
+    an operator-set figure with NO backing NAV ledger — display/config only,
+    does NOT feed leverage/risk math (F-19; see migration a7d2e1f04b93)."""
 
     id: UUID
     name: str
@@ -51,6 +55,11 @@ class PortfolioOut(BaseModel):
     base_currency: str
     portfolio_type: str
     is_active: bool
+    configured_capital: Decimal | None = None
+
+    @field_serializer("configured_capital", when_used="json")
+    def _serialize_capital(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
 
 
 class PositionOut(BaseModel):
@@ -156,3 +165,42 @@ async def get_portfolio_positions(
         if pos.asset_id not in assets:
             assets[pos.asset_id] = await asset_repo.get_by_id(pos.asset_id)
     return ok([PositionOut.from_recorded(p, assets[p.asset_id]) for p in positions])
+
+
+class CapitalConfigIn(BaseModel):
+    """Body for the capital-configuration control (F-19-honest, see below)."""
+
+    configured_capital: Decimal
+
+
+@router.put(
+    "/portfolios/{portfolio_id}/capital",
+    response_model=ResponseEnvelope[PortfolioOut],
+    summary="Set a portfolio's configured capital (NOT a NAV ledger — F-19)",
+)
+async def set_portfolio_capital(
+    portfolio_id: UUID,
+    body: CapitalConfigIn,
+    repo: PortfolioRepo,
+    session: DbSession,
+) -> ResponseEnvelope[PortfolioOut]:
+    # HONEST F-19 SCOPE (flagged, mirrored in the UI): this stores an
+    # operator-set capital figure only. It has NO backing NAV/cash ledger and
+    # does NOT feed leverage or any risk-limit determination — a real §11.4
+    # capital ledger stays deferred. 400 on a non-positive figure, 404 on an
+    # unknown portfolio, then commit (repositories never commit, Doc 07).
+    if body.configured_capital <= 0:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCode.VALIDATION_ERROR,
+            "configured_capital must be a positive amount",
+        )
+    updated = await repo.set_configured_capital(portfolio_id, body.configured_capital)
+    if updated is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Portfolio {portfolio_id} not found",
+        )
+    await session.commit()
+    return ok(_portfolio_out(updated))

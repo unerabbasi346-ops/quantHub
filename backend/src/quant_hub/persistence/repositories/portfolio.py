@@ -15,7 +15,8 @@ from quant_hub.domain.portfolio.positions import RecordedPosition
 from quant_hub.persistence.repositories.base import BaseRepository
 
 _PORTFOLIO_COLS = (
-    "id, name, description, base_currency, portfolio_type, is_active, created_at"
+    "id, name, description, base_currency, portfolio_type, is_active, created_at, "
+    "configured_capital"
 )
 
 
@@ -28,6 +29,7 @@ def _row_to_portfolio(row: object) -> Portfolio:
         portfolio_type=row["portfolio_type"],
         is_active=row["is_active"],
         created_at=row["created_at"],
+        configured_capital=row["configured_capital"],
     )
 
 
@@ -63,6 +65,32 @@ class SQLAlchemyPortfolioRepository(BaseRepository[object], PortfolioRepository)
             )
         )
         return [_row_to_portfolio(row) for row in result.mappings().all()]
+
+    async def set_configured_capital(
+        self, portfolio_id: UUID, amount: Decimal
+    ) -> Portfolio | None:
+        """Set the operator-configured capital figure (migration a7d2e1f04b93),
+        returning the updated portfolio or None if absent.
+
+        F-19 (flagged): this writes ONLY the configured_capital column — it does
+        NOT touch any equity/leverage computation (there is no NAV ledger; risk
+        math still takes equity as an explicit parameter). Setting capital here
+        has no effect on leverage or risk-limit determination by construction.
+        updated_at via clock_timestamp() (frozen-transaction reason, as
+        elsewhere). Does not commit (caller owns the transaction)."""
+        result = await self._session.execute(
+            text(
+                f"""
+                UPDATE core.portfolios
+                SET configured_capital = :amount, updated_at = clock_timestamp()
+                WHERE id = :id AND deleted_at IS NULL
+                RETURNING {_PORTFOLIO_COLS}
+                """
+            ),
+            {"id": portfolio_id, "amount": amount},
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else _row_to_portfolio(row)
 
 
 _POSITION_COLS = (

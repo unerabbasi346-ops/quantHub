@@ -48,9 +48,16 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
-from quant_hub.api.dependencies import BacktestRepo, SignalRepo, StrategyRepo
+from quant_hub.api.dependencies import BacktestRepo, DbSession, SignalRepo, StrategyRepo
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
 from quant_hub.domain.strategy_engine.entities import RecordedSignal, RegisteredStrategy
+
+# The lifecycle states the Activate/Deactivate control may set (Doc 14
+# §10.2.6). Kept a small explicit allow-list — status is a free-form VARCHAR in
+# the schema (F-9/Step 4.5), but the WRITE path validates against exactly the
+# two states the dashboard control exposes, so an arbitrary string can never be
+# written through this endpoint.
+_SETTABLE_STATUSES = {"ACTIVE", "INACTIVE"}
 
 router = APIRouter(tags=["strategies"])
 
@@ -220,3 +227,42 @@ async def get_strategy_backtests(
         )
     rows = await backtest_repo.list_by_strategy(strategy_id)
     return ok([_serialize_backtest_row(row) for row in rows])
+
+
+class StrategyStatusIn(BaseModel):
+    """Body for the Activate/Deactivate control — a governed §10.2.6 transition."""
+
+    status: str
+
+
+@router.patch(
+    "/strategies/{strategy_id}/status",
+    response_model=ResponseEnvelope[StrategyOut],
+    summary="Activate/deactivate a strategy (governed lifecycle transition)",
+)
+async def set_strategy_status(
+    strategy_id: UUID,
+    body: StrategyStatusIn,
+    repo: StrategyRepo,
+    session: DbSession,
+) -> ResponseEnvelope[StrategyOut]:
+    # The first real WRITE endpoint in the dashboard. Validate the requested
+    # state against the explicit allow-list (§10.2.6 governed transition), 404
+    # on an unknown strategy, then commit — repositories never commit
+    # (transaction ownership belongs to the API layer, Doc 07).
+    requested = body.status.strip().upper()
+    if requested not in _SETTABLE_STATUSES:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCode.VALIDATION_ERROR,
+            f"status must be one of {sorted(_SETTABLE_STATUSES)}, got {body.status!r}",
+        )
+    updated = await repo.set_status(strategy_id, requested)
+    if updated is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} not found",
+        )
+    await session.commit()
+    return ok(StrategyOut.from_registered(updated))

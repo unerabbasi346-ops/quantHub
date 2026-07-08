@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 
@@ -26,6 +27,11 @@ class Portfolio:
     classification. `owner_id`, `updated_at`, `deleted_at` are omitted until a
     consumer needs them (Doc 00 §14.6 — additive, minimal). `created_at` is
     included since a portfolio list is naturally ordered/displayed by it.
+
+    `configured_capital` (migration a7d2e1f04b93) is an operator-SET capital
+    figure with NO backing NAV/cash ledger — None when never configured. It is
+    display/config only and does NOT feed leverage or risk math (F-19 remains
+    open; see the migration for the full boundary).
     """
 
     id: UUID
@@ -35,3 +41,4 @@ class Portfolio:
     portfolio_type: str
     is_active: bool
     created_at: datetime
+    configured_capital: Decimal | None = None

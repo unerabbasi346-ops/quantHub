@@ -168,6 +168,26 @@ class SQLAlchemyStrategyRepository(BaseRepository[object], StrategyRepository):
         )
         return [_row_to_strategy(row) for row in result.mappings().all()]
 
+    async def set_status(self, strategy_id: UUID, status: str) -> RegisteredStrategy | None:
+        """Governed lifecycle transition — Doc 14 §10.2.6. A bare UPDATE of the
+        status column (and updated_at via clock_timestamp(), not NOW(), for the
+        same frozen-transaction reason as upsert), scoped to a live
+        (non-soft-deleted) row. RETURNING the full projection so the caller gets
+        the post-transition state without a second read. Does not commit."""
+        result = await self._session.execute(
+            text(
+                f"""
+                UPDATE core.strategies
+                SET status = :status, updated_at = clock_timestamp()
+                WHERE id = :id AND deleted_at IS NULL
+                RETURNING {_STRATEGY_COLS}
+                """
+            ),
+            {"id": strategy_id, "status": status},
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else _row_to_strategy(row)
+
 
 class SQLAlchemySignalRepository(BaseRepository[object], SignalRepository):
     """Concrete repository for core.signals — Step 2.2, Doc 14 §10.6.4."""

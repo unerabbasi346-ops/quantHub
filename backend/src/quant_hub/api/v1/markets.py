@@ -42,6 +42,7 @@ from pydantic import BaseModel, field_serializer
 
 from quant_hub.api.dependencies import AssetRepo, OHLCVRepo
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
+from quant_hub.domain.market_data.correlation import compute_return_correlations
 
 router = APIRouter(tags=["markets"])
 
@@ -137,3 +138,72 @@ async def get_asset_bars(
         )
     bars = await bar_repo.get_bars(asset_id, interval, limit)
     return ok([OHLCVBarOut.model_validate(b, from_attributes=True) for b in bars])
+
+
+# ── Price-return correlation (owner-requested standalone view) ──────────────
+# SCOPE (flagged, and mirrored in the UI label): this is a descriptive
+# PRICE-RETURN correlation matrix between ingested instruments — NOT a
+# portfolio risk metric, and explicitly unrelated to F-18's deferred §11.5.3
+# risk measures (VaR/CVaR/beta/volatility/drawdown), which stay deferred. It
+# consumes only Phase-1 OHLCV closes and the pure domain calculator
+# (domain/market_data/correlation.py). See that module for the full boundary.
+class CorrelationAssetOut(BaseModel):
+    id: UUID
+    symbol: str
+
+
+class CorrelationOut(BaseModel):
+    """A square return-correlation matrix over the active instruments that
+    share an aligned bar window. `assets[i]` labels row/column i of `matrix`.
+    A cell is null where the coefficient is undefined (a constant series).
+    `sample_size` is the number of aligned return observations."""
+
+    interval: str
+    sample_size: int
+    assets: list[CorrelationAssetOut]
+    matrix: list[list[float | None]]
+
+
+@router.get(
+    "/markets/correlation",
+    response_model=ResponseEnvelope[CorrelationOut],
+    summary="Price-return correlation matrix across ingested instruments (NOT portfolio risk)",
+)
+async def get_correlation(
+    asset_repo: AssetRepo,
+    bar_repo: OHLCVRepo,
+    interval: str = Query("1h", description="Bar interval to correlate over"),
+    limit: int = Query(200, ge=2, le=1000, description="Max most-recent bars per asset"),
+) -> ResponseEnvelope[CorrelationOut]:
+    assets = await asset_repo.list_active()
+
+    # Gather each asset's (ts -> close) for the interval; keep only assets with
+    # at least two bars (a single bar yields no return).
+    closes_by_symbol: dict[str, dict[datetime, float]] = {}
+    included: list[CorrelationAssetOut] = []
+    ts_sets: list[set[datetime]] = []
+    for asset in assets:
+        bars = await bar_repo.get_bars(asset.id, interval, limit)
+        if len(bars) < 2:
+            continue
+        series = {b.ts: float(b.close) for b in bars}
+        closes_by_symbol[asset.symbol] = series
+        ts_sets.append(set(series.keys()))
+        included.append(CorrelationAssetOut(id=asset.id, symbol=asset.symbol))
+
+    # Align on the timestamps common to every included asset (an honest
+    # intersection — correlation is only meaningful over concurrent bars).
+    common = sorted(set.intersection(*ts_sets)) if ts_sets else []
+    aligned = {
+        a.symbol: [closes_by_symbol[a.symbol][ts] for ts in common] for a in included
+    }
+
+    result = compute_return_correlations(aligned)
+    return ok(
+        CorrelationOut(
+            interval=interval,
+            sample_size=result.sample_size,
+            assets=included,
+            matrix=[list(row) for row in result.matrix],
+        )
+    )
