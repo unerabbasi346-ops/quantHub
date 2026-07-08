@@ -129,7 +129,17 @@ export function PriceChart({ bars, markers = [] }: { bars: OHLCVBar[]; markers?:
       close: Number.parseFloat(bar.close),
     }))
     series.setData(data)
-    chartRef.current?.timeScale().fitContent()
+    // Reset BOTH axes to the new series' data. A prior user pan/zoom on the
+    // price axis disables its autoScale and pins a fixed price range; because
+    // a different asset can have a wildly different magnitude (SOL ~77 vs BTC
+    // ~62000), leaving that range makes the new candles render off-screen —
+    // the "empty chart on asset switch" bug. Re-enabling autoScale refits the
+    // price axis; fitContent() refits the time axis (clearing any prior zoom).
+    const chart = chartRef.current
+    if (chart) {
+      chart.priceScale('right').applyOptions({ autoScale: true })
+      chart.timeScale().fitContent()
+    }
   }, [bars])
 
   // Overlay real BUY/SELL fill markers (Doc 06 green=profit/red=risk):
