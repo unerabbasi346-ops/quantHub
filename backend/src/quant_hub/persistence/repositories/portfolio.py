@@ -95,7 +95,8 @@ class SQLAlchemyPortfolioRepository(BaseRepository[object], PortfolioRepository)
 
 _POSITION_COLS = (
     "id, portfolio_id, asset_id, quantity, average_entry_price, market_value, "
-    "unrealized_pnl, realized_pnl_today, last_price, is_closed, sequence_number"
+    "unrealized_pnl, realized_pnl_today, last_price, is_closed, sequence_number, "
+    "leverage, margin_used, liquidation_price"
 )
 
 
@@ -112,6 +113,9 @@ def _row_to_position(row: object) -> RecordedPosition:
         last_price=row["last_price"],
         is_closed=row["is_closed"],
         sequence_number=row["sequence_number"],
+        leverage=row["leverage"],
+        margin_used=row["margin_used"],
+        liquidation_price=row["liquidation_price"],
     )
 
 
@@ -166,6 +170,9 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
         last_price: Decimal,
         last_price_at: object,
         is_closed: bool,
+        leverage: Decimal | None = None,
+        margin_used: Decimal | None = None,
+        liquidation_price: Decimal | None = None,
     ) -> RecordedPosition:
         """Write the next position snapshot — §10.6.6 / §10.9.5. INSERT ... ON
         CONFLICT on the (portfolio_id, asset_id) natural key
@@ -173,17 +180,24 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
         sequence_number on update. `unrealized_pnl` is SET (mark-to-market);
         `realized_pnl_today` ACCUMULATES realized_pnl_delta in SQL (race-safe).
         updated_at via clock_timestamp().
+
+        MARGIN (migration e7a3c1f5b9d2, §10.6.6): `leverage`/`margin_used`/
+        `liquidation_price` are SET on every write, including to NULL — a spot
+        position (leverage None) writes NULL, and a perpetual position that
+        closes flat writes its leverage back to NULL, so the margin columns
+        never carry stale state from a prior fill. Additive keyword args with
+        None defaults so the spot write path (which omits them) is unchanged.
         """
         stmt = text(
             f"""
             INSERT INTO core.positions
                 (portfolio_id, asset_id, quantity, average_entry_price, market_value,
                  unrealized_pnl, realized_pnl_today, last_price, last_price_at,
-                 is_closed, sequence_number)
+                 is_closed, sequence_number, leverage, margin_used, liquidation_price)
             VALUES
                 (:portfolio_id, :asset_id, :quantity, :average_entry_price, :market_value,
                  :unrealized_pnl, :realized_pnl_delta, :last_price, :last_price_at,
-                 :is_closed, 1)
+                 :is_closed, 1, :leverage, :margin_used, :liquidation_price)
             ON CONFLICT (portfolio_id, asset_id)
             DO UPDATE SET
                 quantity            = EXCLUDED.quantity,
@@ -195,6 +209,9 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
                 last_price_at       = EXCLUDED.last_price_at,
                 is_closed           = EXCLUDED.is_closed,
                 sequence_number     = core.positions.sequence_number + 1,
+                leverage            = EXCLUDED.leverage,
+                margin_used         = EXCLUDED.margin_used,
+                liquidation_price   = EXCLUDED.liquidation_price,
                 updated_at          = clock_timestamp()
             RETURNING {_POSITION_COLS}
             """
@@ -212,6 +229,9 @@ class SQLAlchemyPositionRepository(BaseRepository[object], PositionRepository):
                 "last_price": last_price,
                 "last_price_at": last_price_at,
                 "is_closed": is_closed,
+                "leverage": leverage,
+                "margin_used": margin_used,
+                "liquidation_price": liquidation_price,
             },
         )
         return _row_to_position(result.mappings().one())

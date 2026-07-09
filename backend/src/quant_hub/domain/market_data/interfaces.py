@@ -23,6 +23,7 @@ from quant_hub.domain.market_data.entities import (
     Asset,
     AssetRef,
     CorporateAction,
+    FundingRate,
     OHLCVBar,
     Tick,
 )
@@ -195,5 +196,45 @@ class CorporateActionsRepository(ABC):
         the corporate-action fact itself. Retroactively applying a split/
         dividend adjustment to historical bars is explicitly NOT
         implemented (Step 1.10 scope note, application service).
+        """
+        ...
+
+
+class FundingRateRepository(ABC):
+    """Persistence contract for market_data.funding_rates — perpetual funding
+    observations (migration e7a3c1f5b9d2, Step 2 of perpetuals work).
+
+    Follows the OHLCVRepository shape: idempotent batch write + a bounded
+    read for the consuming strategy. Kept separate from OHLCV/tick repos
+    because funding is a distinct perpetual-only data series (mirrors how
+    CorporateActionsRepository is separate).
+    """
+
+    @abstractmethod
+    async def upsert_funding_rates(self, rates: list[FundingRate]) -> int:
+        """Idempotently persist funding observations, returning the count written.
+
+        Idempotent on funding_rates_asset_funding_time_uq (asset_id,
+        funding_time) per Doc 11 §2 ("Idempotent ingestion") — re-fetching a
+        funding window revises rather than duplicates, the same pattern as
+        upsert_bars.
+        """
+        ...
+
+    @abstractmethod
+    async def get_funding_rates(
+        self, asset_id: UUID, limit: int = 100
+    ) -> list[FundingRate]:
+        """Most recent `limit` funding rows for asset_id, oldest -> newest.
+
+        The read the funding-rate strategy (Step 4) consumes — same
+        most-recent-N-then-chronological contract as OHLCVRepository.get_bars.
+        """
+        ...
+
+    @abstractmethod
+    async def get_latest_ts(self, asset_id: UUID) -> datetime | None:
+        """Most recent persisted funding_time for asset_id, or None — the
+        late-arrival/ingestion watermark, mirroring OHLCVRepository.get_latest_ts.
         """
         ...

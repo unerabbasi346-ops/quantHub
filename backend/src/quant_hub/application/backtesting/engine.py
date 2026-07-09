@@ -37,7 +37,11 @@ from quant_hub.application.trading.cycle import TradingCycle
 from quant_hub.domain.backtesting.entities import BacktestConfig, BacktestResult
 from quant_hub.domain.backtesting.interfaces import BacktestRepository
 from quant_hub.domain.market_data.entities import AssetRef
-from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository
+from quant_hub.domain.market_data.interfaces import (
+    AssetRepository,
+    FundingRateRepository,
+    OHLCVRepository,
+)
 from quant_hub.domain.portfolio.construction import PortfolioConstructor
 from quant_hub.domain.portfolio.interfaces import PositionRepository
 from quant_hub.domain.portfolio.sizing import PositionSizer, SizingConstraints
@@ -69,11 +73,16 @@ class BacktestEngine:
         order_gen: OrderGenerationService,
         execution: ExecutionService,
         strategy_plugin: Strategy,
+        funding: FundingRateRepository | None = None,
     ) -> None:
         self._bars = bars
         self._assets = assets
         self._positions = positions
         self._backtests = backtests
+        # Optional (additive): a funding-DRIVEN strategy needs point-in-time funding
+        # served through the replay view. Left None for spot/equity backtests, which
+        # keeps every existing construction site and reproducibility hash unchanged.
+        self._funding = funding
         # The shared per-bar trade cycle (Step 5.1) — the same handler the paper
         # trading runner drives, so backtest and paper logic cannot diverge (T-3).
         self._cycle = TradingCycle(
@@ -97,6 +106,15 @@ class BacktestEngine:
         all_bars = await self._bars.get_bars_range(asset_id, config.interval, config.start, config.end)
         constraints = SizingConstraints(max_position_pct=config.max_position_pct)
 
+        # Point-in-time funding for a funding-driven strategy (additive). Loaded once
+        # here (the full available series); the per-step view clamps it to bar.ts so a
+        # future funding observation is never revealed (§10.3.4). Empty when no funding
+        # repo is wired — the spot/equity path, unchanged.
+        all_funding = (
+            await self._funding.get_funding_rates(asset_id, limit=100_000)
+            if self._funding is not None else []
+        )
+
         backtest_id = await self._backtests.create(config, strategy_id)
 
         bars_processed = signals_generated = orders_created = orders_filled = orders_rejected = 0
@@ -108,7 +126,10 @@ class BacktestEngine:
             # §10.3.4 point-in-time: strategy sees only bars at/before this one.
             # Backtest-specific inputs to the shared cycle: the clamped view and
             # the bar close as this step's market price (no live tick).
-            view = PointInTimeMarketDataView(all_bars[: i + 1], asset, config.interval)
+            view = PointInTimeMarketDataView(
+                all_bars[: i + 1], asset, config.interval,
+                funding=all_funding, as_of=bar.ts,
+            )
             outcome = await self._cycle.run_step(
                 view=view,
                 asset=asset,

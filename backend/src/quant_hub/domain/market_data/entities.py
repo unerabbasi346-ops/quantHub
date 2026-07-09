@@ -29,6 +29,13 @@ class AssetRef:
     asset_class: str
     name: str | None = None
     currency: str = "USD"
+    # SPOT | PERPETUAL — migration e7a3c1f5b9d2. Distinguishes a spot instrument
+    # (e.g. ccxt "BTC/USDT") from its perpetual future (ccxt "BTC/USDT:USDT")
+    # for the SAME underlying. Defaults to SPOT so every existing caller/connector
+    # that does not set it resolves a spot row unchanged (matches the column's
+    # NOT NULL DEFAULT 'SPOT'). Ingestion stamps PERPETUAL from ccxt market
+    # metadata (market['swap']) in Step 2.
+    instrument_type: str = "SPOT"
 
 
 @dataclass(frozen=True)
@@ -55,6 +62,10 @@ class Asset:
     name: str | None
     currency: str
     is_active: bool
+    # SPOT | PERPETUAL (migration e7a3c1f5b9d2). Additive with a default so the
+    # Step 4.1 read path and its tests keep constructing Asset without it until
+    # a consumer distinguishes spot from perpetual.
+    instrument_type: str = "SPOT"
 
 
 @dataclass(frozen=True)
@@ -202,3 +213,52 @@ class CorporateAction:
     record_date: date | None = None
     payment_date: date | None = None
     notes: str | None = None
+
+
+@dataclass(frozen=True)
+class RawFundingRate:
+    """Connector output prior to asset_id resolution — a periodic perpetual
+    funding observation (migration e7a3c1f5b9d2, Step 2 of perpetuals work).
+
+    Funding is the periodic cashflow between long and short holders of a
+    perpetual future — Doc 14 has no funding concept of its own, so this is
+    modelled as the §10.9.5 "Financing Costs" input (kept separate from
+    trading P&L). Sourced from ccxt's fetch_funding_rate_history for a
+    PERPETUAL instrument (`asset.instrument_type == "PERPETUAL"`); a SPOT
+    instrument has no funding.
+
+    `funding_rate` is the fractional rate applied at `funding_time` (e.g.
+    Decimal("0.0001") = 0.01% per interval). `mark_price` / `next_funding_time`
+    / `interval_hours` are nullable — ccxt does not always return them for
+    historical funding rows.
+    """
+
+    asset: AssetRef
+    funding_time: datetime
+    funding_rate: Decimal
+    mark_price: Decimal | None = None
+    next_funding_time: datetime | None = None
+    interval_hours: int | None = None
+    source: str | None = None
+    data_quality: str = "CLEAN"
+
+
+@dataclass(frozen=True)
+class FundingRate:
+    """Persistence-ready funding observation — market_data.funding_rates
+    (migration e7a3c1f5b9d2). The asset_id-resolved counterpart to
+    RawFundingRate, mirroring the RawOHLCVBar/OHLCVBar split.
+
+    Idempotent on funding_rates_asset_funding_time_uq (asset_id, funding_time)
+    — the same idempotent-ingestion pattern as ohlcv_bars, so re-fetching a
+    funding window revises rather than duplicates.
+    """
+
+    asset_id: UUID
+    funding_time: datetime
+    funding_rate: Decimal
+    mark_price: Decimal | None = None
+    next_funding_time: datetime | None = None
+    interval_hours: int | None = None
+    source: str | None = None
+    data_quality: str = "CLEAN"

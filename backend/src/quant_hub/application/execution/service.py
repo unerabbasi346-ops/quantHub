@@ -25,7 +25,11 @@ from quant_hub.domain.execution.interfaces import (
 )
 from quant_hub.domain.execution.simulation import simulate_fill
 from quant_hub.domain.portfolio.interfaces import PositionRepository
-from quant_hub.domain.portfolio.positions import RecordedPosition, apply_fill_to_position
+from quant_hub.domain.portfolio.positions import (
+    RecordedPosition,
+    apply_fill_to_position,
+    compute_perpetual_margin,
+)
 from quant_hub.domain.risk.entities import PreTradeRiskRequest
 
 logger = logging.getLogger(__name__)
@@ -86,12 +90,21 @@ class ExecutionService:
         order: RecordedOrder,
         risk_request: PreTradeRiskRequest,
         executed_at: object,
+        leverage: Decimal | None = None,
     ) -> ExecutionOutcome:
         """Run one order through gate -> (validate|reject) -> fill -> position.
 
         The simulated fill executes at `risk_request.price` — the current
         market price the order was risk-assessed against (immediate simulated
         fill; no routing round-trip, F-16).
+
+        `leverage` (migration e7a3c1f5b9d2, §10.6.6): supplied for a PERPETUAL
+        position, None for spot. When provided, the resulting position's margin
+        state (margin_used, liquidation_price) is computed and persisted; when
+        None the margin columns stay NULL. Caller-supplied context (like
+        risk_request.price) rather than looked up here — the caller that built
+        the order from a perpetual instrument knows its configured leverage,
+        keeping ExecutionService free of an AssetRepository dependency.
         """
         decision = await self._risk_gate.evaluate(risk_request)
 
@@ -135,6 +148,23 @@ class ExecutionService:
         update = apply_fill_to_position(cur_qty, cur_avg, fill.signed_quantity, fill.price)
         market_value = (update.quantity * fill.price).quantize(_MV_SCALE, rounding=ROUND_HALF_EVEN)
 
+        # Margin state (§10.6.6, migration e7a3c1f5b9d2) for a perpetual
+        # position. Computed off the NEW position (post-fill quantity + average
+        # entry), so a reduce/close writes the margin of what remains — and a
+        # flat close writes margin_used=0 / liquidation_price=None. leverage is
+        # left on the row (not None) while the position is open so a reader sees
+        # the multiplier the margin was computed at; it goes back to None only
+        # when the position closes flat. Spot (leverage None) -> all None.
+        if leverage is not None and not update.is_closed:
+            margin = compute_perpetual_margin(
+                update.quantity, update.average_entry_price, leverage
+            )
+            row_leverage: Decimal | None = leverage
+            margin_used = margin.margin_used
+            liquidation_price = margin.liquidation_price
+        else:
+            row_leverage = margin_used = liquidation_price = None
+
         # Step 3.6 (§10.9.5): persist mark-to-market unrealized P&L and
         # accumulate realized P&L from this fill (0 for pure opens/adds).
         position = await self._positions.upsert(
@@ -148,6 +178,9 @@ class ExecutionService:
             last_price=fill.price,
             last_price_at=executed_at,
             is_closed=update.is_closed,
+            leverage=row_leverage,
+            margin_used=margin_used,
+            liquidation_price=liquidation_price,
         )
         return ExecutionOutcome(
             order_id=order.id,

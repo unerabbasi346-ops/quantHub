@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 
-from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, Tick
 from quant_hub.domain.strategy_engine.entities import Signal
 
 
@@ -75,6 +75,29 @@ class MarketDataView(ABC):
     async def latest_tick(self, asset: AssetRef) -> Tick | None:
         """Most-recent persisted tick for an instrument, or None if none exists."""
         ...
+
+    async def latest_funding_rates(
+        self, asset: AssetRef, limit: int = 100
+    ) -> Sequence[FundingRate]:
+        """Most-recent persisted perpetual funding rates for an instrument,
+        oldest→newest, read-only (migration e7a3c1f5b9d2).
+
+        Funding is market data (the periodic perpetual financing series), so it
+        belongs on this read-only port for exactly the reason the FORWARD-LOOKING
+        NOTE above anticipated for features: a funding-aware strategy must reach
+        it HERE, never by holding a repository/connector itself.
+
+        CONCRETE DEFAULT (not @abstractmethod — the one deliberate exception on
+        this otherwise-abstract port): returns an empty sequence. This keeps the
+        addition backward-compatible — every existing MarketDataView
+        implementation (the backtest point-in-time view, test doubles) stays
+        valid without change, and a strategy asking for funding through a view
+        that does not back it gets "no funding data" (an empty sequence, a valid
+        Strategy-contract return meaning "no signal"), never an AttributeError.
+        A view that HAS funding data (RepositoryBackedMarketDataView) overrides
+        this. A SPOT instrument legitimately has no funding and returns empty.
+        """
+        return []
 
 
 class Strategy(ABC):

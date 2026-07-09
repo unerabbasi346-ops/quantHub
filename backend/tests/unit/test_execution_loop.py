@@ -24,7 +24,11 @@ from quant_hub.domain.execution.entities import (
 )
 from quant_hub.domain.execution.interfaces import RiskDecision
 from quant_hub.domain.execution.simulation import simulate_fill
-from quant_hub.domain.portfolio.positions import RecordedPosition, apply_fill_to_position
+from quant_hub.domain.portfolio.positions import (
+    RecordedPosition,
+    apply_fill_to_position,
+    compute_perpetual_margin,
+)
 from quant_hub.domain.risk.entities import PreTradeRiskRequest
 
 _NOW = datetime(2026, 7, 3, 12, 0, tzinfo=timezone.utc)
@@ -254,3 +258,82 @@ async def test_second_buy_averages_into_existing_position() -> None:
     # 0.05@60000 + 0.05@62000 -> 0.10 @ 61000
     assert positions.upserted["quantity"] == Decimal("0.10000000")
     assert positions.upserted["average_entry_price"] == Decimal("61000.00000000")
+
+
+# ── compute_perpetual_margin (§10.6.6, migration e7a3c1f5b9d2) ──────────────
+
+def test_long_margin_and_liquidation() -> None:
+    m = compute_perpetual_margin(Decimal("0.5"), Decimal("100"), Decimal("10"))
+    assert m.margin_used == Decimal("5.00000000")            # notional/L = 50/10
+    assert m.liquidation_price == Decimal("90.50000000")     # 100*(1-0.1+0.005)
+
+
+def test_short_margin_and_liquidation() -> None:
+    m = compute_perpetual_margin(Decimal("-0.5"), Decimal("100"), Decimal("10"))
+    assert m.margin_used == Decimal("5.00000000")
+    assert m.liquidation_price == Decimal("109.50000000")    # 100*(1+0.1-0.005)
+
+
+def test_flat_position_has_no_margin_or_liquidation() -> None:
+    m = compute_perpetual_margin(Decimal("0"), Decimal("100"), Decimal("10"))
+    assert m.margin_used == Decimal("0")
+    assert m.liquidation_price is None
+
+
+def test_leverage_must_be_positive() -> None:
+    with pytest.raises(ValueError):
+        compute_perpetual_margin(Decimal("0.5"), Decimal("100"), Decimal("0"))
+
+
+def test_liquidation_price_floored_at_zero() -> None:
+    # 1x long: liq = 100*(1-1+0.005) = 0.5 (stays positive here); a >1/L short
+    # scenario is floored — verify the floor never yields a negative price.
+    m = compute_perpetual_margin(Decimal("1"), Decimal("100"), Decimal("1"))
+    assert m.liquidation_price == Decimal("0.50000000")
+
+
+# ── ExecutionService margin wiring (leverage -> margin columns) ─────────────
+
+@pytest.mark.asyncio
+async def test_perpetual_order_persists_margin_state() -> None:
+    order = _order(OrderSide.SELL, "0.5")  # open a short
+    svc, orders, executions, positions = _service(RiskDecision(approved=True))
+    orders._order = order
+    await svc.process_order(order, _request(order, "100"), _NOW, leverage=Decimal("10"))
+    # short 0.5 @ 100, 10x -> margin 5, liq 109.5, leverage recorded
+    assert positions.upserted["leverage"] == Decimal("10")
+    assert positions.upserted["margin_used"] == Decimal("5.00000000")
+    assert positions.upserted["liquidation_price"] == Decimal("109.50000000")
+
+
+@pytest.mark.asyncio
+async def test_spot_order_leaves_margin_columns_null() -> None:
+    order = _order(OrderSide.BUY, "0.5")
+    svc, orders, executions, positions = _service(RiskDecision(approved=True))
+    orders._order = order
+    await svc.process_order(order, _request(order, "100"), _NOW)  # no leverage -> spot
+    assert positions.upserted["leverage"] is None
+    assert positions.upserted["margin_used"] is None
+    assert positions.upserted["liquidation_price"] is None
+
+
+@pytest.mark.asyncio
+async def test_closing_perpetual_clears_margin_state() -> None:
+    # existing short 0.5 @ 100 (perp); a BUY 0.5 closes it flat -> margin cleared
+    order = _order(OrderSide.BUY, "0.5")
+    existing = RecordedPosition(
+        id=uuid7(), portfolio_id=order.portfolio_id, asset_id=order.asset_id,
+        quantity=Decimal("-0.5"), average_entry_price=Decimal("100"),
+        market_value=Decimal("-50"), unrealized_pnl=Decimal("0"),
+        realized_pnl_today=Decimal("0"), last_price=Decimal("100"),
+        is_closed=False, sequence_number=1,
+        leverage=Decimal("10"), margin_used=Decimal("5"), liquidation_price=Decimal("109.5"),
+    )
+    svc, orders, executions, positions = _service(RiskDecision(approved=True), existing)
+    orders._order = order
+    await svc.process_order(order, _request(order, "100"), _NOW, leverage=Decimal("10"))
+    assert positions.upserted["is_closed"] is True
+    # flat close -> margin state written back to NULL, not left stale
+    assert positions.upserted["leverage"] is None
+    assert positions.upserted["margin_used"] is None
+    assert positions.upserted["liquidation_price"] is None

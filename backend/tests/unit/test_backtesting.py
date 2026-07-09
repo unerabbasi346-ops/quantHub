@@ -28,7 +28,7 @@ from quant_hub.domain.execution.entities import (
     TimeInForce,
 )
 from quant_hub.domain.execution.entities import TargetPosition  # noqa: F401 (type context)
-from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar
+from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar
 from quant_hub.domain.strategy_engine.entities import RecordedSignal, Signal
 from quant_hub.domain.strategy_engine.strategy import MarketDataView, Strategy
 from quant_hub.infrastructure.backtesting.point_in_time_view import PointInTimeMarketDataView
@@ -72,6 +72,47 @@ async def test_view_unknown_asset_or_interval_is_empty() -> None:
     assert await view.latest_bars(AssetRef("ETH/USDT", "binance", "crypto"), "1h") == []
     assert await view.latest_bars(_ASSET, "1d") == []
     assert await view.latest_tick(_ASSET) is None
+
+
+# ── PointInTimeMarketDataView funding (additive, §10.3.4) ───────────────────
+
+
+def _funding(i: int, rate: str) -> FundingRate:
+    return FundingRate(
+        asset_id=uuid4(), funding_time=_T0 + timedelta(hours=8 * i),
+        funding_rate=Decimal(rate),
+    )
+
+
+@pytest.mark.asyncio
+async def test_view_no_funding_defaults_empty() -> None:
+    # Backward compatibility: a view constructed without funding serves none.
+    view = PointInTimeMarketDataView([_bar(0, "100")], _ASSET, "1h")
+    assert await view.latest_funding_rates(_ASSET) == []
+
+
+@pytest.mark.asyncio
+async def test_view_funding_clamped_to_as_of() -> None:
+    # Funding at t=0,8,16,24h; as_of at 16h -> only the first three are visible
+    # (never a future observation), newest last, trailing `limit` honoured.
+    funding = [_funding(i, f"0.000{i}") for i in range(4)]
+    view = PointInTimeMarketDataView(
+        [_bar(0, "100")], _ASSET, "1h", funding=funding, as_of=_T0 + timedelta(hours=16),
+    )
+    got = await view.latest_funding_rates(_ASSET, limit=100)
+    assert [f.funding_time for f in got] == [_T0, _T0 + timedelta(hours=8), _T0 + timedelta(hours=16)]
+    # trailing-limit semantics, same as bars
+    assert [f.funding_time for f in await view.latest_funding_rates(_ASSET, limit=2)] == [
+        _T0 + timedelta(hours=8), _T0 + timedelta(hours=16),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_view_funding_unknown_asset_is_empty() -> None:
+    view = PointInTimeMarketDataView(
+        [_bar(0, "100")], _ASSET, "1h", funding=[_funding(0, "0.0001")], as_of=_T0,
+    )
+    assert await view.latest_funding_rates(AssetRef("ETH/USDT", "binance", "crypto")) == []
 
 
 # ── Engine determinism + orchestration (fakes for persistence) ──────────────

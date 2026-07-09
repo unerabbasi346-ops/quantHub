@@ -33,12 +33,14 @@ from quant_hub.domain.market_data.entities import (
     Asset,
     AssetRef,
     CorporateAction,
+    FundingRate,
     OHLCVBar,
     Tick,
 )
 from quant_hub.domain.market_data.interfaces import (
     AssetRepository,
     CorporateActionsRepository,
+    FundingRateRepository,
     OHLCVRepository,
     TickRepository,
 )
@@ -61,7 +63,8 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
         """
         result = await self._session.execute(
             text(
-                "SELECT id, symbol, exchange, asset_class, name, currency, is_active "
+                "SELECT id, symbol, exchange, asset_class, name, currency, is_active, "
+                "instrument_type "
                 "FROM market_data.assets "
                 "WHERE id = :asset_id AND deleted_at IS NULL"
             ),
@@ -78,6 +81,7 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
             name=row["name"],
             currency=row["currency"],
             is_active=row["is_active"],
+            instrument_type=row["instrument_type"],
         )
 
     async def get_by_symbol_exchange(self, symbol: str, exchange: str) -> UUID | None:
@@ -107,7 +111,8 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
         """
         result = await self._session.execute(
             text(
-                "SELECT id, symbol, exchange, asset_class, name, currency, is_active "
+                "SELECT id, symbol, exchange, asset_class, name, currency, is_active, "
+                "instrument_type "
                 "FROM market_data.assets "
                 "WHERE is_active = TRUE AND deleted_at IS NULL "
                 "ORDER BY symbol, exchange"
@@ -122,6 +127,7 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
                 name=row["name"],
                 currency=row["currency"],
                 is_active=row["is_active"],
+                instrument_type=row["instrument_type"],
             )
             for row in result.mappings().all()
         ]
@@ -147,14 +153,17 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
         """
         stmt = text(
             """
-            INSERT INTO market_data.assets (symbol, exchange, asset_class, name, currency)
-            VALUES (:symbol, :exchange, :asset_class, :name, :currency)
+            INSERT INTO market_data.assets
+                (symbol, exchange, asset_class, name, currency, instrument_type)
+            VALUES
+                (:symbol, :exchange, :asset_class, :name, :currency, :instrument_type)
             ON CONFLICT ON CONSTRAINT assets_symbol_exchange_uq
             DO UPDATE SET
-                asset_class = EXCLUDED.asset_class,
-                name        = EXCLUDED.name,
-                currency    = EXCLUDED.currency,
-                updated_at  = clock_timestamp()
+                asset_class     = EXCLUDED.asset_class,
+                name            = EXCLUDED.name,
+                currency        = EXCLUDED.currency,
+                instrument_type = EXCLUDED.instrument_type,
+                updated_at      = clock_timestamp()
             RETURNING id
             """
         )
@@ -166,6 +175,7 @@ class SQLAlchemyAssetRepository(BaseRepository[object], AssetRepository):
                 "asset_class": asset.asset_class,
                 "name": asset.name,
                 "currency": asset.currency,
+                "instrument_type": asset.instrument_type,
             },
         )
         return result.scalar_one()
@@ -568,3 +578,120 @@ class SQLAlchemyCorporateActionsRepository(BaseRepository[object], CorporateActi
                 actions[0].asset_id, inserted, revised, failed,
             )
         return inserted + revised
+
+
+class SQLAlchemyFundingRateRepository(BaseRepository[object], FundingRateRepository):
+    """Concrete repository for market_data.funding_rates — perpetual funding
+    observations (migration e7a3c1f5b9d2, Step 2 of perpetuals work)."""
+
+    async def upsert_funding_rates(self, rates: list[FundingRate]) -> int:
+        """Idempotently persist funding observations on
+        funding_rates_asset_funding_time_uq — Doc 11 §2 idempotent ingestion.
+
+        ON CONFLICT DO UPDATE, per-row SAVEPOINT checkpoint isolation, and the
+        insert/revised tally follow the exact same pattern as
+        SQLAlchemyOHLCVRepository.upsert_bars — see that method's docstring for
+        the full reasoning (DO-UPDATE-vs-DO-NOTHING judgment call, SAVEPOINT
+        rationale, xmax=0 insert-vs-revised signal, clock_timestamp() over
+        NOW()). Reused here rather than re-derived.
+        """
+        stmt = text(
+            """
+            INSERT INTO market_data.funding_rates
+                (asset_id, funding_time, funding_rate, mark_price,
+                 next_funding_time, interval_hours, source, data_quality)
+            VALUES
+                (:asset_id, :funding_time, :funding_rate, :mark_price,
+                 :next_funding_time, :interval_hours, :source, :data_quality)
+            ON CONFLICT ON CONSTRAINT funding_rates_asset_funding_time_uq
+            DO UPDATE SET
+                funding_rate      = EXCLUDED.funding_rate,
+                mark_price        = EXCLUDED.mark_price,
+                next_funding_time = EXCLUDED.next_funding_time,
+                interval_hours    = EXCLUDED.interval_hours,
+                source            = EXCLUDED.source,
+                data_quality      = EXCLUDED.data_quality,
+                updated_at        = clock_timestamp()
+            RETURNING (xmax = 0) AS was_insert
+            """
+        )
+        inserted = 0
+        revised = 0
+        failed = 0
+        for rate in rates:
+            try:
+                async with self._session.begin_nested():
+                    result = await self._session.execute(
+                        stmt,
+                        {
+                            "asset_id": rate.asset_id,
+                            "funding_time": rate.funding_time,
+                            "funding_rate": rate.funding_rate,
+                            "mark_price": rate.mark_price,
+                            "next_funding_time": rate.next_funding_time,
+                            "interval_hours": rate.interval_hours,
+                            "source": rate.source,
+                            "data_quality": rate.data_quality,
+                        },
+                    )
+                if result.scalar_one():
+                    inserted += 1
+                else:
+                    revised += 1
+            except DBAPIError as exc:
+                failed += 1
+                logger.error(
+                    "upsert_funding_rates: failed to persist funding row, asset_id=%s "
+                    "funding_time=%s error=%r",
+                    rate.asset_id, rate.funding_time, exc,
+                )
+        if rates:
+            logger.info(
+                "upsert_funding_rates: batch summary asset_id=%s inserted=%d revised=%d failed=%d",
+                rates[0].asset_id, inserted, revised, failed,
+            )
+        return inserted + revised
+
+    async def get_funding_rates(self, asset_id: UUID, limit: int = 100) -> list[FundingRate]:
+        """Most recent `limit` funding rows for asset_id, oldest -> newest.
+
+        ORDER BY funding_time DESC LIMIT :limit then reverse — the same
+        most-recent-N-then-chronological shape as OHLCVRepository.get_bars, so
+        the funding-rate strategy consumes it exactly like a bar series.
+        """
+        result = await self._session.execute(
+            text(
+                "SELECT asset_id, funding_time, funding_rate, mark_price, "
+                "next_funding_time, interval_hours, source, data_quality "
+                "FROM market_data.funding_rates "
+                "WHERE asset_id = :asset_id "
+                "ORDER BY funding_time DESC LIMIT :limit"
+            ),
+            {"asset_id": asset_id, "limit": limit},
+        )
+        rows = [
+            FundingRate(
+                asset_id=row["asset_id"],
+                funding_time=row["funding_time"],
+                funding_rate=row["funding_rate"],
+                mark_price=row["mark_price"],
+                next_funding_time=row["next_funding_time"],
+                interval_hours=row["interval_hours"],
+                source=row["source"],
+                data_quality=row["data_quality"],
+            )
+            for row in result.mappings().all()
+        ]
+        rows.reverse()  # DESC-fetched -> oldest-to-newest, matching get_bars' contract
+        return rows
+
+    async def get_latest_ts(self, asset_id: UUID) -> datetime | None:
+        """Most recent persisted funding_time watermark — see interface docstring."""
+        result = await self._session.execute(
+            text(
+                "SELECT MAX(funding_time) FROM market_data.funding_rates "
+                "WHERE asset_id = :asset_id"
+            ),
+            {"asset_id": asset_id},
+        )
+        return result.scalar_one_or_none()

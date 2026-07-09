@@ -11,12 +11,21 @@ from decimal import Decimal
 import aiohttp
 import ccxt.async_support as ccxt
 
-from quant_hub.domain.market_data.connectors import MarketDataConnector
-from quant_hub.domain.market_data.entities import AssetRef, RawOHLCVBar, RawTick
+from quant_hub.domain.market_data.connectors import (
+    FundingRateConnector,
+    MarketDataConnector,
+    infer_instrument_type,
+)
+from quant_hub.domain.market_data.entities import (
+    AssetRef,
+    RawFundingRate,
+    RawOHLCVBar,
+    RawTick,
+)
 from quant_hub.infrastructure.market_data.retry import with_retry
 
 
-class CCXTConnector(MarketDataConnector):
+class CCXTConnector(MarketDataConnector, FundingRateConnector):
     """Crypto market-data adapter over CCXT — Doc 11 §1, Doc 03 §Quantitative Libraries.
 
     JUDGMENT CALL (flagged per Doc 00 §14.5/§14.7 — not silently decided):
@@ -88,7 +97,18 @@ class CCXTConnector(MarketDataConnector):
             retryable=(ccxt.NetworkError,),
             context=f"CCXTConnector.fetch_ohlcv(symbol={symbol}, interval={interval})",
         )
-        asset = AssetRef(symbol=symbol, exchange=self.source_id, asset_class="crypto")
+        asset = AssetRef(
+            symbol=symbol,
+            exchange=self.source_id,
+            asset_class="crypto",
+            # SPOT vs PERPETUAL from ccxt's own unified-symbol convention
+            # (":" settle suffix -> perpetual), network-free — see
+            # infer_instrument_type. The owner passes e.g. "BTC/USDT" (spot)
+            # or "BTC/USDT:USDT" (USDT-margined perpetual) for the same
+            # underlying, which resolve to distinct assets rows (distinct
+            # symbol -> distinct assets_symbol_exchange_uq key).
+            instrument_type=infer_instrument_type(symbol),
+        )
         return [
             RawOHLCVBar(
                 asset=asset,
@@ -120,7 +140,18 @@ class CCXTConnector(MarketDataConnector):
         )
         if not ticker:
             return None
-        asset = AssetRef(symbol=symbol, exchange=self.source_id, asset_class="crypto")
+        asset = AssetRef(
+            symbol=symbol,
+            exchange=self.source_id,
+            asset_class="crypto",
+            # SPOT vs PERPETUAL from ccxt's own unified-symbol convention
+            # (":" settle suffix -> perpetual), network-free — see
+            # infer_instrument_type. The owner passes e.g. "BTC/USDT" (spot)
+            # or "BTC/USDT:USDT" (USDT-margined perpetual) for the same
+            # underlying, which resolve to distinct assets rows (distinct
+            # symbol -> distinct assets_symbol_exchange_uq key).
+            instrument_type=infer_instrument_type(symbol),
+        )
         now = datetime.now(timezone.utc)
         ts_ms = ticker.get("timestamp")
         return RawTick(
@@ -138,6 +169,65 @@ class CCXTConnector(MarketDataConnector):
             # truncated this silently on every live tick fetch.
             volume=_to_decimal(ticker.get("baseVolume")),
         )
+
+    async def fetch_funding_rate_history(
+        self,
+        symbol: str,
+        since: datetime | None = None,
+        limit: int = 500,
+    ) -> list[RawFundingRate]:
+        """Historical perpetual funding rates via ccxt.fetch_funding_rate_history.
+
+        ccxt returns rows shaped {timestamp, datetime, symbol, fundingRate,
+        info, ...}; `fundingRate` is the fractional rate applied at that
+        funding time. `mark_price`, `next_funding_time`, and `interval_hours`
+        are left None — ccxt's unified funding-history row does not carry them
+        (they live in the venue-specific `info` blob, which Doc 11's
+        normalization mandate says not to leak through unchanged). Same retry
+        policy as fetch_ohlcv (ccxt.NetworkError, bounded backoff). Same
+        Decimal(str(...)) conversion as volume to avoid float-repr noise.
+
+        The symbol must be a PERPETUAL ccxt symbol (e.g. "BTC/USDT:USDT");
+        instrument_type is stamped from the symbol convention, so a
+        mis-passed spot symbol produces SPOT-typed RawFundingRate rows that
+        the repository/strategy layer can reject — funding on a spot asset is
+        meaningless (FundingRateConnector docstring).
+        """
+        since_ms = int(since.timestamp() * 1000) if since is not None else None
+
+        async def _do_fetch() -> list:
+            return await self._exchange.fetch_funding_rate_history(
+                symbol, since=since_ms, limit=limit
+            )
+
+        raw_rows = await with_retry(
+            _do_fetch,
+            retryable=(ccxt.NetworkError,),
+            context=f"CCXTConnector.fetch_funding_rate_history(symbol={symbol})",
+        )
+        asset = AssetRef(
+            symbol=symbol,
+            exchange=self.source_id,
+            asset_class="crypto",
+            instrument_type=infer_instrument_type(symbol),
+        )
+        rates: list[RawFundingRate] = []
+        for row in raw_rows:
+            ts_ms = row.get("timestamp")
+            rate = row.get("fundingRate")
+            # A funding row with no timestamp or no rate is unusable — skip it
+            # rather than fabricate a value (Doc 11 §2 normalize: no invented data).
+            if ts_ms is None or rate is None:
+                continue
+            rates.append(
+                RawFundingRate(
+                    asset=asset,
+                    funding_time=datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc),
+                    funding_rate=Decimal(str(rate)),
+                    source=self.source_id,
+                )
+            )
+        return rates
 
     async def close(self) -> None:
         """Release the underlying ccxt client's network resources.

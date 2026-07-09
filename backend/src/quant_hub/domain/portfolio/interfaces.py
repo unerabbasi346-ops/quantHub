@@ -80,12 +80,21 @@ class PositionRepository(ABC):
         last_price: Decimal,
         last_price_at: object,
         is_closed: bool,
+        leverage: Decimal | None = None,
+        margin_used: Decimal | None = None,
+        liquidation_price: Decimal | None = None,
     ) -> RecordedPosition:
         """Write the next position snapshot — Doc 14 §10.6.6 (position updated
         on every fill). Upsert on the (portfolio_id, asset_id) natural key,
         incrementing sequence_number. `unrealized_pnl` is set to the mark-to-
         market value; `realized_pnl_delta` is ADDED to realized_pnl_today
         (Step 3.6, §10.9.5). Does not commit (caller owns the transaction).
+
+        `leverage`/`margin_used`/`liquidation_price` (migration e7a3c1f5b9d2,
+        §10.6.6 Margin Monitoring) are the perpetual position's margin state;
+        None for a spot/unleveraged position. They are always written
+        (including to NULL) so the margin columns never carry stale state from a
+        prior fill — additive keyword args, so the spot write path is unchanged.
         """
         ...
 

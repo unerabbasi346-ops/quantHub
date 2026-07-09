@@ -18,8 +18,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 
-from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, Tick
 from quant_hub.domain.strategy_engine.strategy import MarketDataView
 
 
@@ -32,12 +33,32 @@ class PointInTimeMarketDataView(MarketDataView):
     identical semantics to the live view, so the strategy's moving-average
     logic behaves the same. `latest_tick` returns None: a bar-driven backtest
     has no tick stream (the strategy under test reads bars, not ticks).
+
+    FUNDING (additive, migration e7a3c1f5b9d2 lineage): a funding-DRIVEN strategy
+    (FundingRateBasisStrategy) reads `latest_funding_rates`, which the ABC
+    defaults to empty — so without this, such a strategy would emit NO signal in
+    a backtest replay. The engine now optionally passes the instrument's full
+    funding series plus this step's `as_of` timestamp; `latest_funding_rates`
+    then serves only funding observations at/before `as_of`, enforcing §10.3.4
+    point-in-time correctness for funding exactly as the bar slice does for bars.
+    Backward compatible: a caller that passes no funding (equities/spot backtests,
+    every pre-existing construction site) gets the ABC's empty default unchanged.
     """
 
-    def __init__(self, bars: Sequence[OHLCVBar], asset: AssetRef, interval: str) -> None:
+    def __init__(
+        self,
+        bars: Sequence[OHLCVBar],
+        asset: AssetRef,
+        interval: str,
+        funding: Sequence[FundingRate] = (),
+        as_of: datetime | None = None,
+    ) -> None:
         self._bars = list(bars)
         self._asset = asset
         self._interval = interval
+        # Funding kept sorted oldest->newest and clamped to as_of on read (point-in-time).
+        self._funding = sorted(funding, key=lambda f: f.funding_time)
+        self._as_of = as_of
 
     async def latest_bars(
         self, asset: AssetRef, interval: str, limit: int = 100
@@ -52,3 +73,17 @@ class PointInTimeMarketDataView(MarketDataView):
 
     async def latest_tick(self, asset: AssetRef) -> Tick | None:
         return None
+
+    async def latest_funding_rates(
+        self, asset: AssetRef, limit: int = 100
+    ) -> Sequence[FundingRate]:
+        # Same instrument-scoping as latest_bars; unknown asset -> "no data".
+        if (asset.symbol, asset.exchange) != (self._asset.symbol, self._asset.exchange):
+            return []
+        # §10.3.4: never reveal a funding observation dated after this step.
+        visible = (
+            self._funding
+            if self._as_of is None
+            else [f for f in self._funding if f.funding_time <= self._as_of]
+        )
+        return visible[-limit:] if 0 < limit < len(visible) else list(visible)

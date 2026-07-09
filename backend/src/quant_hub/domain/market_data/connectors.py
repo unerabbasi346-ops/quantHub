@@ -8,7 +8,41 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from quant_hub.domain.market_data.entities import RawCorporateAction, RawOHLCVBar, RawTick
+from quant_hub.domain.market_data.entities import (
+    RawCorporateAction,
+    RawFundingRate,
+    RawOHLCVBar,
+    RawTick,
+)
+
+
+def infer_instrument_type(symbol: str, market: dict | None = None) -> str:
+    """Classify a ccxt symbol as SPOT or PERPETUAL — pure, no I/O (unit-testable).
+
+    Preference order (most authoritative first):
+      1. ccxt market metadata: `market['swap'] is True` (ccxt's own flag for a
+         perpetual swap) -> PERPETUAL. This is the ccxt-native source of truth
+         and is used whenever the caller has loaded the market dict.
+      2. ccxt unified-symbol convention (fallback when `market` is None): a
+         perpetual is `BASE/QUOTE:SETTLE` (a settle suffix after ':' with NO
+         dated-expiry '-YYMMDD' tail); spot is `BASE/QUOTE` (no ':').
+
+    SCOPE (S-10): only SPOT | PERPETUAL are modelled. A dated future
+    (`BASE/QUOTE:SETTLE-YYMMDD`) is NOT a perpetual and NOT in scope — it is
+    classified SPOT-by-default here (its ':' carries an expiry '-'), flagged
+    so a future dated-futures effort adds an explicit type rather than
+    silently mis-reading this fallback. Inverse (coin-margined) perps are out
+    of scope per S-10 but WOULD still classify PERPETUAL via market['swap'];
+    that is harmless (the type is correct) — the margin math, not this
+    classification, is what excludes them.
+    """
+    if market is not None:
+        return "PERPETUAL" if market.get("swap") is True else "SPOT"
+    # Symbol-convention fallback: perpetual = ':' present, no dated-expiry tail.
+    _, _, settle = symbol.partition(":")
+    if settle and "-" not in settle:
+        return "PERPETUAL"
+    return "SPOT"
 
 
 class MarketDataConnector(ABC):
@@ -65,3 +99,33 @@ class CorporateActionsConnector(ABC):
 
     @abstractmethod
     async def fetch_corporate_actions(self, symbol: str) -> list[RawCorporateAction]: ...
+
+
+class FundingRateConnector(ABC):
+    """Perpetual funding-rate data source contract (Step 2 of perpetuals work).
+
+    Kept as a SEPARATE ABC from MarketDataConnector for the same reason
+    CorporateActionsConnector is (see its docstring): funding is a
+    perpetual-derivative construct with no spot/equities analog, so forcing it
+    onto the shared connector contract would make spot-only connectors
+    (YFinanceConnector) implement a meaningless stub. Only a derivatives
+    connector (CCXTConnector against a swap symbol) implements this; a class
+    may implement both ABCs.
+
+    JUDGMENT CALL (Doc 00 §14.5/§14.7): the symbol passed must be a ccxt
+    PERPETUAL symbol (e.g. "BTC/USDT:USDT"); calling this with a spot symbol
+    is a caller error (spot has no funding). Not enforced here — the contract
+    documents it; ccxt raises BadSymbol for a non-swap symbol on most venues.
+    """
+
+    source_id: str
+
+    @abstractmethod
+    async def fetch_funding_rate_history(
+        self,
+        symbol: str,
+        since: datetime | None = None,
+        limit: int = 500,
+    ) -> list[RawFundingRate]:
+        """Historical periodic funding observations for a perpetual, oldest -> newest."""
+        ...

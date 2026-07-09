@@ -123,3 +123,50 @@ async def test_get_by_portfolio_returns_only_that_portfolios_positions(
     assert len(result) == 1
     assert result[0].portfolio_id == portfolio_a
     assert result[0].asset_id == asset_a
+
+
+async def test_position_margin_state_round_trips(db_session: AsyncSession) -> None:
+    # A perpetual position persists leverage/margin_used/liquidation_price and
+    # reads them back (migration e7a3c1f5b9d2, §10.6.6 Margin Monitoring).
+    portfolio = await _mk_portfolio(db_session)
+    asset = await _mk_asset(db_session)
+    now = datetime.now(timezone.utc)
+    positions = SQLAlchemyPositionRepository(db_session)
+
+    written = await positions.upsert(
+        portfolio, asset,
+        quantity=Decimal("-0.5"), average_entry_price=Decimal("100"),
+        market_value=Decimal("-50"), unrealized_pnl=Decimal("0"),
+        realized_pnl_delta=Decimal("0"), last_price=Decimal("100"),
+        last_price_at=now, is_closed=False,
+        leverage=Decimal("10"), margin_used=Decimal("5"),
+        liquidation_price=Decimal("109.5"),
+    )
+    assert written.leverage == Decimal("10.00")               # NUMERIC(8,2)
+    assert written.margin_used == Decimal("5.00000000")       # NUMERIC(28,8)
+    assert written.liquidation_price == Decimal("109.50000000")
+
+    # read back via the fetch path
+    read = await positions.get_by_portfolio_and_asset(portfolio, asset)
+    assert read is not None
+    assert read.margin_used == Decimal("5.00000000")
+    assert read.liquidation_price == Decimal("109.50000000")
+
+
+async def test_spot_position_has_null_margin_state(db_session: AsyncSession) -> None:
+    # Omitting the margin kwargs (the spot write path) leaves the columns NULL.
+    portfolio = await _mk_portfolio(db_session)
+    asset = await _mk_asset(db_session)
+    now = datetime.now(timezone.utc)
+    positions = SQLAlchemyPositionRepository(db_session)
+
+    written = await positions.upsert(
+        portfolio, asset,
+        quantity=Decimal("1"), average_entry_price=Decimal("100"),
+        market_value=Decimal("100"), unrealized_pnl=Decimal("0"),
+        realized_pnl_delta=Decimal("0"), last_price=Decimal("100"),
+        last_price_at=now, is_closed=False,
+    )
+    assert written.leverage is None
+    assert written.margin_used is None
+    assert written.liquidation_price is None

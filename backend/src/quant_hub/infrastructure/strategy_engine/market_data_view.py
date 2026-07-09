@@ -18,8 +18,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from quant_hub.domain.market_data.entities import AssetRef, OHLCVBar, Tick
-from quant_hub.domain.market_data.interfaces import AssetRepository, OHLCVRepository, TickRepository
+from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, Tick
+from quant_hub.domain.market_data.interfaces import (
+    AssetRepository,
+    FundingRateRepository,
+    OHLCVRepository,
+    TickRepository,
+)
 from quant_hub.domain.strategy_engine.strategy import MarketDataView
 
 
@@ -38,10 +43,22 @@ class RepositoryBackedMarketDataView(MarketDataView):
     ingested yet should behave (return no signal, not raise).
     """
 
-    def __init__(self, assets: AssetRepository, bars: OHLCVRepository, ticks: TickRepository) -> None:
+    def __init__(
+        self,
+        assets: AssetRepository,
+        bars: OHLCVRepository,
+        ticks: TickRepository,
+        funding_rates: FundingRateRepository | None = None,
+    ) -> None:
         self._assets = assets
         self._bars = bars
         self._ticks = ticks
+        # Optional (migration e7a3c1f5b9d2): a caller that wires funding data
+        # (the funding-rate strategy path) passes it; callers that don't
+        # (equities/spot flows, backtests) leave it None and latest_funding_rates
+        # returns empty, matching the ABC's concrete default. Additive so every
+        # existing 3-arg construction site is unchanged.
+        self._funding_rates = funding_rates
 
     async def latest_bars(
         self, asset: AssetRef, interval: str, limit: int = 100
@@ -56,3 +73,16 @@ class RepositoryBackedMarketDataView(MarketDataView):
         if asset_id is None:
             return None
         return await self._ticks.get_latest(asset_id)
+
+    async def latest_funding_rates(
+        self, asset: AssetRef, limit: int = 100
+    ) -> Sequence[FundingRate]:
+        # No funding repo wired -> defer to the ABC's empty default (no funding
+        # available through this view), same "no data yet" treatment as an
+        # unresolved asset below.
+        if self._funding_rates is None:
+            return []
+        asset_id = await self._assets.get_by_symbol_exchange(asset.symbol, asset.exchange)
+        if asset_id is None:
+            return []
+        return await self._funding_rates.get_funding_rates(asset_id, limit)
