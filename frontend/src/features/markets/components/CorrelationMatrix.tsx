@@ -13,21 +13,8 @@
 'use client'
 
 import { Info } from 'lucide-react'
-import { Badge, EmptyState, ErrorState, Panel, Section } from '@/components/ui'
-import { CryptoIcon } from '@/components/ui'
+import { Badge, EmptyState, ErrorState, Heatmap, Panel, Section } from '@/components/ui'
 import { useCorrelation } from '../hooks/useMarkets'
-
-// Diverging cell background: +1 -> profit green, 0 -> transparent, -1 -> risk red.
-function cellStyle(v: number | null): React.CSSProperties {
-  if (v === null) return {}
-  const mag = Math.min(1, Math.abs(v))
-  const hue = v >= 0 ? 'var(--color-profit)' : 'var(--color-risk)'
-  return { background: `hsl(${hue} / ${(0.12 + mag * 0.55).toFixed(3)})` }
-}
-
-function fmtCell(v: number | null): string {
-  return v === null ? '—' : v.toFixed(2)
-}
 
 export function CorrelationMatrix() {
   const query = useCorrelation('1h')
@@ -59,44 +46,14 @@ export function CorrelationMatrix() {
       )}
 
       {query.isSuccess && data && data.assets.length >= 2 && (
-        <Panel className="overflow-x-auto p-4">
-          <table className="border-separate border-spacing-1">
-            <thead>
-              <tr>
-                <th className="w-28" />
-                {data.assets.map((a) => (
-                  <th key={a.id} className="px-1 pb-2">
-                    <div className="flex flex-col items-center gap-1">
-                      <CryptoIcon symbol={a.symbol} size={20} />
-                      <span className="text-[10px] font-medium text-fg-muted">{a.symbol.split('/')[0]}</span>
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.assets.map((rowAsset, i) => (
-                <tr key={rowAsset.id}>
-                  <td className="pr-3">
-                    <div className="flex items-center gap-2">
-                      <CryptoIcon symbol={rowAsset.symbol} size={20} />
-                      <span className="text-xs font-medium text-fg">{rowAsset.symbol.split('/')[0]}</span>
-                    </div>
-                  </td>
-                  {data.matrix[i].map((v, j) => (
-                    <td
-                      key={j}
-                      style={cellStyle(v)}
-                      title={`${rowAsset.symbol} · ${data.assets[j].symbol}: ${fmtCell(v)}`}
-                      className="h-11 w-16 rounded-md text-center align-middle font-mono text-xs tabular-nums text-fg"
-                    >
-                      {fmtCell(v)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Panel className="p-4">
+          <Heatmap
+            xLabels={data.assets.map((a) => a.symbol.split('/')[0])}
+            yLabels={data.assets.map((a) => a.symbol.split('/')[0])}
+            values={data.matrix}
+            mode="diverging"
+            height={Math.max(280, data.assets.length * 46 + 90)}
+          />
         </Panel>
       )}
     </Section>

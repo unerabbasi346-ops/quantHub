@@ -1,13 +1,14 @@
-// Governing specification: Doc 06 — UI/UX Design System (QH-006 v1.0)
-//   §Components (cards), §Data Visualization (inline sparkline).
-// Doc 14 §10.2 (Strategy Governance), §10.3 (Backtesting). Doc 00 §14.5/§14.7
-//   — DATA HONESTY: every number real; uncomputed metrics show an explicit
-//   "Not yet computed" state (F-18 risk metrics / F-21 equity-curve), never a
-//   fabricated value. Per Doc 00 §14.11
+// Governing specification: Doc 03 §Strategy Cards ("miniature research reports":
+//   Status, mini equity curve, Signal Count, Current Conviction, Current Asset,
+//   Last Signal + the risk metrics), Doc 04 §Strategy Performance Card.
+// Doc 00 §14.5/§14.7 — DATA HONESTY: every number real; uncomputed metrics show
+//   an explicit "Not yet computed" state (F-18 risk metrics / F-21 equity-curve),
+//   never a fabricated value. Per Doc 00 §14.11
 //
-// One glowing card per registered strategy (owner request, point 4). Clicking
-// it navigates to the dedicated detail route /strategies/[id] (point 6). Scales
-// to any number of strategies via the caller's responsive grid.
+// One glowing card per registered strategy. Clicking it opens /strategies/[id].
+// The card packs the Doc 03 field set that REAL data supports (signals-derived:
+// count, current conviction, asset, last signal) and honestly defers the metrics
+// the platform does not compute yet (drawdown / win rate / Sharpe).
 'use client'
 
 import Link from 'next/link'
@@ -23,9 +24,12 @@ function returnPct(v: string | null): { text: string; tone: 'profit' | 'risk' | 
   return { text: `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`, tone: n >= 0 ? 'profit' : 'risk' }
 }
 
+function fmtSignalTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 // Honest "not computed" chip — real per-step equity-curve tracking does not
-// exist yet, so drawdown / win-rate cannot be computed (F-18/F-21). We say so
-// rather than invent a number.
+// exist yet, so drawdown / win-rate / Sharpe cannot be computed (F-18/F-21).
 function NotComputed({ label }: { label: string }) {
   return (
     <div className="flex flex-col gap-1">
@@ -35,17 +39,39 @@ function NotComputed({ label }: { label: string }) {
         className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[11px] font-medium text-fg-subtle"
       >
         <span aria-hidden className="h-1 w-1 rounded-full bg-fg-subtle" />
-        Not yet computed
+        Not computed
+      </span>
+    </div>
+  )
+}
+
+// A real, computed metric cell.
+function Metric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'profit' | 'risk' }) {
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <span className="truncate text-[11px] uppercase tracking-wide text-fg-subtle">{label}</span>
+      <span
+        className={cn(
+          'truncate font-mono text-sm font-semibold tabular-nums',
+          tone === 'profit' ? 'text-profit' : tone === 'risk' ? 'text-risk' : 'text-fg',
+        )}
+      >
+        {value}
       </span>
     </div>
   )
 }
 
 export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
-  const { strategy, sparkline, latestReturn, hasBacktest, loading } = perf
+  const { strategy, signals, sparkline, latestReturn, hasBacktest, loading } = perf
   const ret = returnPct(latestReturn)
   const reference = isReferenceStrategy(strategy.name)
-  const active = strategy.status.toUpperCase() === 'ACTIVE'
+
+  // Real, signals-derived fields (no fetch beyond what the card already has).
+  const ordered = [...signals].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
+  const last = ordered.at(-1)
+  const conviction = last ? Number.parseFloat(last.value) : null
+  const asset = typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null
 
   return (
     <Card elevation="glow" interactive className="group h-full">
@@ -68,7 +94,7 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
 
         {/* Status row */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={active ? 'profit' : 'neutral'}>{strategy.status}</Badge>
+          <Badge variant={strategy.status.toUpperCase() === 'ACTIVE' ? 'profit' : 'neutral'}>{strategy.status}</Badge>
           {reference && (
             <Badge variant="warning" title={REFERENCE_TOOLTIP}>
               {REFERENCE_BADGE}
@@ -76,7 +102,7 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
           )}
         </div>
 
-        {/* Sparkline of signed conviction (real signal values) */}
+        {/* Return + mini conviction curve */}
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-wide text-fg-subtle">Return (backtest)</div>
@@ -101,10 +127,27 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
           </div>
         </div>
 
-        {/* Honest deferred metrics */}
-        <div className="mt-auto grid grid-cols-2 gap-3 border-t border-border/60 pt-3">
+        {/* Real, signals-derived metrics (Doc 03 field set that data supports) */}
+        <div className="grid grid-cols-3 gap-3 border-t border-border/60 pt-3">
+          <Metric label="Signals" value={String(signals.length)} />
+          <Metric
+            label="Conviction"
+            value={conviction != null ? `${conviction >= 0 ? '+' : ''}${conviction.toFixed(3)}` : '—'}
+            tone={conviction == null ? 'default' : conviction >= 0 ? 'profit' : 'risk'}
+          />
+          <Metric label="Asset" value={asset ?? '—'} />
+        </div>
+
+        {/* Honestly deferred risk metrics */}
+        <div className="mt-auto grid grid-cols-3 gap-3">
           <NotComputed label="Max drawdown" />
           <NotComputed label="Win rate" />
+          <NotComputed label="Sharpe" />
+        </div>
+
+        {/* Last signal footer */}
+        <div className="text-[11px] text-fg-subtle">
+          {last ? <>Last signal · {fmtSignalTime(last.ts)}</> : 'No signals recorded yet'}
         </div>
       </Link>
     </Card>

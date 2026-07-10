@@ -19,6 +19,7 @@ import { useState } from 'react'
 import { Wallet } from 'lucide-react'
 import {
   Badge,
+  DonutChart,
   EmptyState,
   ErrorState,
   PageHeader,
@@ -142,6 +143,13 @@ function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
   const totalUnrealized = open.reduce((s, p) => s + Number.parseFloat(p.unrealized_pnl), 0)
   const totalRealizedToday = open.reduce((s, p) => s + Number.parseFloat(p.realized_pnl_today), 0)
 
+  // Allocation slices from real open-position market values (abs, so a short
+  // still shows its capital footprint). Excludes zero/near-zero rows.
+  const allocation = open
+    .map((p) => ({ name: p.symbol ?? p.asset_id, value: Math.abs(Number.parseFloat(p.market_value)) }))
+    .filter((d) => d.value > 0)
+    .sort((a, b) => b.value - a.value)
+
   return (
     <>
       {/* KPI strip — fills the top of the workspace and anchors the page */}
@@ -162,6 +170,35 @@ function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
           />
           <StatCard label="Open positions" value={open.length} hint={`${positions.length} total`} />
         </div>
+      )}
+
+      {/* Asset allocation — computed from REAL open-position market values.
+          Honest: shows only actual holdings; an unpriced/empty book renders an
+          empty state rather than a fabricated split. */}
+      {!positionsQuery.isLoading && (
+        <Section
+          title="Asset allocation"
+          description="Share of capital by open-position market value."
+          actions={<Badge variant="neutral">{open.length} open</Badge>}
+        >
+          {allocation.length > 0 ? (
+            <Panel className="p-4">
+              <DonutChart
+                data={allocation}
+                height={280}
+                centerLabel="market value"
+                centerValue={fmtMoney(totalMarketValue)}
+                valueFormat={(v) => fmtMoney(v)}
+              />
+            </Panel>
+          ) : (
+            <EmptyState
+              icon={<Wallet size={20} />}
+              title="No open positions to allocate"
+              description="Allocation appears once this portfolio holds positions with a market value."
+            />
+          )}
+        </Section>
       )}
 
       {/* Capital configuration (honest F-19 labeling) */}

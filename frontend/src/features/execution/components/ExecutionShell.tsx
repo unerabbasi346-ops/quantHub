@@ -14,6 +14,8 @@ import { ArrowLeftRight } from 'lucide-react'
 import {
   Badge,
   CryptoIcon,
+  DonutChart,
+  type DonutSlice,
   EmptyState,
   ErrorState,
   PageHeader,
@@ -108,6 +110,19 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
   const rejected = orders.filter((o) => o.status === 'REJECTED').length
   const fillRate = orders.length ? filled / orders.length : 0
 
+  // Real order-status distribution (Doc 04 "Order Distribution" donut). Counts
+  // are genuine lifecycle states; tones are semantic (filled=profit, etc.).
+  const STATUS_TONE: Partial<Record<OrderStatus, DonutSlice['tone']>> = {
+    FILLED: 'profit',
+    REJECTED: 'risk',
+    VALIDATED: 'info',
+    CREATED: 'accent',
+  }
+  const statusOrder: OrderStatus[] = ['FILLED', 'VALIDATED', 'CREATED', 'REJECTED']
+  const statusDist: DonutSlice[] = statusOrder
+    .map((s) => ({ name: s, value: orders.filter((o) => o.status === s).length, tone: STATUS_TONE[s] }))
+    .filter((d) => d.value > 0)
+
   return (
     <div className="space-y-8">
       {query.isSuccess && orders.length > 0 && (
@@ -121,6 +136,20 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
             <Ring value={fillRate} size={92} thickness={9} tone="profit" centerLabel={`${Math.round(fillRate * 100)}%`} centerSub="filled" />
           </Panel>
         </div>
+      )}
+
+      {query.isSuccess && statusDist.length > 1 && (
+        <Section title="Order distribution" description="Orders by lifecycle status.">
+          <Panel className="p-4">
+            <DonutChart
+              data={statusDist}
+              height={240}
+              centerValue={String(orders.length)}
+              centerLabel="orders"
+              valueFormat={(v) => String(v)}
+            />
+          </Panel>
+        </Section>
       )}
 
       <Section

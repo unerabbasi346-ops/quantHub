@@ -1,23 +1,18 @@
-// Governing specification: Doc 06 — UI/UX Design System (QH-006 v1.0)
-//   §Data Visualization: "clear, information-dense visualizations." A
-//   responsive SVG line chart for a single series over time — the strategy
-//   conviction curve (signal values) and backtest equity progression (owner
-//   request: "different charts, curves" from data that already exists).
-//   Pure SVG + a light hover crosshair; no charting dependency, so it stays
-//   fully styleable with the theme tokens.
-// Per Doc 00 §14.11
+// Governing specification: handbook/ui Doc 01 — Apache ECharts is the single
+//   analytics chart engine; Doc 05 §Line/Area; Doc 11 — axes + tooltip + units
+//   mandatory. Doc 03 §Empty States. Per Doc 00 §14.11
 //
-// MOTION (digital materialization): the chart is the second-most-important
-// reveal. The baseline/grid settles first, then the series LINE DRAWS itself
-// progressively from the first data point across every point (an SVG pathLength
-// animation — a real travelling draw, not an opacity fade), and finally the
-// gradient fill washes up beneath it. Hover interactions are unaffected.
+// Single-series area line over time — the strategy conviction curve (signed
+// signal values) and backtest equity progression. MIGRATED from hand-rolled SVG
+// onto the shared ECharts wrapper (single-engine consistency) while keeping the
+// EXACT public API: same {label,value}[] input, same tone/zeroBaseline/height
+// props, same "not enough data" guard — so every existing caller renders the
+// identical real data, now with a themed axis, crosshair and tooltip.
 'use client'
 
-import { useState } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
-import { cn } from '@/lib/utils/cn'
-import { DURATION, EASE_OUT } from '@/lib/motion'
+import { Chart } from './Chart'
+import { EmptyState } from './States'
+import { chartAxis, chartTooltip, type ChartTheme } from './chart-theme'
 
 export interface LinePoint {
   /** X label (e.g. a timestamp) shown on hover. */
@@ -35,12 +30,6 @@ interface LineChartProps {
   className?: string
 }
 
-const TONE_STROKE: Record<NonNullable<LineChartProps['tone']>, string> = {
-  info: 'hsl(var(--color-info))',
-  profit: 'hsl(var(--color-profit))',
-  risk: 'hsl(var(--color-risk))',
-}
-
 export function LineChart({
   data,
   height = 220,
@@ -49,118 +38,85 @@ export function LineChart({
   valueFormat = (v) => v.toLocaleString(undefined, { maximumFractionDigits: 4 }),
   className,
 }: LineChartProps) {
-  const [hover, setHover] = useState<number | null>(null)
-  const reduce = useReducedMotion()
-  const width = 100 // viewBox units; scales responsively via preserveAspectRatio=none on x
-
   if (!data || data.length < 2) {
     return (
-      <div
-        style={{ height }}
-        className={cn('flex items-center justify-center text-sm text-fg-muted', className)}
-      >
-        Not enough data to plot.
+      <div style={{ height }} className={className}>
+        <EmptyState title="Not enough data" description="At least two points are needed to plot a curve." />
       </div>
     )
   }
 
   const values = data.map((d) => d.value)
-  let min = Math.min(...values)
-  let max = Math.max(...values)
-  if (zeroBaseline) {
-    min = Math.min(min, 0)
-    max = Math.max(max, 0)
-  }
-  const span = max - min || 1
-  const padY = 8
-  const plotH = height - padY * 2
-
-  const x = (i: number) => (i / (data.length - 1)) * width
-  const y = (v: number) => padY + (1 - (v - min) / span) * plotH
-
-  const line = data
-    .map((d, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(3)} ${y(d.value).toFixed(3)}`)
-    .join(' ')
-  const area = `${line} L${width} ${height - padY} L0 ${height - padY} Z`
-  const stroke = TONE_STROKE[tone]
-  const zeroY = zeroBaseline ? y(0) : null
+  const dataMin = Math.min(...values)
+  const dataMax = Math.max(...values)
+  const yMin = zeroBaseline ? Math.min(dataMin, 0) : undefined
+  const yMax = zeroBaseline ? Math.max(dataMax, 0) : undefined
 
   return (
-    <div className={cn('relative w-full', className)}>
-      <svg
-        width="100%"
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
-        preserveAspectRatio="none"
-        className="overflow-visible"
-        onMouseLeave={() => setHover(null)}
-        onMouseMove={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect()
-          const rel = (e.clientX - rect.left) / rect.width
-          setHover(Math.max(0, Math.min(data.length - 1, Math.round(rel * (data.length - 1)))))
-        }}
-      >
-        <defs>
-          <linearGradient id={`lc-${tone}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity="0.2" />
-            <stop offset="100%" stopColor={stroke} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {zeroY != null && (
-          <motion.line
-            x1="0"
-            y1={zeroY}
-            x2={width}
-            y2={zeroY}
-            stroke="hsl(var(--color-border-strong))"
-            strokeWidth="0.4"
-            strokeDasharray="1.5 1.5"
-            vectorEffect="non-scaling-stroke"
-            initial={reduce ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.35, ease: EASE_OUT, delay: reduce ? 0 : 0.08 }}
-          />
-        )}
-        <motion.path
-          d={area}
-          fill={`url(#lc-${tone})`}
-          initial={reduce ? false : { opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, ease: EASE_OUT, delay: reduce ? 0 : 0.2 + DURATION.chart * 0.55 }}
-        />
-        <motion.path
-          d={line}
-          fill="none"
-          stroke={stroke}
-          strokeWidth="1.5"
-          vectorEffect="non-scaling-stroke"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          initial={reduce ? false : { pathLength: 0, opacity: 0.85 }}
-          animate={{ pathLength: 1, opacity: 1 }}
-          transition={{ duration: reduce ? 0 : DURATION.chart, ease: EASE_OUT, delay: reduce ? 0 : 0.2 }}
-        />
-        {hover != null && (
-          <>
-            <line
-              x1={x(hover)}
-              y1="0"
-              x2={x(hover)}
-              y2={height}
-              stroke="hsl(var(--color-fg) / 0.25)"
-              strokeWidth="0.4"
-              vectorEffect="non-scaling-stroke"
-            />
-            <circle cx={x(hover)} cy={y(data[hover].value)} r="1.6" fill={stroke} vectorEffect="non-scaling-stroke" />
-          </>
-        )}
-      </svg>
-      {hover != null && (
-        <div className="pointer-events-none absolute left-2 top-2 rounded-md border border-border bg-surface-raised/95 px-2.5 py-1.5 text-xs shadow-md">
-          <div className="font-mono font-semibold tabular-nums text-fg">{valueFormat(data[hover].value)}</div>
-          <div className="text-[11px] text-fg-muted">{data[hover].label}</div>
-        </div>
-      )}
-    </div>
+    <Chart
+      className={className}
+      height={height}
+      ariaLabel="Line chart"
+      option={(theme: ChartTheme) => {
+        const color = theme[tone]
+        const axis = chartAxis(theme)
+        return {
+          tooltip: chartTooltip(theme, {
+            trigger: 'axis',
+            axisPointer: { type: 'line', lineStyle: { color: theme.alpha('fg', 0.25), width: 1 } },
+            formatter: (params: unknown) => {
+              const p = (params as { axisValue: string; data: number }[])[0]
+              return `${p.axisValue}<br/><b>${valueFormat(p.data)}</b>`
+            },
+          }),
+          grid: { left: 52, right: 14, top: 12, bottom: 24 },
+          xAxis: {
+            type: 'category',
+            data: data.map((d) => d.label),
+            boundaryGap: false,
+            ...axis,
+            splitLine: { show: false },
+          },
+          yAxis: {
+            type: 'value',
+            scale: !zeroBaseline,
+            min: yMin,
+            max: yMax,
+            ...axis,
+            axisLabel: { ...axis.axisLabel, formatter: (v: number) => valueFormat(v) },
+          },
+          series: [
+            {
+              type: 'line',
+              data: values,
+              smooth: false,
+              showSymbol: false,
+              lineStyle: { color, width: 2 },
+              itemStyle: { color },
+              areaStyle: {
+                color: {
+                  type: 'linear',
+                  x: 0, y: 0, x2: 0, y2: 1,
+                  colorStops: [
+                    { offset: 0, color: theme.alpha(tone, 0.22) },
+                    { offset: 1, color: theme.alpha(tone, 0) },
+                  ],
+                },
+              },
+              // zero reference line for signed series
+              markLine: zeroBaseline
+                ? {
+                    silent: true,
+                    symbol: 'none',
+                    lineStyle: { color: theme.borderStrong, type: 'dashed', width: 1 },
+                    data: [{ yAxis: 0 }],
+                    label: { show: false },
+                  }
+                : undefined,
+            },
+          ],
+        }
+      }}
+    />
   )
 }
