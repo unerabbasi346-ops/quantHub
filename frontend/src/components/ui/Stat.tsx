@@ -3,8 +3,18 @@
 //   canonical KPI/stat treatment reused across dashboard, portfolio, risk —
 //   so a "gross exposure" figure looks the same everywhere.
 // Per Doc 00 §14.11
+//
+// MOTION (digital materialization): when `value` is a plain formatted string
+// (e.g. "$1,234.56", "+2.3%"), it is routed through AnimatedNumber, which
+// counts it up from zero AFTER the figure has sharpened — numbers resolve, then
+// climb. Non-string / non-numeric values (JSX, "Not yet computed") render
+// verbatim. StatCard, being its own boxed tile, self-reveals via the cascade.
+'use client'
+
 import type { ReactNode } from 'react'
+import { motion, type HTMLMotionProps } from 'framer-motion'
 import { cn } from '@/lib/utils/cn'
+import { AnimatedNumber, useReveal } from '@/lib/motion'
 
 type Tone = 'default' | 'profit' | 'risk' | 'info' | 'warning'
 
@@ -21,18 +31,27 @@ interface StatProps {
   value: ReactNode
   hint?: ReactNode
   tone?: Tone
+  /** Optional distinct icon for the metric (a Lucide node) — sits in a soft accent chip. */
+  icon?: ReactNode
   className?: string
 }
 
 // Inline stat (no box) — for use inside a Section or Card content region.
-export function Stat({ label, value, hint, tone = 'default', className }: StatProps) {
+export function Stat({ label, value, hint, tone = 'default', icon, className }: StatProps) {
   return (
     <div className={cn('min-w-0', className)}>
-      <div className="truncate text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-        {label}
+      <div className="flex items-center gap-2">
+        {icon && (
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
+            {icon}
+          </span>
+        )}
+        <div className="truncate text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+          {label}
+        </div>
       </div>
       <div className={cn('mt-1 font-mono text-xl font-semibold tabular-nums tracking-tight', TONE[tone])}>
-        {value}
+        {typeof value === 'string' ? <AnimatedNumber value={value} /> : value}
       </div>
       {hint && <div className="mt-0.5 text-xs text-fg-muted">{hint}</div>}
     </div>
@@ -42,15 +61,30 @@ export function Stat({ label, value, hint, tone = 'default', className }: StatPr
 // Boxed KPI tile — the ONE case where a single stat earns its own bordered
 // card (owner feedback: reserve bordered cards for content that truly needs
 // grouping, e.g. a single KPI). A subtle raised surface, not flat.
-export function StatCard({ label, value, hint, tone = 'default', className }: StatProps) {
+export function StatCard({
+  label,
+  value,
+  hint,
+  tone = 'default',
+  icon,
+  className,
+  ...props
+}: StatProps & Omit<HTMLMotionProps<'div'>, keyof StatProps>) {
+  const reveal = useReveal('container')
   return (
-    <div
+    <motion.div
+      {...reveal}
       className={cn(
-        'rounded-xl border border-border bg-surface-raised px-4 py-3.5 shadow-sm',
+        // Glow surface (owner: consistent glow treatment across all card types) —
+        // the same violet-halo language as Card/Panel, sized for a KPI tile.
+        'relative rounded-xl bg-surface-raised px-4 py-3.5 shadow-glow',
+        'before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px',
+        'before:bg-gradient-to-r before:from-transparent before:via-accent/25 before:to-transparent',
         className,
       )}
+      {...props}
     >
-      <Stat label={label} value={value} hint={hint} tone={tone} />
-    </div>
+      <Stat label={label} value={value} hint={hint} tone={tone} icon={icon} />
+    </motion.div>
   )
 }

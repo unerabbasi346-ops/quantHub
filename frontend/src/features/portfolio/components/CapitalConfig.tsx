@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { CircleDollarSign, Info } from 'lucide-react'
-import { Badge, Button, Section } from '@/components/ui'
+import { Badge, Button, Panel, Section } from '@/components/ui'
 import { useSetCapital } from '../hooks/usePortfolio'
 import type { Portfolio } from '../types'
 
@@ -60,7 +60,7 @@ export function CapitalConfig({ portfolio }: { portfolio: Portfolio }) {
         )
       }
     >
-      <div className="rounded-xl border border-border bg-surface-raised p-5 shadow-sm">
+      <Panel className="p-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
@@ -121,10 +121,10 @@ export function CapitalConfig({ portfolio }: { portfolio: Portfolio }) {
           <p className="text-xs leading-relaxed text-fg-muted">
             <Badge variant="warning" className="mr-1.5 align-middle">F-19</Badge>
             This is a configuration value only. It has <strong className="font-semibold text-fg">no backing NAV/cash ledger</strong> and does
-            not feed leverage or any risk-limit calculation — those still take equity as an explicit input. A real capital ledger (Doc 15 §11.4) remains deferred.
+            not feed leverage or any risk-limit calculation — those still take equity as an explicit input. A real capital ledger remains deferred.
           </p>
         </div>
-      </div>
+      </Panel>
     </Section>
   )
 }

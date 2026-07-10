@@ -9,7 +9,7 @@ import { Providers } from '@/lib/query/client'
 
 export const metadata: Metadata = {
   title: 'Quant Hub',
-  description: 'Institutional-grade trading and research platform — Doc 08',
+  description: 'Institutional-grade trading and research platform',
 }
 
 // Doc 06 §Visual Language "dark-first theme, optional light mode": this

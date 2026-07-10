@@ -2,7 +2,7 @@
 // Component Standards: shared design-system components re-exported here — Doc 08 §Component Standards
 // No duplicated UI implementations; feature-specific components stay inside feature dirs — Doc 08 §Component Standards
 // Per Doc 00 §14.11
-export { SidebarNav } from './SidebarNav'
+// SidebarNav removed — navigation moved to the horizontal TopBar (owner request).
 export { TopBar } from './TopBar'
 export { ContextPanel } from './ContextPanel'
 export { Button } from './Button'
@@ -23,5 +23,9 @@ export { Ring } from './Ring'
 export { Sparkline } from './Sparkline'
 export { LineChart } from './LineChart'
 export type { LinePoint } from './LineChart'
+export { MultiLineChart } from './MultiLineChart'
+export type { Series } from './MultiLineChart'
+export { Histogram } from './Histogram'
+export { Panel } from './Panel'
 export { CryptoIcon } from './CryptoIcon'
 export { ComingSoon } from './ComingSoon'

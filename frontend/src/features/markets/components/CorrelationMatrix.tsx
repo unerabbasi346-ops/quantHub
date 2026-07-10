@@ -13,7 +13,7 @@
 'use client'
 
 import { Info } from 'lucide-react'
-import { Badge, EmptyState, ErrorState, Section } from '@/components/ui'
+import { Badge, EmptyState, ErrorState, Panel, Section } from '@/components/ui'
 import { CryptoIcon } from '@/components/ui'
 import { useCorrelation } from '../hooks/useMarkets'
 
@@ -45,7 +45,7 @@ export function CorrelationMatrix() {
         <p className="text-xs leading-relaxed text-fg-muted">
           <strong className="font-semibold text-fg">Market price-return correlation only.</strong>{' '}
           This is <strong className="font-semibold text-fg">not</strong> a portfolio risk metric — it is unrelated to VaR, CVaR,
-          beta or volatility, which remain deferred (F-18). It describes how these instruments&apos; prices have moved together, nothing about capital at risk.
+          beta or volatility, which aren&apos;t computed yet. It describes how these instruments&apos; prices have moved together, nothing about capital at risk.
         </p>
       </div>
 
@@ -59,7 +59,7 @@ export function CorrelationMatrix() {
       )}
 
       {query.isSuccess && data && data.assets.length >= 2 && (
-        <div className="overflow-x-auto rounded-xl border border-border bg-surface-raised p-4 shadow-sm">
+        <Panel className="overflow-x-auto p-4">
           <table className="border-separate border-spacing-1">
             <thead>
               <tr>
@@ -97,7 +97,7 @@ export function CorrelationMatrix() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Panel>
       )}
     </Section>
   )

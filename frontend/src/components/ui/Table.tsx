@@ -4,8 +4,18 @@
 //   virtualization deferred per S-6 until profiling justifies it (Doc 08
 //   §Performance); these are the plain canonical primitives for now.
 // Per Doc 00 §14.11
+//
+// MOTION (digital materialization): the table container and header stay crisp;
+// each ROW self-reveals via the positional cascade, so rows "populate one after
+// another" (opacity + a slight upward slide). Rows intentionally use NO blur
+// filter — a filter on a <tr> can detach it from the table's box model — so the
+// page-root wash supplies their haze while they slide crisply into place.
+'use client'
+
+import { motion, type HTMLMotionProps } from 'framer-motion'
 import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react'
 import { cn } from '@/lib/utils/cn'
+import { useReveal } from '@/lib/motion'
 
 // Doc 08 §Architecture: stateless presentation components.
 export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>) {
@@ -24,9 +34,11 @@ export function TableBody({ className, ...props }: HTMLAttributes<HTMLTableSecti
   return <tbody className={cn('divide-y divide-border/70', className)} {...props} />
 }
 
-export function TableRow({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
+export function TableRow({ className, ...props }: HTMLMotionProps<'tr'>) {
+  const reveal = useReveal('row')
   return (
-    <tr
+    <motion.tr
+      {...reveal}
       className={cn('transition-colors duration-150 hover:bg-surface-hover/60', className)}
       {...props}
     />

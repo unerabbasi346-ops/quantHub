@@ -143,7 +143,7 @@ export function StrategiesShell() {
           </div>
           {strategiesQuery.isSuccess && strategies.length > 0 && (
             <p className="text-xs leading-relaxed text-fg-subtle">
-              Version shown is the current registration only — no history/rollback exists (F-9).
+              Shows the current registration only — version history and rollback aren&apos;t available yet.
             </p>
           )}
         </Section>
@@ -228,7 +228,7 @@ function ActivateControl({ strategy }: { strategy: Strategy }) {
         {mutation.isPending ? 'Saving…' : isActive ? 'Deactivate' : 'Activate'}
       </Button>
       {mutation.isError && <span className="text-xs text-risk">Transition failed</span>}
-      <span className="text-[11px] text-fg-subtle">Governed transition · §10.2.6</span>
+      <span className="text-[11px] text-fg-subtle">Governed status change</span>
     </div>
   )
 }
@@ -271,7 +271,7 @@ function OverviewTab({ strategy, signals, backtests }: { strategy: Strategy; sig
               ))}
             </div>
           )}
-          <p className="mt-2 text-xs text-fg-subtle">Configuration is opaque to the platform (P-1) — shown verbatim, never interpreted.</p>
+          <p className="mt-2 text-xs text-fg-subtle">Configuration is owned by the strategy — shown exactly as registered, never interpreted.</p>
         </Section>
       </div>
 
@@ -297,7 +297,7 @@ function PerformanceTab({ signals, loading }: { signals: Signal[]; loading: bool
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_16rem]">
-        <Section title="Conviction curve" description="Signed signal values over time (Doc 15 §11.1.5).">
+        <Section title="Conviction curve" description="Signed conviction over time.">
           <div className="rounded-xl border border-border bg-surface-raised p-4 shadow-sm">
             {points.length >= 2 ? (
               <LineChart data={points} tone="info" zeroBaseline height={240} />

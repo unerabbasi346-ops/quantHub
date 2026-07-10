@@ -1,78 +1,281 @@
 // Governing specification: Doc 06 — UI/UX Design System (QH-006 v1.0)
-//   §Layout: "Persistent sidebar, top command bar, central workspace,
-//   optional contextual panel, responsive grid, modular widgets."
-//   §Visual Language: "Dark-first theme, optional light mode."
+//   §Layout: "top command bar, central workspace." §Visual Language:
+//   "Dark-first theme." §Accessibility: semantic nav, keyboard-navigable.
 // Component Standards: reusable design-system component — Doc 08 §Component Standards
 // Per Doc 00 §14.11
 //
-// REDESIGN (owner feedback): the top bar had almost nothing in it. It now
-// carries real utility presence — a global search field, a notifications
-// bell, and a user avatar — alongside the sidebar toggle and theme switch.
-//
-// HONEST PLACEHOLDER SCOPE (Doc 00 §14.5/§14.7 — flagged): search,
-// notifications, and the user menu are STYLED, NON-FUNCTIONAL placeholders.
-// There is no search index, no notification/audit pipeline (none exists —
-// see S-6 monitoring deferral), and no real auth/user (G-AUTH-1: single-user
-// local platform). They are marked with title tooltips and disabled/decorative
-// so they read as "planned", never implying capability the platform lacks.
+// NAVIGATION RESTRUCTURE (owner request): navigation moves from the left
+// vertical sidebar to this HORIZONTAL top bar. All 9 feature routes are
+// reachable from here. GROUPING CHOICE (flagged — owner asked for a proposed
+// primary/overflow split):
+//   PRIMARY (always inline on desktop): Dashboard, Portfolio, Markets,
+//     Execution, Strategies, Risk — the six with real Phase 1–4 data and the
+//     daily trading/analysis workflow.
+//   OVERFLOW ("More" menu): Research, Monitoring, Settings — the three that are
+//     deferred / placeholder-stage per S-6 (no research module, no monitoring
+//     pipeline, single-user settings). Demoting them to an overflow menu is an
+//     honest reflection of their current secondary status, not a hierarchy
+//     invented for looks.
+// Below the lg breakpoint the primary row collapses into the same menu so all
+// nine stay reachable (S-6: full multi-device parity is still deferred; this is
+// a graceful single-menu fallback, not a full mobile nav).
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Bell, PanelLeft, Search } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { DURATION, EASE_OUT } from '@/lib/motion'
+import {
+  Activity,
+  ArrowLeftRight,
+  Bell,
+  Brain,
+  CandlestickChart,
+  ChevronDown,
+  FlaskConical,
+  LayoutDashboard,
+  Menu,
+  Search,
+  Settings,
+  ShieldAlert,
+  Wallet,
+  type LucideIcon,
+} from 'lucide-react'
 import { useUIStore } from '@/lib/store/ui'
-import { Button } from './Button'
+import { cn } from '@/lib/utils/cn'
+import { BrandMark } from './BrandMark'
+
+interface NavItem {
+  href: string
+  label: string
+  icon: LucideIcon
+}
+
+// Primary routes render inline on desktop; overflow routes live in the "More"
+// menu. See the grouping-choice note in the file header.
+const PRIMARY: NavItem[] = [
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/portfolio', label: 'Portfolio', icon: Wallet },
+  { href: '/markets', label: 'Markets', icon: CandlestickChart },
+  { href: '/execution', label: 'Execution', icon: ArrowLeftRight },
+  { href: '/strategies', label: 'Strategies', icon: Brain },
+  { href: '/risk', label: 'Risk', icon: ShieldAlert },
+]
+const OVERFLOW: NavItem[] = [
+  { href: '/research', label: 'Research', icon: FlaskConical },
+  { href: '/monitoring', label: 'Monitoring', icon: Activity },
+  { href: '/settings', label: 'Settings', icon: Settings },
+]
+
+function isActive(pathname: string | null, href: string): boolean {
+  return pathname === href || Boolean(pathname?.startsWith(`${href}/`))
+}
+
+/** Close a popover when a click lands outside its ref, or Escape is pressed. */
+function useDismiss(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close()
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, close])
+  return ref
+}
+
+function NavLink({ item, pathname }: { item: NavItem; pathname: string | null }) {
+  const active = isActive(pathname, item.href)
+  const Icon = item.icon
+  return (
+    <Link
+      href={item.href}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'relative flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150',
+        active
+          ? 'bg-accent-soft text-accent'
+          : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+      )}
+    >
+      <Icon size={16} strokeWidth={2} className="shrink-0" />
+      <span>{item.label}</span>
+    </Link>
+  )
+}
 
 export function TopBar() {
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
-  const sidebarOpen = useUIStore((s) => s.sidebarOpen)
+  const pathname = usePathname()
   const theme = useUIStore((s) => s.theme)
   const toggleTheme = useUIStore((s) => s.toggleTheme)
+  const reduce = useReducedMotion()
 
-  // Hydration-safe theme label (see original note): render the theme-driven
-  // icon only after mount so SSR ('dark' default) never mismatches.
+  // The bar lives in the persistent layout, so this materializes ONCE on the
+  // first app load (not on route changes): the bar settles from the top, then
+  // the nav and the right-hand utilities resolve a beat later — a left-to-right
+  // "chrome coming online" feel. No filter here (it would fight the bar's own
+  // backdrop-blur); a crisp opacity + slide is enough above the page wash.
+  const enter = (delay: number) =>
+    reduce
+      ? {}
+      : {
+          initial: { opacity: 0, y: -8 },
+          animate: { opacity: 1, y: 0 },
+          transition: { duration: DURATION.text, ease: EASE_OUT, delay },
+        }
+
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const moreRef = useDismiss(moreOpen, () => setMoreOpen(false))
+  const mobileRef = useDismiss(mobileOpen, () => setMobileOpen(false))
+
+  const overflowActive = OVERFLOW.some((i) => isActive(pathname, i.href))
+
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
+  // Close menus on route change.
+  useEffect(() => {
+    setMoreOpen(false)
+    setMobileOpen(false)
+  }, [pathname])
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface/70 px-4 backdrop-blur-sm">
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-        onClick={toggleSidebar}
-        className="px-2"
-      >
-        <PanelLeft size={18} />
-      </Button>
+    <motion.header
+      {...enter(0)}
+      className="relative z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-4 backdrop-blur-md"
+    >
+      {/* Brand */}
+      <Link href="/dashboard" className="flex shrink-0 items-center gap-2.5 pr-2" aria-label="QuantHub — Dashboard">
+        <BrandMark size={26} />
+        <span className="hidden text-[15px] font-semibold tracking-tight text-fg sm:inline">
+          Quant<span className="text-accent">Hub</span>
+        </span>
+      </Link>
 
-      {/* Global search — styled placeholder (no search index exists yet) */}
-      <div className="relative hidden max-w-md flex-1 sm:block">
-        <Search
-          size={15}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle"
-        />
-        <input
-          type="text"
-          placeholder="Search markets, strategies, orders…"
-          aria-label="Search (coming soon)"
-          title="Search is a styled placeholder — not yet functional"
-          className="h-9 w-full rounded-lg border border-border bg-surface-raised/60 pl-9 pr-16 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:border-border-strong focus:bg-surface-raised focus:outline-none"
-        />
-        <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-fg-subtle md:inline-block">
-          ⌘K
-        </kbd>
+      <div className="mx-1 hidden h-6 w-px bg-border lg:block" aria-hidden />
+
+      {/* Primary nav (desktop) */}
+      <motion.nav {...enter(0.1)} className="hidden items-center gap-0.5 lg:flex" aria-label="Primary navigation">
+        {PRIMARY.map((item) => (
+          <NavLink key={item.href} item={item} pathname={pathname} />
+        ))}
+
+        {/* Overflow "More" menu */}
+        <div className="relative" ref={moreRef}>
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((v) => !v)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150',
+              overflowActive || moreOpen
+                ? 'bg-accent-soft text-accent'
+                : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+            )}
+          >
+            More
+            <ChevronDown size={14} className={cn('transition-transform duration-150', moreOpen && 'rotate-180')} />
+          </button>
+          {moreOpen && (
+            <div
+              role="menu"
+              className="absolute left-0 top-full mt-1.5 w-48 origin-top-left animate-scale-in rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
+            >
+              {OVERFLOW.map((item) => {
+                const active = isActive(pathname, item.href)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    role="menuitem"
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                      active ? 'bg-accent-soft text-accent' : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+                    )}
+                  >
+                    <Icon size={16} className="shrink-0" />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </motion.nav>
+
+      {/* Mobile menu trigger (below lg) */}
+      <div className="relative lg:hidden" ref={mobileRef}>
+        <button
+          type="button"
+          aria-label="Open navigation menu"
+          aria-haspopup="menu"
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((v) => !v)}
+          className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
+        >
+          <Menu size={18} />
+          <span className="hidden sm:inline">Menu</span>
+        </button>
+        {mobileOpen && (
+          <div
+            role="menu"
+            className="absolute left-0 top-full mt-1.5 w-56 origin-top-left animate-scale-in rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
+          >
+            {[...PRIMARY, ...OVERFLOW].map((item) => {
+              const active = isActive(pathname, item.href)
+              const Icon = item.icon
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  role="menuitem"
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                    active ? 'bg-accent-soft text-accent' : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+                  )}
+                >
+                  <Icon size={16} className="shrink-0" />
+                  {item.label}
+                </Link>
+              )
+            })}
+          </div>
+        )}
       </div>
 
-      <div className="ml-auto flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
+      {/* Right utilities */}
+      <motion.div {...enter(0.18)} className="ml-auto flex items-center gap-1.5">
+        {/* Global search — styled placeholder (no search index exists yet) */}
+        <div className="relative hidden max-w-xs flex-1 xl:block">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
+          <input
+            type="text"
+            placeholder="Search…"
+            aria-label="Search (coming soon)"
+            title="Search is a styled placeholder — not yet functional"
+            className="h-9 w-56 rounded-lg border border-border bg-surface-raised/60 pl-9 pr-3 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:border-border-strong focus:bg-surface-raised focus:outline-none"
+          />
+        </div>
+
+        <button
+          type="button"
           aria-label="Toggle theme"
           onClick={toggleTheme}
-          className="px-2"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
         >
           {mounted && theme === 'dark' ? <SunIcon /> : <MoonIcon />}
-        </Button>
+        </button>
 
         {/* Notifications — styled placeholder (no notification pipeline; S-6) */}
         <button
@@ -82,10 +285,7 @@ export function TopBar() {
           className="relative flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
         >
           <Bell size={18} />
-          <span
-            aria-hidden
-            className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-warning ring-2 ring-surface"
-          />
+          <span aria-hidden className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-warning ring-2 ring-surface" />
         </button>
 
         <div className="mx-1 h-6 w-px bg-border" aria-hidden />
@@ -102,8 +302,8 @@ export function TopBar() {
           </span>
           <span className="hidden text-sm font-medium text-fg-muted lg:inline">Operator</span>
         </button>
-      </div>
-    </header>
+      </motion.div>
+    </motion.header>
   )
 }
 
@@ -124,12 +324,7 @@ function SunIcon() {
 function MoonIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
     </svg>
   )
 }

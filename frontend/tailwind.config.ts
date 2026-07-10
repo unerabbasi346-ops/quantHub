@@ -75,6 +75,11 @@ const config: Config = {
         sm: 'var(--shadow-sm)',
         md: 'var(--shadow-md)',
         lg: 'var(--shadow-lg)',
+        // Violet brand halo for the glowing card treatment (owner visual
+        // language) — a soft blurred accent glow, not a hard border. `-hover`
+        // intensifies for interactive cards. See globals.css --shadow-glow*.
+        glow: 'var(--shadow-glow)',
+        'glow-hover': 'var(--shadow-glow-hover)',
       },
       keyframes: {
         'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },

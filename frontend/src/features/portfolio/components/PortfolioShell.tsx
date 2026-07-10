@@ -22,6 +22,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  Panel,
   Section,
   SkeletonStats,
   SkeletonTable,
@@ -178,7 +179,7 @@ function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
           <EmptyState icon={<Wallet size={20} />} title="No positions" description="This portfolio holds no positions." />
         )}
         {positionsQuery.isSuccess && positions.length > 0 && (
-          <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
+          <Panel className="overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -196,7 +197,7 @@ function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </Panel>
         )}
       </Section>
     </>

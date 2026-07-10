@@ -49,7 +49,7 @@ export default function DesignSystemPreviewPage() {
         <div>
           <h1 className="text-2xl font-semibold text-fg">Design System Foundation</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            Step 4.0 — Doc 06 theme tokens + core components (static example data only).
+            Theme tokens + core components, shown with static example data only.
           </p>
         </div>
 
@@ -149,7 +149,7 @@ export default function DesignSystemPreviewPage() {
 
       <ContextPanel title="Contextual Panel (example)">
         <p className="text-sm text-fg-muted">
-          Doc 06 §Layout&apos;s optional contextual panel — composed by a
+          An optional contextual panel — composed by a
           feature page when it has something contextual to show.
         </p>
       </ContextPanel>

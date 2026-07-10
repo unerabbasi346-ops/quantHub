@@ -17,6 +17,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  Panel,
   Ring,
   Section,
   SkeletonTable,
@@ -116,9 +117,9 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
             <StatCard label="Filled" value={filled} tone="profit" />
             <StatCard label="Rejected" value={rejected} tone={rejected ? 'risk' : 'default'} />
           </div>
-          <div className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-raised px-8 py-4 shadow-sm">
+          <Panel className="flex flex-col items-center justify-center gap-1.5 px-8 py-4">
             <Ring value={fillRate} size={92} thickness={9} tone="profit" centerLabel={`${Math.round(fillRate * 100)}%`} centerSub="filled" />
-          </div>
+          </Panel>
         </div>
       )}
 
@@ -132,7 +133,7 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
           <EmptyState icon={<ArrowLeftRight size={20} />} title="No orders" description="This portfolio has placed no orders." />
         )}
         {query.isSuccess && orders.length > 0 && (
-          <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
+          <Panel className="overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -144,7 +145,7 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
                 {orders.map((order) => (<OrderRow key={order.id} order={order} />))}
               </TableBody>
             </Table>
-          </div>
+          </Panel>
         )}
       </Section>
     </div>

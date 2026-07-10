@@ -22,6 +22,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  Panel,
   Section,
   Sparkline,
   StatCard,
@@ -93,13 +94,18 @@ export function MarketsShell() {
       />
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[19rem_1fr]">
-        <Section title="Instruments" actions={assetsQuery.isSuccess ? <Badge variant="neutral">{assets.length}</Badge> : null}>
+        <Section
+          title="Instruments"
+          actions={assetsQuery.isSuccess ? <Badge variant="neutral">{assets.length}</Badge> : null}
+        >
           {assetsQuery.isLoading && <div className="skeleton h-40 w-full" />}
           {assetsQuery.isError && <ErrorState description="Could not load assets." onRetry={() => assetsQuery.refetch()} />}
           {assetsQuery.isSuccess && assets.length === 0 && (
             <EmptyState icon={<CandlestickChart size={20} />} title="No assets" description="No tradable assets are registered yet." />
           )}
-          <div className="space-y-1">
+          {/* Fixed-height, internally scrollable list — the page no longer grows
+              with the instrument count; the list scrolls within its own panel. */}
+          <div className="max-h-[32rem] space-y-1 overflow-y-auto overscroll-contain pr-1 qh-scroll">
             {assets.map((asset) => (
               <AssetRow key={asset.id} asset={asset} selected={asset.id === activeId} onSelect={() => setSelectedId(asset.id)} />
             ))}
@@ -213,7 +219,7 @@ function AssetDetail({ asset }: { asset: Asset }) {
           </div>
         }
       >
-        <div className="rounded-xl border border-border-strong bg-surface-raised p-4 shadow-lg">
+        <Panel className="p-4">
           {barsQuery.isLoading && <div className="skeleton h-[420px] w-full" />}
           {barsQuery.isError && <ErrorState description="Could not load bars." onRetry={() => barsQuery.refetch()} />}
           {barsQuery.isSuccess && view.length === 0 && (
@@ -232,7 +238,7 @@ function AssetDetail({ asset }: { asset: Asset }) {
               <PriceChart bars={view} markers={markers} />
             </>
           )}
-        </div>
+        </Panel>
       </Section>
 
       {/* Stat strip fills the space that used to sit empty beside the table */}
@@ -258,7 +264,7 @@ function RecentBars({ bars, tf }: { bars: OHLCVBar[]; tf: Timeframe }) {
   const recent = [...bars].reverse().slice(0, 15)
   return (
     <Section title="Recent bars" actions={<Badge variant="neutral">{bars.length} {tf} bars</Badge>}>
-      <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
+      <Panel className="overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-[11px] uppercase tracking-wider text-fg-subtle">
@@ -288,7 +294,7 @@ function RecentBars({ bars, tf }: { bars: OHLCVBar[]; tf: Timeframe }) {
             })}
           </tbody>
         </table>
-      </div>
+      </Panel>
     </Section>
   )
 }

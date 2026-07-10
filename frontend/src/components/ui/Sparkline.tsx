@@ -4,7 +4,15 @@
 //   (owner request: watchlist rows get an inline mini price sparkline).
 //   Pure SVG, no dependency, deterministic.
 // Per Doc 00 §14.11
+//
+// MOTION (digital materialization): the mini line GROWS left-to-right — the
+// same travelling pathLength draw as the full chart, scaled down — and the
+// gradient fill fades up just behind it. Reduced-motion renders it static.
+'use client'
+
+import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/utils/cn'
+import { DURATION, EASE_OUT } from '@/lib/motion'
 
 interface SparklineProps {
   data: number[]
@@ -23,6 +31,7 @@ export function Sparkline({
   tone = 'auto',
   className,
 }: SparklineProps) {
+  const reduce = useReducedMotion()
   if (!data || data.length < 2) {
     return <div style={{ width, height }} className={cn('inline-block', className)} aria-hidden />
   }
@@ -66,8 +75,24 @@ export function Sparkline({
           <stop offset="100%" stopColor={stroke} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={area} fill={`url(#${gid})`} />
-      <path d={line} fill="none" stroke={stroke} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <motion.path
+        d={area}
+        fill={`url(#${gid})`}
+        initial={reduce ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4, ease: EASE_OUT, delay: reduce ? 0 : DURATION.spark * 0.5 }}
+      />
+      <motion.path
+        d={line}
+        fill="none"
+        stroke={stroke}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        initial={reduce ? false : { pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: reduce ? 0 : DURATION.spark, ease: EASE_OUT }}
+      />
     </svg>
   )
 }

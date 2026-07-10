@@ -9,7 +9,6 @@
 //   it is the shell real auth would attach to when built.
 // Architecture: stateless shell layout; feature modules render in {children} — Doc 08 §Architecture
 // Per Doc 00 §14.11
-import { SidebarNav } from '@/components/ui/SidebarNav'
 import { TopBar } from '@/components/ui/TopBar'
 
 export default function AppLayout({
@@ -18,17 +17,17 @@ export default function AppLayout({
   children: React.ReactNode
 }) {
   return (
-    // Doc 06 §Layout: sidebar + (top bar above workspace) side by side.
-    <div className="flex h-screen overflow-hidden bg-bg">
-      <SidebarNav />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar />
-        {/* Central workspace — Doc 06 §Layout "central workspace,
-            responsive grid, modular widgets"; the optional contextual
-            panel (ContextPanel) is composed by individual feature pages,
-            not force-mounted here (see its own docstring). */}
-        <main className="flex-1 overflow-auto px-6 py-6 lg:px-8">{children}</main>
-      </div>
+    // NAVIGATION RESTRUCTURE (owner request): the left vertical sidebar is
+    // removed; navigation now lives in the horizontal TopBar. The shell is a
+    // simple vertical stack — command bar on top, central workspace below
+    // (Doc 06 §Layout "top command bar, central workspace").
+    <div className="flex h-screen flex-col overflow-hidden bg-bg">
+      <TopBar />
+      {/* Central workspace — the optional contextual panel (ContextPanel) is
+          composed by individual feature pages, not force-mounted here. */}
+      <main className="flex-1 overflow-auto px-6 py-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+      </main>
     </div>
   )
 }

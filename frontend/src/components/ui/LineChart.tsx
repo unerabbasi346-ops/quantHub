@@ -6,10 +6,18 @@
 //   Pure SVG + a light hover crosshair; no charting dependency, so it stays
 //   fully styleable with the theme tokens.
 // Per Doc 00 §14.11
+//
+// MOTION (digital materialization): the chart is the second-most-important
+// reveal. The baseline/grid settles first, then the series LINE DRAWS itself
+// progressively from the first data point across every point (an SVG pathLength
+// animation — a real travelling draw, not an opacity fade), and finally the
+// gradient fill washes up beneath it. Hover interactions are unaffected.
 'use client'
 
 import { useState } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/utils/cn'
+import { DURATION, EASE_OUT } from '@/lib/motion'
 
 export interface LinePoint {
   /** X label (e.g. a timestamp) shown on hover. */
@@ -42,6 +50,7 @@ export function LineChart({
   className,
 }: LineChartProps) {
   const [hover, setHover] = useState<number | null>(null)
+  const reduce = useReducedMotion()
   const width = 100 // viewBox units; scales responsively via preserveAspectRatio=none on x
 
   if (!data || data.length < 2) {
@@ -98,7 +107,7 @@ export function LineChart({
           </linearGradient>
         </defs>
         {zeroY != null && (
-          <line
+          <motion.line
             x1="0"
             y1={zeroY}
             x2={width}
@@ -107,10 +116,19 @@ export function LineChart({
             strokeWidth="0.4"
             strokeDasharray="1.5 1.5"
             vectorEffect="non-scaling-stroke"
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.35, ease: EASE_OUT, delay: reduce ? 0 : 0.08 }}
           />
         )}
-        <path d={area} fill={`url(#lc-${tone})`} />
-        <path
+        <motion.path
+          d={area}
+          fill={`url(#lc-${tone})`}
+          initial={reduce ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, ease: EASE_OUT, delay: reduce ? 0 : 0.2 + DURATION.chart * 0.55 }}
+        />
+        <motion.path
           d={line}
           fill="none"
           stroke={stroke}
@@ -118,6 +136,9 @@ export function LineChart({
           vectorEffect="non-scaling-stroke"
           strokeLinejoin="round"
           strokeLinecap="round"
+          initial={reduce ? false : { pathLength: 0, opacity: 0.85 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ duration: reduce ? 0 : DURATION.chart, ease: EASE_OUT, delay: reduce ? 0 : 0.2 }}
         />
         {hover != null && (
           <>

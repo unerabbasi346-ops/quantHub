@@ -18,6 +18,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  Panel,
   Ring,
   Section,
   SkeletonTable,
@@ -157,7 +158,7 @@ function Snapshot({ portfolio }: { portfolio: Portfolio }) {
                   ))}
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-fg-muted">
-                  VaR, CVaR, volatility, drawdown and beta require a return-series / equity-curve the platform does not accumulate yet — shown as deferred, never a fabricated 0 <span className="opacity-70">(F-18)</span>.
+                  VaR, CVaR, volatility, drawdown and beta require a return-series / equity-curve the platform does not accumulate yet — shown as deferred, never a fabricated 0.
                 </p>
               </div>
             )}
@@ -172,14 +173,14 @@ function Limits({ portfolio }: { portfolio: Portfolio }) {
   const query = useRiskLimits(portfolio.id)
   const limits = query.data ?? []
   return (
-    <Section title="Risk limits" description="Governed limits (§11.5.7)." actions={query.isSuccess ? <Badge variant="neutral">{limits.length}</Badge> : null}>
+    <Section title="Risk limits" description="Governed limits for this portfolio." actions={query.isSuccess ? <Badge variant="neutral">{limits.length}</Badge> : null}>
       {query.isLoading && <SkeletonTable rows={3} cols={6} />}
       {query.isError && <ErrorState description="Could not load limits." onRetry={() => query.refetch()} />}
       {query.isSuccess && limits.length === 0 && (
         <EmptyState title="No risk limits" description="No governed risk limits are configured for this portfolio." />
       )}
       {query.isSuccess && limits.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
+        <Panel className="overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>
@@ -191,7 +192,7 @@ function Limits({ portfolio }: { portfolio: Portfolio }) {
               {limits.map((limit) => (<LimitRow key={limit.limit_id} limit={limit} />))}
             </TableBody>
           </Table>
-        </div>
+        </Panel>
       )}
     </Section>
   )
@@ -218,14 +219,14 @@ function Assessments({ portfolio }: { portfolio: Portfolio }) {
   const query = useRiskAssessments(portfolio.id)
   const assessments = query.data ?? []
   return (
-    <Section title="Pre-trade assessments" description="Most recent gate evaluations (§10.7.5)." actions={query.isSuccess ? <Badge variant="neutral">{assessments.length}</Badge> : null}>
+    <Section title="Pre-trade assessments" description="Most recent pre-trade risk-gate evaluations." actions={query.isSuccess ? <Badge variant="neutral">{assessments.length}</Badge> : null}>
       {query.isLoading && <SkeletonTable rows={4} cols={4} />}
       {query.isError && <ErrorState description="Could not load assessments." onRetry={() => query.refetch()} />}
       {query.isSuccess && assessments.length === 0 && (
         <EmptyState title="No assessments" description="No pre-trade risk assessments have been recorded." />
       )}
       {query.isSuccess && assessments.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
+        <Panel className="overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow><TableHead>Time</TableHead><TableHead>Order</TableHead><TableHead>Decision</TableHead><TableHead>Reason</TableHead></TableRow>
@@ -241,7 +242,7 @@ function Assessments({ portfolio }: { portfolio: Portfolio }) {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </Panel>
       )}
     </Section>
   )
