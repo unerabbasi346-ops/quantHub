@@ -48,9 +48,23 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
-from quant_hub.api.dependencies import BacktestRepo, DbSession, SignalRepo, StrategyRepo
+from quant_hub.api.dependencies import (
+    AssetRepo,
+    BacktestRepo,
+    DbSession,
+    PortfolioRepo,
+    PositionRepo,
+    SignalRepo,
+    StrategyRepo,
+)
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
 from quant_hub.domain.strategy_engine.entities import RecordedSignal, RegisteredStrategy
+from quant_hub.domain.strategy_engine.implied_sizing import (
+    assert_direction_matches_value,
+    compute_direction,
+    compute_implied_leverage,
+    compute_implied_size_usdt,
+)
 
 # The lifecycle states the Activate/Deactivate control may set (Doc 14
 # §10.2.6). Kept a small explicit allow-list — status is a free-form VARCHAR in
@@ -98,7 +112,32 @@ class StrategyOut(BaseModel):
 class SignalOut(BaseModel):
     """API shape of a core.signals row — Doc 14 §10.6.4 (immutable signal
     event). `value` (NUMERIC signed conviction, Doc 15 §11.1.5) renders as a
-    string; `metadata` is opaque (P-1), passed through verbatim."""
+    string; `metadata` is opaque (P-1), passed through verbatim.
+
+    ── IMPLIED SIZING FIELDS (task-scoped addition) ────────────────────────
+    `direction`, `implied_size_usdt`, `implied_leverage` are all COMPUTED
+    ON-THE-FLY at request time — Doc 07 §Layers pure functions in
+    domain/strategy_engine/implied_sizing.py — and stored NOWHERE in
+    core.signals. Deliberately not persisted columns:
+      1. core.signals is a P-5 immutable append-only event log with no
+         update path (migration 7c7482e4e00a) — freezing a capital-derived
+         figure at signal-write time would go stale the instant the
+         portfolio's configured_capital is later changed (PUT
+         .../capital), and there is no update path to refresh it.
+      2. Computing at read time means every signal's implied size always
+         reflects the CURRENT configured_capital, exactly satisfying "any
+         live signal recalculation should use the new value" without a
+         schema migration or a background recompute job.
+      3. `direction` is 100% derived from the already-stored `value` (its
+         sign) — persisting a column for it would only invite drift.
+    These are explicitly SIZING SUGGESTIONS derived from signal conviction
+    and configured capital — NOT executed positions, and NOT the platform's
+    real governed position-sizing pipeline (domain/portfolio/sizing.py,
+    which sizes off post-construction target weights under real risk
+    constraints). `implied_size_usdt` is null when the strategy has no
+    linked portfolio or that portfolio has no configured_capital set (F-19:
+    never fabricated from an assumed capital figure).
+    """
 
     id: UUID
     strategy_id: UUID
@@ -108,13 +147,24 @@ class SignalOut(BaseModel):
     validation_status: str
     metadata: dict[str, Any]
     created_at: datetime | None
+    direction: str
+    implied_size_usdt: Decimal | None
+    implied_leverage: Decimal
 
-    @field_serializer("value", when_used="json")
-    def _serialize_decimal(self, value: Decimal) -> str:
-        return format(value, "f")
+    @field_serializer("value", "implied_size_usdt", "implied_leverage", when_used="json")
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
 
     @classmethod
-    def from_recorded(cls, signal: RecordedSignal) -> "SignalOut":
+    def from_recorded(
+        cls,
+        signal: RecordedSignal,
+        *,
+        configured_capital: Decimal | None,
+        implied_leverage: Decimal,
+    ) -> "SignalOut":
+        direction = compute_direction(signal.value)
+        assert_direction_matches_value(signal.value, direction)  # Task 4 consistency check
         return cls(
             id=signal.id,
             strategy_id=signal.strategy_id,
@@ -124,6 +174,9 @@ class SignalOut(BaseModel):
             validation_status=signal.validation_status,
             metadata=dict(signal.metadata),
             created_at=signal.created_at,
+            direction=direction,
+            implied_size_usdt=compute_implied_size_usdt(signal.value, configured_capital),
+            implied_leverage=implied_leverage,
         )
 
 
@@ -189,24 +242,71 @@ async def get_strategy(strategy_id: UUID, repo: StrategyRepo) -> ResponseEnvelop
 @router.get(
     "/strategies/{strategy_id}/signals",
     response_model=ResponseEnvelope[list[SignalOut]],
-    summary="Get the recent signal feed for a strategy",
+    summary="Get the recent signal feed for a strategy, with implied sizing",
 )
 async def get_strategy_signals(
     strategy_id: UUID,
     strategy_repo: StrategyRepo,
     signal_repo: SignalRepo,
+    portfolio_repo: PortfolioRepo,
+    asset_repo: AssetRepo,
+    position_repo: PositionRepo,
     limit: int = Query(100, ge=1, le=1000, description="Max most-recent signals"),
 ) -> ResponseEnvelope[list[SignalOut]]:
     # 404 on an unknown strategy so a client distinguishes "no such strategy"
     # from "strategy exists but has emitted no signals" (a legitimate empty).
-    if await strategy_repo.get_by_id(strategy_id) is None:
+    strategy = await strategy_repo.get_by_id(strategy_id)
+    if strategy is None:
         raise ApiError(
             status.HTTP_404_NOT_FOUND,
             ErrorCode.RESOURCE_NOT_FOUND,
             f"Strategy {strategy_id} not found",
         )
     signals = await signal_repo.list_by_strategy(strategy_id, limit)
-    return ok([SignalOut.from_recorded(s) for s in signals])
+
+    # ── Implied sizing inputs (Task 2/3) ─────────────────────────────────
+    # configured_capital: F-19-honest — None unless the strategy is linked to
+    # a portfolio that has actually had capital configured via PUT
+    # .../capital. Read fresh on every request, so a just-updated capital
+    # figure is reflected immediately (no caching, no staleness).
+    configured_capital: Decimal | None = None
+    if strategy.portfolio_id is not None:
+        portfolio = await portfolio_repo.get_by_id(strategy.portfolio_id)
+        if portfolio is not None:
+            configured_capital = portfolio.configured_capital
+
+    # implied_leverage per signal: strategy.config["leverage"] short-circuits
+    # everything (checked first, cheaply, per signal); only when absent do we
+    # need each signal's asset instrument_type + (for PERPETUAL) its open
+    # position's real leverage — resolved once per DISTINCT asset_id, mirroring
+    # the dedup pattern in api/v1/portfolio.py's position enrichment.
+    assets: dict[UUID, Any] = {}
+    positions: dict[UUID, Any] = {}
+
+    async def _implied_leverage_for(asset_id: UUID) -> Decimal:
+        if asset_id not in assets:
+            assets[asset_id] = await asset_repo.get_by_id(asset_id)
+        asset = assets[asset_id]
+        instrument_type = asset.instrument_type if asset is not None else None
+        position_leverage = None
+        if instrument_type == "PERPETUAL" and strategy.portfolio_id is not None:
+            if asset_id not in positions:
+                positions[asset_id] = await position_repo.get_by_portfolio_and_asset(
+                    strategy.portfolio_id, asset_id
+                )
+            position = positions[asset_id]
+            position_leverage = position.leverage if position is not None else None
+        return compute_implied_leverage(
+            strategy.config, instrument_type=instrument_type, position_leverage=position_leverage
+        )
+
+    out: list[SignalOut] = []
+    for s in signals:
+        leverage = await _implied_leverage_for(s.asset_id)
+        out.append(
+            SignalOut.from_recorded(s, configured_capital=configured_capital, implied_leverage=leverage)
+        )
+    return ok(out)
 
 
 @router.get(
