@@ -126,13 +126,16 @@ export function Card({ className, elevation = 'raised', interactive, ...props }:
   )
 }
 
+// Doc 09 §Header Specification: "Header Height 56-64px" — px-5 (20px each
+// side) is Doc 09's card padding; py-[18px] brings a card-title-sized (19px,
+// 1.2 line-height) header to ~59px total, inside the required range.
 export function CardHeader({ className, ...props }: HTMLMotionProps<'div'>) {
   const reveal = useReveal('cardHeader')
   return (
     <motion.div
       {...reveal}
       className={cn(
-        'flex items-center justify-between gap-4 border-b border-border px-5 py-3.5',
+        'flex items-center justify-between gap-4 border-b border-border px-5 py-[18px]',
         className,
       )}
       {...props}
@@ -145,7 +148,7 @@ export function CardTitle({ className, ...props }: HTMLMotionProps<'h3'>) {
   return (
     <motion.h3
       {...reveal}
-      className={cn('text-sm font-semibold tracking-tight text-fg', className)}
+      className={cn('text-card-title font-medium tracking-tight text-fg', className)}
       {...props}
     />
   )
@@ -153,5 +156,5 @@ export function CardTitle({ className, ...props }: HTMLMotionProps<'h3'>) {
 
 export function CardContent({ className, ...props }: HTMLMotionProps<'div'>) {
   const reveal = useReveal('cardContent')
-  return <motion.div {...reveal} className={cn('p-5', className)} {...props} />
+  return <motion.div {...reveal} className={cn('p-5 text-body text-fg', className)} {...props} />
 }

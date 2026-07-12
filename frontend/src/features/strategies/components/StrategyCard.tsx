@@ -117,7 +117,7 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
             <div className="text-[11px] uppercase tracking-wide text-fg-subtle">Return (backtest)</div>
             <div
               className={cn(
-                'mt-0.5 font-mono text-2xl font-semibold tabular-nums',
+                'mt-0.5 font-mono text-metric font-bold tabular-nums',
                 ret.tone === 'profit' ? 'text-profit' : ret.tone === 'risk' ? 'text-risk' : 'text-fg-muted',
               )}
             >

@@ -3,7 +3,8 @@
 // No duplicated UI implementations; feature-specific components stay inside feature dirs — Doc 08 §Component Standards
 // Per Doc 00 §14.11
 // SidebarNav removed — navigation moved to the horizontal TopBar (owner request).
-export { TopBar } from './TopBar'
+export { TopBar, PRIMARY as PRIMARY_NAV, OVERFLOW as OVERFLOW_NAV } from './TopBar'
+export type { NavItem } from './TopBar'
 export { ContextPanel } from './ContextPanel'
 export { Button } from './Button'
 export type { ButtonVariant, ButtonSize } from './Button'
@@ -41,3 +42,6 @@ export { Gauge } from './Gauge'
 export { Panel } from './Panel'
 export { CryptoIcon } from './CryptoIcon'
 export { ComingSoon } from './ComingSoon'
+export { Modal } from './Modal'
+export { Tooltip, TooltipProvider } from './Tooltip'
+export { CommandPalette } from './CommandPalette'

@@ -47,7 +47,7 @@ export default function DesignSystemPreviewPage() {
     <div className="flex gap-6">
       <div className="flex-1 space-y-8">
         <div>
-          <h1 className="text-2xl font-semibold text-fg">Design System Foundation</h1>
+          <h1 className="text-page-title font-semibold text-fg">Design System Foundation</h1>
           <p className="mt-1 text-sm text-fg-muted">
             Theme tokens + core components, shown with static example data only.
           </p>

@@ -47,14 +47,14 @@ export function Stat({ label, value, hint, tone = 'default', icon, className }: 
             {icon}
           </span>
         )}
-        <div className="truncate text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+        <div className="truncate text-caption font-medium uppercase tracking-wider text-fg-subtle">
           {label}
         </div>
       </div>
-      <div className={cn('mt-1 font-mono text-xl font-semibold tabular-nums tracking-tight', TONE[tone])}>
+      <div className={cn('mt-1 font-mono text-metric-sm font-semibold tabular-nums tracking-tight', TONE[tone])}>
         {typeof value === 'string' ? <AnimatedNumber value={value} /> : value}
       </div>
-      {hint && <div className="mt-0.5 text-xs text-fg-muted">{hint}</div>}
+      {hint && <div className="mt-0.5 text-caption text-fg-muted">{hint}</div>}
     </div>
   )
 }

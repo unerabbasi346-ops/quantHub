@@ -157,7 +157,7 @@ function DashboardFooter() {
   return (
     <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-6 text-[11px] text-fg-subtle">
       <span>QuantHub — institutional quantitative intelligence platform.</span>
-      <span>Single-user local deployment · Doc 00 §14.11</span>
+      <span>Single-user local deployment</span>
     </footer>
   )
 }
@@ -223,21 +223,21 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<Wallet size={16} />} title="Portfolio" />
         <CardContent>
-          <div className="font-mono text-xl font-semibold tabular-nums text-fg">{fmtMoney(String(marketValue))}</div>
+          <div className="font-mono text-metric font-bold tabular-nums text-fg">{fmtMoney(String(marketValue))}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">{open.length} open position{open.length === 1 ? '' : 's'}</div>
         </CardContent>
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<ShieldAlert size={16} />} title="Risk" />
         <CardContent>
-          <div className="font-mono text-xl font-semibold tabular-nums text-fg">{snap ? fmtMoney(snap.gross_exposure) : '—'}</div>
+          <div className="font-mono text-metric font-bold tabular-nums text-fg">{snap ? fmtMoney(snap.gross_exposure) : '—'}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">{snap ? `lev ${fmtLeverage(snap.gross_leverage)} gross exposure` : 'no snapshot yet'}</div>
         </CardContent>
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<TrendingUp size={16} />} title="Performance" />
         <CardContent>
-          <div className={cn('font-mono text-xl font-semibold tabular-nums', unrealized >= 0 ? 'text-profit' : 'text-risk')}>{fmtSigned(unrealized)}</div>
+          <div className={cn('font-mono text-metric font-bold tabular-nums', unrealized >= 0 ? 'text-profit' : 'text-risk')}>{fmtSigned(unrealized)}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">{fmtSigned(realized)} realized today</div>
         </CardContent>
       </Card>
@@ -248,7 +248,7 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
             <>
               <div className="flex items-center gap-2">
                 <CryptoIcon symbol={marketAsset.symbol} size={18} />
-                <span className="font-mono text-xl font-semibold tabular-nums text-fg">{fmtMoney(last.close)}</span>
+                <span className="font-mono text-metric font-bold tabular-nums text-fg">{fmtMoney(last.close)}</span>
               </div>
               <div className="mt-1 text-[11px] text-fg-subtle">
                 {marketAsset.symbol}

@@ -46,8 +46,10 @@ import { useUIStore } from '@/lib/store/ui'
 import { cn } from '@/lib/utils/cn'
 import { BrandMark } from './BrandMark'
 import { glassSurface } from './Card'
+import { Tooltip } from './Tooltip'
+import { openCommandPalette } from './CommandPalette'
 
-interface NavItem {
+export interface NavItem {
   href: string
   label: string
   icon: LucideIcon
@@ -55,7 +57,10 @@ interface NavItem {
 
 // Primary routes render inline on desktop; overflow routes live in the "More"
 // menu. See the grouping-choice note in the file header.
-const PRIMARY: NavItem[] = [
+// Exported so CommandPalette can list "pages" from the same single source
+// of truth instead of duplicating the route list (Doc 08 §Component
+// Standards: no duplicated UI implementations).
+export const PRIMARY: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/portfolio', label: 'Portfolio', icon: Wallet },
   { href: '/markets', label: 'Markets', icon: CandlestickChart },
@@ -63,7 +68,7 @@ const PRIMARY: NavItem[] = [
   { href: '/strategies', label: 'Strategies', icon: Brain },
   { href: '/risk', label: 'Risk', icon: ShieldAlert },
 ]
-const OVERFLOW: NavItem[] = [
+export const OVERFLOW: NavItem[] = [
   { href: '/research', label: 'Research', icon: FlaskConical },
   { href: '/monitoring', label: 'Monitoring', icon: Activity },
   { href: '/settings', label: 'Settings', icon: Settings },
@@ -100,7 +105,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string | null })
       href={item.href}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'relative flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150',
+        'relative flex items-center gap-2 rounded-lg px-3 py-1.5 text-nav font-medium transition-colors duration-150',
         active
           ? 'bg-accent-soft text-accent'
           : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
@@ -184,7 +189,7 @@ export function TopBar() {
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen((v) => !v)}
             className={cn(
-              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150',
+              'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-nav font-medium transition-colors duration-150',
               overflowActive || moreOpen
                 ? 'bg-accent-soft text-accent'
                 : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
@@ -208,7 +213,7 @@ export function TopBar() {
                     role="menuitem"
                     aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                      'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-nav transition-colors',
                       active ? 'bg-accent-soft text-accent' : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
                     )}
                   >
@@ -230,7 +235,7 @@ export function TopBar() {
           aria-haspopup="menu"
           aria-expanded={mobileOpen}
           onClick={() => setMobileOpen((v) => !v)}
-          className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
+          className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-nav font-medium text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
         >
           <Menu size={18} />
           <span className="hidden sm:inline">Menu</span>
@@ -250,7 +255,7 @@ export function TopBar() {
                   role="menuitem"
                   aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                    'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-nav transition-colors',
                     active ? 'bg-accent-soft text-accent' : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
                   )}
                 >
@@ -265,52 +270,59 @@ export function TopBar() {
 
       {/* Right utilities */}
       <motion.div {...enter(0.18)} className="ml-auto flex items-center gap-1.5">
-        {/* Global search — styled placeholder (no search index exists yet) */}
-        <div className="relative hidden max-w-xs flex-1 xl:block">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
-          <input
-            type="text"
-            placeholder="Search…"
-            aria-label="Search (coming soon)"
-            title="Search is a styled placeholder — not yet functional"
-            className="h-9 w-56 rounded-lg border border-border bg-surface-raised/60 pl-9 pr-3 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:border-border-strong focus:bg-surface-raised focus:outline-none"
-          />
-        </div>
-
+        {/* Global search — REAL functionality: opens the Ctrl+K command
+            palette (Doc 13/05). No longer a styled placeholder. */}
         <button
           type="button"
-          aria-label="Toggle theme"
-          onClick={toggleTheme}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
+          onClick={openCommandPalette}
+          aria-label="Search (opens command palette)"
+          className="hidden max-w-xs flex-1 items-center gap-2 rounded-lg border border-border/70 bg-surface-raised/60 py-2 pl-3 pr-2 text-left backdrop-blur-md transition-colors hover:border-border-strong/80 hover:bg-surface-hover/70 xl:flex"
         >
-          {mounted && theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+          <Search size={15} className="shrink-0 text-fg-subtle" />
+          <span className="flex-1 truncate text-nav text-fg-subtle">Search…</span>
+          <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] text-fg-subtle">⌘K</kbd>
         </button>
 
-        {/* Notifications — styled placeholder (no notification pipeline; S-6) */}
-        <button
-          type="button"
-          aria-label="Notifications (coming soon)"
-          title="Notifications — planned (no alert pipeline yet)"
-          className="relative flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
-        >
-          <Bell size={18} />
-          <span aria-hidden className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-warning ring-2 ring-surface" />
-        </button>
+        <Tooltip content={mounted && theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
+          <button
+            type="button"
+            aria-label="Toggle theme"
+            onClick={toggleTheme}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
+          >
+            {mounted && theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+          </button>
+        </Tooltip>
+
+        {/* Notifications — honest placeholder (no notification pipeline; S-6).
+            Fully glass-polished per Doc 09; the tooltip states its real,
+            not-yet-wired state instead of a silent browser title attribute. */}
+        <Tooltip content="Notifications — planned, no alert pipeline yet">
+          <button
+            type="button"
+            aria-label="Notifications (coming soon)"
+            className="relative flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
+          >
+            <Bell size={18} />
+            <span aria-hidden className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-warning ring-2 ring-surface" />
+          </button>
+        </Tooltip>
 
         <div className="mx-1 h-6 w-px bg-border" aria-hidden />
 
-        {/* User — styled placeholder (G-AUTH-1: single-user local, no real auth) */}
-        <button
-          type="button"
-          aria-label="Account (single-user local platform)"
-          title="Local operator — real accounts deferred (G-AUTH-1)"
-          className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-surface-hover"
-        >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-accent to-info text-xs font-semibold text-accent-fg">
-            QH
-          </span>
-          <span className="hidden text-sm font-medium text-fg-muted lg:inline">Operator</span>
-        </button>
+        {/* User — honest placeholder (G-AUTH-1: single-user local, no real auth). */}
+        <Tooltip content="Local operator — real accounts deferred (G-AUTH-1)">
+          <button
+            type="button"
+            aria-label="Account (single-user local platform)"
+            className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-surface-hover"
+          >
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-accent to-info text-xs font-semibold text-accent-fg">
+              QH
+            </span>
+            <span className="hidden text-nav font-medium text-fg-muted lg:inline">Operator</span>
+          </button>
+        </Tooltip>
       </motion.div>
     </motion.header>
   )

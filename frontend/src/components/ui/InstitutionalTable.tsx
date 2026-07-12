@@ -310,7 +310,7 @@ export function InstitutionalTable<TData>({
                     return (
                       <div
                         key={cell.id}
-                        className={cn('truncate px-4 text-fg', meta?.numeric && 'text-right tabular-nums font-mono')}
+                        className={cn('truncate px-4 text-table text-fg', meta?.numeric && 'text-right tabular-nums font-mono')}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </div>
@@ -337,7 +337,7 @@ export function InstitutionalTable<TData>({
                     return (
                       <div
                         key={cell.id}
-                        className={cn('px-4 py-2.5 text-fg', meta?.numeric && 'text-right tabular-nums font-mono')}
+                        className={cn('px-4 py-2.5 text-table text-fg', meta?.numeric && 'text-right tabular-nums font-mono')}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </div>

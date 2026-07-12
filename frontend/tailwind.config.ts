@@ -34,6 +34,28 @@ const config: Config = {
         sans: ['var(--font-sans)'],
         mono: ['var(--font-mono)'],
       },
+      // Doc 07 §Typography Hierarchy — the platform-wide type scale. Extends
+      // (does not replace) Tailwind's stock text-* sizes, each entry named
+      // for its Doc 07 role rather than a raw pixel value so a page reads
+      // `text-page-title` / `text-metric` and the scale stays centralized
+      // here as the single source of truth. Weight and letter-spacing stay
+      // separate utility classes (font-semibold, tracking-tight, ...) at
+      // each call site — same convention already used throughout the
+      // codebase — rather than baked into the tuple, so this doesn't depend
+      // on every consumer picking up a font-weight-in-fontSize feature.
+      fontSize: {
+        display: ['44px', { lineHeight: '1.1' }], // Doc 07 Display Title 40-48px
+        'page-title': ['32px', { lineHeight: '1.2' }], // Doc 07 Page Title 28-36px
+        'section-title': ['24px', { lineHeight: '1.2' }], // Doc 07 Section Title 22-26px
+        'card-title': ['19px', { lineHeight: '1.2' }], // Doc 07 Card Title 18-20px
+        metric: ['36px', { lineHeight: '1.1' }], // Doc 07 Primary Metric 32-40px
+        'metric-sm': ['22px', { lineHeight: '1.2' }], // Doc 07 Secondary Metric 20-24px
+        body: ['15px', { lineHeight: '1.5' }], // Doc 07 Body Text 14-16px
+        caption: ['12.5px', { lineHeight: '1.4' }], // Doc 07 Caption 12-13px
+        table: ['13.5px', { lineHeight: '1.4' }], // Doc 07 Table Text 13-14px
+        btn: ['14.5px', { lineHeight: '1.2' }], // Doc 07 Button Text 14-15px
+        nav: ['14px', { lineHeight: '1.2' }], // Doc 07 Navigation 14px
+      },
       colors: {
         bg: themeColor('--color-bg'),
         surface: themeColor('--color-surface'),

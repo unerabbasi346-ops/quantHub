@@ -46,11 +46,11 @@ export function PageHeader({ title, subtitle, icon, actions, className }: PageHe
           </motion.span>
         )}
         <div>
-          <motion.h1 {...titleReveal} className="text-xl font-semibold tracking-tight text-fg">
+          <motion.h1 {...titleReveal} className="text-page-title font-semibold tracking-tight text-fg">
             {title}
           </motion.h1>
           {subtitle && (
-            <motion.p {...subtitleReveal} className="mt-1 text-sm leading-relaxed text-fg-muted">
+            <motion.p {...subtitleReveal} className="mt-1 text-body text-fg-muted">
               {subtitle}
             </motion.p>
           )}

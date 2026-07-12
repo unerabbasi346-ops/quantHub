@@ -5,6 +5,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
+import { TooltipProvider } from '@/components/ui/Tooltip'
 
 // Doc 08 §State Management: server state caching; avoid global state unless required
 function makeQueryClient(): QueryClient {
@@ -36,7 +37,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(getQueryClient)
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <TooltipProvider delayDuration={250}>{children}</TooltipProvider>
     </QueryClientProvider>
   )
 }

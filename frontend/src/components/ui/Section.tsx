@@ -46,12 +46,12 @@ export function Section({
         <div className="space-y-0.5">
           <motion.h2
             {...titleReveal}
-            className="text-[13px] font-semibold uppercase tracking-wider text-fg-subtle"
+            className="text-section-title font-semibold tracking-tight text-fg"
           >
             {title}
           </motion.h2>
           {description && (
-            <motion.p {...descReveal} className="text-sm text-fg-muted">
+            <motion.p {...descReveal} className="text-body text-fg-muted">
               {description}
             </motion.p>
           )}

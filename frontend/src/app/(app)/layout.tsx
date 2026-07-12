@@ -10,6 +10,7 @@
 // Architecture: stateless shell layout; feature modules render in {children} — Doc 08 §Architecture
 // Per Doc 00 §14.11
 import { TopBar } from '@/components/ui/TopBar'
+import { CommandPalette } from '@/components/ui/CommandPalette'
 
 export default function AppLayout({
   children,
@@ -23,6 +24,7 @@ export default function AppLayout({
     // (Doc 06 §Layout "top command bar, central workspace").
     <div className="flex h-screen flex-col overflow-hidden bg-bg">
       <TopBar />
+      <CommandPalette />
       {/* Central workspace — the optional contextual panel (ContextPanel) is
           composed by individual feature pages, not force-mounted here. */}
       <main className="flex-1 overflow-auto px-6 py-6 lg:px-8">

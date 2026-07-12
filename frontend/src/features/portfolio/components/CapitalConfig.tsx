@@ -89,7 +89,7 @@ export function CapitalConfig({ portfolio, openMarketValue = 0 }: { portfolio: P
             <div className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
               Operator-set capital
             </div>
-            <div className="mt-1 font-mono text-2xl font-semibold tabular-nums text-fg">
+            <div className="mt-1 font-mono text-metric font-bold tabular-nums text-fg">
               {current ? (
                 <>
                   {fmtMoney(current)}{' '}
