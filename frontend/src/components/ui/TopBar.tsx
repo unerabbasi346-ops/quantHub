@@ -45,6 +45,7 @@ import {
 import { useUIStore } from '@/lib/store/ui'
 import { cn } from '@/lib/utils/cn'
 import { BrandMark } from './BrandMark'
+import { glassSurface } from './Card'
 
 interface NavItem {
   href: string
@@ -149,7 +150,7 @@ export function TopBar() {
   return (
     <motion.header
       {...enter(0)}
-      className="relative z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-4 backdrop-blur-md"
+      className="relative z-30 flex h-[72px] shrink-0 items-center gap-2 border-b border-border bg-surface/80 px-4 backdrop-blur-md"
     >
       {/* Brand */}
       <Link href="/dashboard" className="flex shrink-0 items-center gap-2.5 pr-2" aria-label="QuantHub — Dashboard">
@@ -187,7 +188,7 @@ export function TopBar() {
           {moreOpen && (
             <div
               role="menu"
-              className="absolute left-0 top-full mt-1.5 w-48 origin-top-left animate-scale-in rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
+              className={cn(glassSurface('elevated'), 'absolute left-0 top-full mt-1.5 w-48 origin-top-left animate-scale-in p-1.5')}
             >
               {OVERFLOW.map((item) => {
                 const active = isActive(pathname, item.href)
@@ -229,7 +230,7 @@ export function TopBar() {
         {mobileOpen && (
           <div
             role="menu"
-            className="absolute left-0 top-full mt-1.5 w-56 origin-top-left animate-scale-in rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
+            className={cn(glassSurface('elevated'), 'absolute left-0 top-full mt-1.5 w-56 origin-top-left animate-scale-in p-1.5')}
           >
             {[...PRIMARY, ...OVERFLOW].map((item) => {
               const active = isActive(pathname, item.href)

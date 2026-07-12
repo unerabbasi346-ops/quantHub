@@ -2,6 +2,10 @@
 //   FROZEN analytics chart engine ("one responsibility, one library"). Doc 12
 //   §Motion — progressive reveal, ease-out with no bounce, GPU-friendly. Doc 03
 //   §Empty/Loading — skeleton while resolving, never a bare box.
+// handbook/ui/visual_engineering/11_CHART_RENDERING_SPECIFICATION §Animation
+//   Sequence: "Charts load in this order: 1. Background 2. Grid 3. Axis
+//   4. Volume 5. Candles/Line 6. Indicators 7. Signal Markers 8. Live Updates.
+//   Charts must never instantly appear."
 // Per Doc 00 §14.11
 //
 // The ONE React↔ECharts bridge. Every analytical chart in QuantHub renders
@@ -11,6 +15,19 @@
 // from the resolved theme and hand it here — they never touch the engine
 // directly. Keeping the coupling in one file is what lets the whole platform
 // swap or restyle charts as one instrument.
+//
+// STAGED LOAD (Doc 11): rather than a second, parallel animation system, this
+// reuses lib/motion's own DURATION.chart as the one timing source. The
+// enclosing `motion.div` below (useReveal('cardContent')) already supplies
+// "Background" — the chart's card materializes before any pixel of the chart
+// itself paints. Once mounted, this component then applies the option in TWO
+// echarts.setOption passes: first the structural chrome only (grid/axis/
+// tooltip, animation off, series stripped) — "Grid" + "Axis" appearing before
+// any data — then, a beat later, the full option with series animation
+// enabled, which is where ECharts' own progressive draw-in handles
+// "Candles/Line" (and "Signal Markers", set by callers in a subsequent effect
+// once the series exists, e.g. PriceChart's marker effect). Reduced-motion
+// skips straight to the final state, per house convention.
 'use client'
 
 import { useEffect, useRef } from 'react'
@@ -20,6 +37,10 @@ import type { EChartsOption } from 'echarts'
 import { cn } from '@/lib/utils/cn'
 import { useReveal, DURATION } from '@/lib/motion'
 import { useChartTheme, useChartAnimation, type ChartTheme } from './chart-theme'
+
+// Grid/axis settle before the series draws — a fraction of the existing
+// "progressive line draw" duration, not a new timing constant.
+const STRUCTURE_DELAY_MS = Math.round(DURATION.chart * 1000 * 0.15)
 
 export interface ChartProps {
   /** ECharts option, or a builder given the live resolved theme. */
@@ -64,16 +85,36 @@ export function Chart({ option, height = 280, className, onEvents, ariaLabel }: 
     const inst = instanceRef.current
     if (!inst || !theme) return
     const resolved = typeof option === 'function' ? option(theme) : option
-    inst.setOption(
-      {
-        animation: animate,
-        animationDuration: animate ? DURATION.chart * 1000 : 0,
-        animationEasing: CHART_EASING,
-        textStyle: { fontFamily: theme.fontMono },
-        ...resolved,
-      },
-      { notMerge: true },
-    )
+    const finalOption: EChartsOption = {
+      animation: animate,
+      animationDuration: animate ? DURATION.chart * 1000 : 0,
+      animationEasing: CHART_EASING,
+      textStyle: { fontFamily: theme.fontMono },
+      ...resolved,
+    }
+
+    // Reduced motion: render the finished state immediately, no staging.
+    if (!animate) {
+      inst.setOption(finalOption, { notMerge: true })
+      return
+    }
+
+    // Pass 1 — structural chrome only (Doc 11: "Grid" then "Axis" before any
+    // data). Series stripped, animation off, so the grid/axis simply appear.
+    const { series: _series, ...structure } = finalOption as typeof finalOption & {
+      series?: unknown
+    }
+    inst.setOption({ ...structure, animation: false, series: [] }, { notMerge: true })
+
+    // Pass 2 — the full option a beat later; ECharts' own animation draws the
+    // series in (Doc 11: "Candles/Line"). Callers add signal markers in their
+    // own effect once the series exists, which naturally lands after this.
+    const timer = setTimeout(() => {
+      if (!instanceRef.current) return
+      instanceRef.current.setOption(finalOption, { notMerge: true })
+    }, STRUCTURE_DELAY_MS)
+
+    return () => clearTimeout(timer)
   }, [option, theme, animate])
 
   // Bind events once.

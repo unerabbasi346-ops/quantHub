@@ -22,6 +22,14 @@ const config: Config = {
   darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {
+      // Doc 02 §Responsive Breakpoints: Tablet 768-1023, Laptop 1024-1399,
+      // Desktop 1400+. Named alongside (not replacing) Tailwind's stock
+      // sm/md/lg/xl/2xl scale so existing classes keep working.
+      screens: {
+        tablet: '768px',
+        laptop: '1024px',
+        desktop: '1400px',
+      },
       fontFamily: {
         sans: ['var(--font-sans)'],
         mono: ['var(--font-mono)'],

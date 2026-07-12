@@ -15,6 +15,7 @@ import type { ReactNode } from 'react'
 import { motion, type HTMLMotionProps } from 'framer-motion'
 import { cn } from '@/lib/utils/cn'
 import { AnimatedNumber, useReveal } from '@/lib/motion'
+import { glassSurface, type Elevation } from './Card'
 
 type Tone = 'default' | 'profit' | 'risk' | 'info' | 'warning'
 
@@ -60,7 +61,10 @@ export function Stat({ label, value, hint, tone = 'default', icon, className }: 
 
 // Boxed KPI tile — the ONE case where a single stat earns its own bordered
 // card (owner feedback: reserve bordered cards for content that truly needs
-// grouping, e.g. a single KPI). A subtle raised surface, not flat.
+// grouping, e.g. a single KPI). A subtle elevated surface by default; glow is
+// reserved for Hero Chart / AI Workspace / active controls / focus states
+// per VE_13 ("restrained glows... avoid excessive bloom") — pass
+// `elevation="glow"` explicitly for one of those reserved contexts.
 export function StatCard({
   label,
   value,
@@ -68,20 +72,14 @@ export function StatCard({
   tone = 'default',
   icon,
   className,
+  elevation = 'elevated',
   ...props
-}: StatProps & Omit<HTMLMotionProps<'div'>, keyof StatProps>) {
+}: StatProps & Omit<HTMLMotionProps<'div'>, keyof StatProps> & { elevation?: Elevation }) {
   const reveal = useReveal('container')
   return (
     <motion.div
       {...reveal}
-      className={cn(
-        // Glow surface (owner: consistent glow treatment across all card types) —
-        // the same violet-halo language as Card/Panel, sized for a KPI tile.
-        'relative rounded-xl bg-surface-raised px-4 py-3.5 shadow-glow',
-        'before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px',
-        'before:bg-gradient-to-r before:from-transparent before:via-accent/25 before:to-transparent',
-        className,
-      )}
+      className={cn(glassSurface(elevation), 'px-4 py-3.5', className)}
       {...props}
     >
       <Stat label={label} value={value} hint={hint} tone={tone} icon={icon} />

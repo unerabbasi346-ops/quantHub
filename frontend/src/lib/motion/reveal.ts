@@ -6,7 +6,10 @@
 //   itself, nothing depends on render order or a parent orchestrator — a brand
 //   new page inherits the whole sequence with zero animation code.
 // Motion respects prefers-reduced-motion: reduced users get the finished state
-//   instantly (initial=false), no blur, no translate, no delay.
+//   instantly, no blur, no translate, no delay. This is done by explicitly
+//   asserting the 'visible' variant target (duration 0) rather than by
+//   withholding `animate` entirely — see the reduced-motion branch below for
+//   why the withholding approach silently broke this.
 // Per Doc 00 §14.11
 'use client'
 
@@ -24,7 +27,7 @@ export interface RevealResult {
   // .span / .svg without per-element ref-variance friction.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ref: React.MutableRefObject<any>
-  initial: 'hidden' | false
+  initial: 'hidden' | 'visible' | false
   animate?: 'visible' | 'hidden'
   variants?: Variants
   custom?: RevealCustom
@@ -70,7 +73,34 @@ export function useReveal(kind: RevealKind = 'item'): RevealResult {
   }, [reduce, kind])
 
   if (reduce) {
-    return { ref, initial: false }
+    // BUG THIS FIXES: SSR always sees `useReducedMotion() === false` (no
+    // `matchMedia` on the server), so the server-rendered markup bakes in the
+    // 'hidden' variant's inline style (opacity:0, blurred, translated).
+    // Client hydration's first render also reports `reduce === false` to
+    // avoid a hydration mismatch, so that SAME 'hidden' style ships to the
+    // DOM again. Only AFTER framer's own reduced-motion detection resolves
+    // (a render or two later) does `reduce` flip to `true` here. The
+    // previous fix simply withheld the `animate` prop at that point — but
+    // withholding `animate` tells framer to stop asserting ANY target, not
+    // to move to a visible one, so the stale 'hidden' inline style from the
+    // earlier render was never overwritten and elements stayed permanently
+    // invisible. The fix is to keep driving the SAME `revealVariants`
+    // mechanism (no new primitive) but explicitly target 'visible' with a
+    // zero-length transition — framer then unconditionally applies the
+    // visible variant's resolved style on every render, reduced or not.
+    const cfg = KIND[kind]
+    return {
+      ref,
+      initial: 'visible',
+      animate: 'visible',
+      variants: revealVariants,
+      custom: { ...buildCustom(kind, 0), duration: 0 },
+      onAnimationComplete: cfg.useFilter
+        ? () => {
+            if (ref.current) ref.current.style.filter = ''
+          }
+        : undefined,
+    }
   }
 
   const cfg = KIND[kind]

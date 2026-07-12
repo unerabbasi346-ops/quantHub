@@ -122,25 +122,33 @@ export function chartTextStyle(theme: ChartTheme) {
   return { fontFamily: theme.fontMono, color: theme.fgMuted, fontSize: 11 }
 }
 
-/** Institutional tooltip: raised surface, hairline border, mono body. */
+// Doc 05 Glass Surface System / Doc 11 Chart Rendering §Tooltip: "Glass
+// surface. Soft blur. Rounded corners." ECharts tooltips render as a real
+// positioned <div> (not canvas), so — unlike series colors — native CSS
+// `backdrop-filter` works here directly via extraCssText.
+/** Institutional tooltip: translucent glass surface, hairline border, mono body. */
 export function chartTooltip(theme: ChartTheme, extra: Record<string, unknown> = {}) {
   return {
-    backgroundColor: theme.surfaceRaised,
-    borderColor: theme.border,
+    backgroundColor: theme.alpha('surfaceRaised', 0.72),
+    borderColor: theme.alpha('border', 0.5),
     borderWidth: 1,
     padding: [8, 10],
     textStyle: { color: theme.fg, fontFamily: theme.fontMono, fontSize: 12 },
-    extraCssText: 'border-radius:8px;box-shadow:var(--shadow-md);',
+    extraCssText: 'border-radius:12px;box-shadow:var(--shadow-md);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);',
     ...extra,
   }
 }
 
+// Doc 11 Chart Rendering §Grid: "Grid opacity between 4% and 6%." §Axis:
+// "Minimal styling. Low opacity." 0.05 (5%) sits mid-range for split lines;
+// the axis line itself isn't numerically specified but is softened too so it
+// stays secondary to the data, never "bright axis labels" (forbidden).
 /** Themed category/value axis fragment (subtle grid, hairline axis). */
 export function chartAxis(theme: ChartTheme) {
   return {
-    axisLine: { lineStyle: { color: theme.border } },
+    axisLine: { lineStyle: { color: theme.alpha('border', 0.5) } },
     axisTick: { show: false },
     axisLabel: { color: theme.fgSubtle, fontFamily: theme.fontMono, fontSize: 10 },
-    splitLine: { lineStyle: { color: theme.alpha('border', 0.6), type: 'dashed' as const } },
+    splitLine: { lineStyle: { color: theme.alpha('border', 0.05), type: 'dashed' as const } },
   }
 }
