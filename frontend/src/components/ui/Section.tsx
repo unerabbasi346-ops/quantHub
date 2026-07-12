@@ -21,6 +21,8 @@ import { useReveal } from '@/lib/motion'
 
 interface SectionProps {
   title: string
+  /** Optional Lucide icon shown before the title (VE_13: "Section headers with icons"). */
+  icon?: ReactNode
   description?: ReactNode
   actions?: ReactNode
   children: ReactNode
@@ -31,6 +33,7 @@ interface SectionProps {
 // Doc 08 §Architecture: stateless presentation component.
 export function Section({
   title,
+  icon,
   description,
   actions,
   children,
@@ -46,8 +49,9 @@ export function Section({
         <div className="space-y-0.5">
           <motion.h2
             {...titleReveal}
-            className="text-section-title font-semibold tracking-tight text-fg"
+            className="flex items-center gap-2 text-section-title font-semibold tracking-tight text-fg"
           >
+            {icon && <span className="text-fg-subtle">{icon}</span>}
             {title}
           </motion.h2>
           {description && (

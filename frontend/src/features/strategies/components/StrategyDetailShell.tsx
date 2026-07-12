@@ -4,6 +4,14 @@
 // Doc 14 §10.2 Strategy Governance (§10.2.5 versioning F-9), §10.6.4 Signal
 //   Recording, §10.3 Backtesting. Doc 15 §11.1.5 (signal value = conviction).
 // Doc 00 §14.5/§14.7 — DATA HONESTY. Per Doc 00 §14.11
+// handbook/ui/06_STRATEGY_ENGINEERING + visual_engineering/13_VISUAL_DNA —
+//   dense institutional quantitative analytics hub. Six sections: (1) selector
+//   + real-data stat pill strip, (2) equity/conviction curve + performance
+//   metrics grid, (3) full-width monthly signal-performance heatmap, (4)
+//   conviction distribution + signal timeline scatter, (5) backtest order flow
+//   + trade P&L distribution + consecutive-direction runs, (6) strategy
+//   configuration + metadata card. Every figure is real (signals/backtest) or
+//   an explicit "Pending"/"Not computed" disclosure — nothing fabricated.
 //
 // Dedicated strategy detail page (owner request, points 7–8) at
 // /strategies/[id]: a large primary chart, a side metadata panel (F-9 honest),
@@ -20,34 +28,40 @@ import {
   Activity,
   BarChart3,
   Brain,
+  CalendarClock,
+  CalendarRange,
   Check,
   ChevronDown,
   Clock,
-  Gauge,
+  FileText,
+  Gauge as GaugeIcon,
+  Hash,
   LineChart as LineChartIcon,
   ListChecks,
+  Percent,
   ShieldQuestion,
+  Sigma,
   Target,
   TerminalSquare,
+  Waves,
+  Zap,
 } from 'lucide-react'
 import {
   Badge,
   CryptoIcon,
   EmptyState,
   ErrorState,
+  Heatmap,
   Histogram,
   InstitutionalTable,
   type InstitutionalColumnDef,
-  LineChart,
   MultiLineChart,
   Panel,
-  Ring,
   Section,
   SkeletonTable,
   StatCard,
   pnlBadgeVariant,
   type BadgeVariant,
-  type LinePoint,
   type Series,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
@@ -57,7 +71,15 @@ import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
 import { useBacktests, useSignals, useStrategies } from '../hooks/useStrategies'
 import type { Signal, Strategy } from '../types'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
+import { consecutiveRuns, monthlyConvictionGrid, signalPoints } from '../analytics'
 import { BacktestRunsTable } from './tables'
+import { ConsecutiveRunsChart, ConvictionEquityChart, SignalTimelineScatter } from './charts'
+import { PendingMetricTile, RealMetricTile, RealRingTile } from './metric-tiles'
+
+// Signal history depth for the detail workspace's derived analytics (monthly
+// heatmap, timeline scatter, streaks) — the backend caps at 1000; the flat
+// /strategies list and dashboard cards keep their own lighter default.
+const SIGNAL_HISTORY_LIMIT = 1000
 
 const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
 const fmtMoney = (v: string | null) =>
@@ -68,6 +90,7 @@ const fmtSignal = (v: string) => {
   return n > 0 ? `+${s}` : s
 }
 const fmtTime = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+const fmtDate = (ts: string | null) => (ts ? new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—')
 
 function statusVariant(status: string): BadgeVariant {
   return status.toUpperCase() === 'ACTIVE' ? 'profit' : 'neutral'
@@ -252,11 +275,17 @@ export function StrategyDetailShell({ id }: { id: string }) {
 function DetailSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="skeleton h-20 w-full" />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]">
+      <div className="skeleton h-24 w-full" />
+      <div className="flex gap-2.5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="skeleton h-9 w-32 shrink-0 rounded-full" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
         <div className="skeleton h-80" />
         <div className="skeleton h-80" />
       </div>
+      <div className="skeleton h-64 w-full" />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="skeleton h-56" />
         <div className="skeleton h-56" />
@@ -265,15 +294,76 @@ function DetailSkeleton() {
   )
 }
 
+// ── Section 1: real-data stat pill strip — horizontal scroll, one pill per
+//    headline metric (Status, Total Signals, Valid Rate, Backtest Return,
+//    Last Signal), matching the reference's Voltrex asset-pill styling. ──
+function StatPill({
+  icon,
+  label,
+  value,
+  tone = 'default',
+}: {
+  icon: React.ReactNode
+  label: string
+  value: React.ReactNode
+  tone?: 'default' | 'profit' | 'risk'
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 rounded-full border border-border/60 bg-surface-raised/50 px-3.5 py-2 backdrop-blur-sm">
+      <span className="text-fg-subtle">{icon}</span>
+      <span className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">{label}</span>
+      <span
+        className={cn(
+          'font-mono text-xs font-semibold tabular-nums',
+          tone === 'profit' ? 'text-profit' : tone === 'risk' ? 'text-risk' : 'text-fg',
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+function StatPillStrip({
+  strategy,
+  totalSignals,
+  validity,
+  latest,
+  latestSignal,
+}: {
+  strategy: Strategy
+  totalSignals: number
+  validity: number
+  latest: import('../types').Backtest | null
+  latestSignal: Signal | null
+}) {
+  const active = strategy.status.toUpperCase() === 'ACTIVE'
+  const ret = latest?.total_return != null ? Number.parseFloat(latest.total_return) : null
+  return (
+    <div className="flex gap-2.5 overflow-x-auto pb-1">
+      <StatPill icon={<Zap size={13} />} label="Status" value={strategy.status} tone={active ? 'profit' : 'default'} />
+      <StatPill icon={<Activity size={13} />} label="Total signals" value={totalSignals} />
+      <StatPill icon={<Percent size={13} />} label="Valid rate" value={`${Math.round(validity * 100)}%`} tone="profit" />
+      <StatPill
+        icon={<Target size={13} />}
+        label="Backtest return"
+        value={fmtReturnPct(latest?.total_return ?? null)}
+        tone={ret == null ? 'default' : ret >= 0 ? 'profit' : 'risk'}
+      />
+      <StatPill icon={<Clock size={13} />} label="Last signal" value={latestSignal ? fmtTime(latestSignal.ts) : '—'} />
+    </div>
+  )
+}
+
 function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
-  const signalsQuery = useSignals(strategy.id)
+  const signalsQuery = useSignals(strategy.id, SIGNAL_HISTORY_LIMIT)
   const backtestsQuery = useBacktests(strategy.id)
   const signals = signalsQuery.data ?? []
   const backtests = backtestsQuery.data ?? []
   const latest = backtests[0] ?? null
 
   const ordered = [...signals].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
-  const points: LinePoint[] = ordered.map((s) => ({ label: fmtTime(s.ts), value: Number.parseFloat(s.value) }))
+  const points = ordered.map((s) => ({ label: fmtTime(s.ts), value: Number.parseFloat(s.value) }))
   const signalValues = signals.map((s) => Number.parseFloat(s.value))
   const validCount = signals.filter((s) => s.validation_status.toUpperCase() === 'VALID').length
   const validity = signals.length ? validCount / signals.length : 0
@@ -283,73 +373,114 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
   const results = latest?.results ?? null
   const fillRate = results && results.orders_created > 0 ? results.orders_filled / results.orders_created : null
   const reference = isReferenceStrategy(strategy.name)
-  const active = strategy.status.toUpperCase() === 'ACTIVE'
+
+  const monthly = useMemo(() => monthlyConvictionGrid(signals), [signals])
+  const timelinePoints = useMemo(() => signalPoints(signals), [signals])
+  const runs = useMemo(() => consecutiveRuns(signals), [signals])
+
+  const tradeCount = latest?.trade_count ?? results?.trade_count ?? null
+  const retNum = latest?.total_return != null ? Number.parseFloat(latest.total_return) : null
 
   return (
     <>
-      {/* Title row */}
-      <Panel className="flex flex-wrap items-start justify-between gap-4 p-5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="truncate text-lg font-semibold tracking-tight text-fg">{strategy.name}</h1>
-            <Badge variant={statusVariant(strategy.status)}>{strategy.status}</Badge>
-            {reference && (
-              <Badge variant="warning" title={REFERENCE_TOOLTIP}>
-                {REFERENCE_BADGE}
-              </Badge>
-            )}
+      {/* ── Section 1: title + real-data pill strip ── */}
+      <Panel className="space-y-4 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="truncate text-lg font-semibold tracking-tight text-fg">{strategy.name}</h1>
+              <Badge variant={statusVariant(strategy.status)}>{strategy.status}</Badge>
+              {reference && (
+                <Badge variant="warning" title={REFERENCE_TOOLTIP}>
+                  {REFERENCE_BADGE}
+                </Badge>
+              )}
+            </div>
+            <p className="mt-1 text-sm text-fg-muted">
+              {strategy.description ?? (reference ? REFERENCE_CAPTION : 'No description.')} · <span className="font-mono">v{strategy.version}</span>
+            </p>
           </div>
-          <p className="mt-1 text-sm text-fg-muted">
-            {strategy.description ?? (reference ? REFERENCE_CAPTION : 'No description.')} · <span className="font-mono">v{strategy.version}</span>
-          </p>
         </div>
-        <div className="flex gap-3">
-          <StatCard icon={<BarChart3 size={13} />} label="Recent signals" value={signals.length} />
-          <StatCard icon={<Target size={13} />} label="Backtest return" value={latest ? fmtReturnPct(latest.total_return) : '—'} tone={latest?.total_return ? (Number.parseFloat(latest.total_return) >= 0 ? 'profit' : 'risk') : 'default'} />
-        </div>
+        <StatPillStrip strategy={strategy} totalSignals={signals.length} validity={validity} latest={latest} latestSignal={latestSignal} />
       </Panel>
 
-      {/* Real-data metric strip — distinct icon per metric, every value computed
-          from real signals/backtest results (no fabricated figures). */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-        <StatCard icon={<Activity size={13} />} label="Signals" value={signals.length} hint="recorded events" />
-        <StatCard
-          icon={<Gauge size={13} />}
-          label="Avg conviction"
-          value={avgConviction != null ? fmtSignal(String(avgConviction)) : '—'}
-          tone={avgConviction != null ? (avgConviction >= 0 ? 'profit' : 'risk') : 'default'}
-          hint="mean signal value"
-        />
-        <StatCard icon={<Check size={13} />} label="Valid rate" value={`${Math.round(validity * 100)}%`} tone="profit" hint={`${validCount} of ${signals.length}`} />
-        <StatCard
-          icon={<Target size={13} />}
-          label="Fill rate"
-          value={fillRate != null ? `${Math.round(fillRate * 100)}%` : '—'}
-          hint={results ? `${results.orders_filled} of ${results.orders_created} orders` : 'no backtest'}
-        />
-        <StatCard icon={<Clock size={13} />} label="Latest signal" value={latestSignal ? fmtTime(latestSignal.ts) : '—'} hint={latestSignal ? 'most recent' : 'none yet'} />
-      </div>
-
-      {/* Primary chart + metadata panel */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]">
-        <Section title="Conviction curve" description="Signed conviction over time — the value each signal contributes to position sizing.">
+      {/* ── Section 2: equity/conviction curve (60%) + performance metrics grid (40%) ── */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
+        <Section
+          icon={<LineChartIcon size={16} />}
+          title="Equity curve"
+          description="Signed conviction over time — an honest equity proxy (per-step P&L isn't tracked yet, F-21). Green above zero, red drawdown shading below."
+        >
           <Panel className="p-4">
             {signalsQuery.isLoading ? (
-              <div className="skeleton h-[280px] w-full" />
-            ) : points.length >= 2 ? (
-              <LineChart data={points} tone="info" zeroBaseline height={280} />
+              <div className="skeleton h-[320px] w-full" />
             ) : (
-              <div className="flex h-[280px] items-center justify-center text-sm text-fg-muted">Not enough signals to plot a curve yet.</div>
+              <>
+                <ConvictionEquityChart points={points} height={320} />
+                {latest?.total_return != null && (
+                  <div className="mt-3 flex justify-end">
+                    <Badge variant={retNum != null && retNum >= 0 ? 'profit' : 'risk'}>
+                      Latest backtest return · {fmtReturnPct(latest.total_return)}
+                    </Badge>
+                  </div>
+                )}
+              </>
             )}
           </Panel>
         </Section>
 
-        <MetadataPanel strategy={strategy} validity={validity} validCount={validCount} total={signals.length} active={active} />
+        <Section icon={<GaugeIcon size={16} />} title="Performance metrics" description="Real where computable; honestly deferred otherwise.">
+          <Panel className="grid grid-cols-2 gap-3 p-4">
+            <PendingMetricTile label="Win rate" ticket="F-21" shell="ring" />
+            <PendingMetricTile label="Sharpe ratio" ticket="F-21" shell="number" />
+            <PendingMetricTile label="Max drawdown" ticket="F-21" shell="bar" />
+            <RealMetricTile icon={<Activity size={11} />} label="Total signals" value={signals.length} />
+            <RealRingTile label="Valid rate" value={validity} hint={`${validCount}/${signals.length}`} />
+            <RealMetricTile
+              icon={<Target size={11} />}
+              label="Backtest return"
+              value={fmtReturnPct(latest?.total_return ?? null)}
+              tone={retNum == null ? 'default' : retNum >= 0 ? 'profit' : 'risk'}
+            />
+            <RealMetricTile icon={<Hash size={11} />} label="Trade count" value={tradeCount ?? '—'} />
+            <PendingMetricTile label="Profit factor" ticket="F-21" shell="number" />
+          </Panel>
+        </Section>
       </div>
 
-      {/* Distribution + indicator overlay (real data; honest states otherwise) */}
+      {/* ── Section 3: monthly signal performance heatmap (full width) ── */}
+      <Section
+        icon={<CalendarRange size={16} />}
+        title="Monthly signal performance"
+        description="Average signed conviction by month — an honest proxy for strategy lean, not a realized P&L calendar."
+      >
+        <Panel className="p-4">
+          {signalsQuery.isLoading ? (
+            <div className="skeleton h-[240px] w-full" />
+          ) : monthly.years.length === 0 ? (
+            <div className="flex h-[200px] items-center justify-center text-sm text-fg-muted">Not enough signals to build a monthly grid yet.</div>
+          ) : (
+            <Heatmap
+              xLabels={monthly.months}
+              yLabels={monthly.years}
+              values={monthly.grid}
+              mode="diverging"
+              min={-monthly.maxAbs}
+              max={monthly.maxAbs}
+              height={Math.max(180, monthly.years.length * 70 + 90)}
+              valueFormat={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(3)}`}
+            />
+          )}
+        </Panel>
+      </Section>
+
+      {/* ── Section 4: signal intelligence — distribution + timeline scatter ── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Section title="Conviction distribution" description="How this strategy's signal values are spread — red below zero, green above.">
+        <Section
+          icon={<BarChart3 size={16} />}
+          title="Conviction distribution"
+          description="How this strategy's signal values are spread — red below zero, green above."
+        >
           <Panel className="p-4">
             {signalsQuery.isLoading ? (
               <div className="skeleton h-[200px] w-full" />
@@ -360,6 +491,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
                   <span>min <span className="font-mono text-fg-muted">{fmtSignal(String(Math.min(...signalValues)))}</span></span>
                   <span>median <span className="font-mono text-fg-muted">{fmtSignal(String(median(signalValues)))}</span></span>
                   <span>max <span className="font-mono text-fg-muted">{fmtSignal(String(Math.max(...signalValues)))}</span></span>
+                  <span>mean <span className="font-mono text-fg-muted">{avgConviction != null ? fmtSignal(String(avgConviction)) : '—'}</span></span>
                 </div>
               </>
             ) : (
@@ -368,24 +500,71 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
           </Panel>
         </Section>
 
-        <Section title="Indicator overlay" description="The numeric series this strategy records with each signal, over time.">
+        <Section icon={<Waves size={16} />} title="Signal timeline" description="Every recorded signal — color by direction, size by magnitude.">
           <Panel className="p-4">
-            {signalsQuery.isLoading ? (
-              <div className="skeleton h-[240px] w-full" />
-            ) : indicator.series.length > 0 ? (
-              <MultiLineChart labels={indicator.labels} series={indicator.series} height={240} />
-            ) : (
-              <div className="flex h-[240px] flex-col items-center justify-center gap-1 px-6 text-center text-sm text-fg-muted">
-                <LineChartIcon size={18} className="text-fg-subtle" />
-                This strategy&apos;s signals don&apos;t carry an indicator series to overlay.
-              </div>
-            )}
+            {signalsQuery.isLoading ? <div className="skeleton h-[260px] w-full" /> : <SignalTimelineScatter points={timelinePoints} height={260} />}
           </Panel>
         </Section>
       </div>
 
-      {/* Backtest order flow — real counts from the latest backtest run */}
-      <OrderFlow query={backtestsQuery} results={results} />
+      {/* Indicator overlay — real recorded metadata series (kept from the prior
+          layout; the new spec doesn't remove it and it's genuine data). */}
+      <Section icon={<LineChartIcon size={16} />} title="Indicator overlay" description="The numeric series this strategy records with each signal, over time.">
+        <Panel className="p-4">
+          {signalsQuery.isLoading ? (
+            <div className="skeleton h-[240px] w-full" />
+          ) : indicator.series.length > 0 ? (
+            <MultiLineChart labels={indicator.labels} series={indicator.series} height={240} />
+          ) : (
+            <div className="flex h-[240px] flex-col items-center justify-center gap-1 px-6 text-center text-sm text-fg-muted">
+              <LineChartIcon size={18} className="text-fg-subtle" />
+              This strategy&apos;s signals don&apos;t carry an indicator series to overlay.
+            </div>
+          )}
+        </Panel>
+      </Section>
+
+      {/* ── Section 5: backtest analytics ── */}
+      <OrderFlow query={backtestsQuery} results={results} fillRate={fillRate} />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Section icon={<Sigma size={16} />} title="Trade P&L distribution" description="Distribution of realized trade outcomes by magnitude.">
+          <Panel className="flex items-start gap-3 p-5">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warning-soft text-warning">
+              <ShieldQuestion size={16} />
+            </span>
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium text-fg">
+                Not computed <Badge variant="warning">pending backend computation</Badge>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-fg-muted">
+                Backtest runs store aggregate results only (created/filled/rejected order counts, realized/unrealized P&L
+                totals) — there is no per-trade fill record to bucket into a distribution. Per-order fills exist for live
+                portfolio executions, not backtest replays, so bucketing those would misattribute a different data source
+                to this chart. Shown honestly rather than approximated.
+              </p>
+            </div>
+          </Panel>
+        </Section>
+
+        <Section
+          icon={<Activity size={16} />}
+          title="Consecutive signal direction"
+          description="Streaks of same-direction signals, time-ordered — computed purely from signal sign."
+        >
+          <Panel className="p-4">
+            {signalsQuery.isLoading ? <div className="skeleton h-[220px] w-full" /> : <ConsecutiveRunsChart runs={runs} height={220} />}
+          </Panel>
+        </Section>
+      </div>
+
+      {/* ── Section 6: strategy configuration + metadata ── */}
+      <Section icon={<TerminalSquare size={16} />} title="Strategy configuration" description="Registered configuration and metadata for this strategy.">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <ConfigChipsCard strategy={strategy} />
+          <StrategyMetadataCard strategy={strategy} />
+        </div>
+      </Section>
 
       {/* Full run history — Doc 06 "Backtest Analytics": every run, not just
           the latest, browsable in place (no navigating away from the workspace). */}
@@ -423,6 +602,62 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         <BacktestPanel query={backtestsQuery} latest={latest} count={backtests.length} />
       </div>
     </>
+  )
+}
+
+// ── Section 6a: config parameters as labeled chips (kept from the prior
+//    layout, relocated into the dedicated configuration section). ──
+function ConfigChipsCard({ strategy }: { strategy: Strategy }) {
+  const config = Object.entries(strategy.config)
+  return (
+    <Panel className="p-5">
+      <div className="mb-3 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-fg-subtle">
+        <TerminalSquare size={13} /> Configuration
+      </div>
+      {config.length === 0 ? (
+        <p className="text-sm text-fg-muted">No configuration parameters.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {config.map(([k, v]) => (
+            <span key={k} className="rounded-md border border-border bg-surface px-2 py-1 font-mono text-[11px] text-fg-muted">
+              <span className="text-fg-subtle">{k}</span>=<span className="text-fg">{String(v)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="mt-4 border-t border-border pt-3 text-[11px] leading-relaxed text-fg-subtle">
+        Shows the current registration only — version history and rollback aren&apos;t available yet (F-9). Configuration
+        is owned by the strategy and shown exactly as registered.
+      </p>
+    </Panel>
+  )
+}
+
+// ── Section 6b: strategy metadata card — description, version, registered
+//    date, last modified. Clean glass card, not a settings form. ──
+function StrategyMetadataCard({ strategy }: { strategy: Strategy }) {
+  return (
+    <Panel className="space-y-3 p-5">
+      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-fg-subtle">
+        <FileText size={13} /> Metadata
+      </div>
+      <p className="text-sm leading-relaxed text-fg-muted">
+        {strategy.description ?? 'No description registered for this strategy.'}
+      </p>
+      <div className="space-y-2 border-t border-border pt-3 text-sm">
+        <Meta label="Version" value={<span className="font-mono text-fg">v{strategy.version}</span>} />
+        <Meta label="Status" value={<Badge variant={statusVariant(strategy.status)}>{strategy.status}</Badge>} />
+        <Meta
+          label="Registered"
+          value={
+            <span className="flex items-center gap-1.5 font-mono text-fg-muted">
+              <CalendarClock size={12} className="text-fg-subtle" /> {fmtDate(strategy.created_at)}
+            </span>
+          }
+        />
+        <Meta label="Last modified" value={<span className="font-mono text-fg-muted">{fmtDate(strategy.updated_at)}</span>} />
+      </div>
+    </Panel>
   )
 }
 
@@ -503,58 +738,6 @@ function RiskDisclosure() {
         </div>
       </Panel>
     </Section>
-  )
-}
-
-function MetadataPanel({
-  strategy,
-  validity,
-  validCount,
-  total,
-  active,
-}: {
-  strategy: Strategy
-  validity: number
-  validCount: number
-  total: number
-  active: boolean
-}) {
-  const config = Object.entries(strategy.config)
-  return (
-    <Panel className="space-y-4 p-5">
-      <div className="flex flex-col items-center gap-1.5">
-        <Ring value={validity} tone="profit" centerLabel={`${Math.round(validity * 100)}%`} centerSub="valid" />
-        <p className="text-xs text-fg-muted">Signal validity rate</p>
-        <p className="text-[11px] text-fg-subtle">{validCount} of {total} recent</p>
-      </div>
-
-      <div className="space-y-2.5 border-t border-border pt-4 text-sm">
-        <Meta label="Status" value={<Badge variant={statusVariant(strategy.status)}>{strategy.status}</Badge>} />
-        <Meta label="Version" value={<span className="font-mono text-fg">v{strategy.version}</span>} />
-        <Meta label="Engaged" value={<span className="text-fg-muted">{active ? 'emitting signals' : 'inactive'}</span>} />
-      </div>
-
-      <div className="border-t border-border pt-4">
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-fg-subtle">
-          <TerminalSquare size={13} /> Configuration
-        </div>
-        {config.length === 0 ? (
-          <p className="text-sm text-fg-muted">No configuration parameters.</p>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {config.map(([k, v]) => (
-              <span key={k} className="rounded-md border border-border bg-surface px-2 py-1 font-mono text-[11px] text-fg-muted">
-                <span className="text-fg-subtle">{k}</span>=<span className="text-fg">{String(v)}</span>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <p className="border-t border-border pt-3 text-[11px] leading-relaxed text-fg-subtle">
-        Shows the current registration only — version history and rollback aren&apos;t available yet. Configuration is owned by the strategy and shown exactly as registered.
-      </p>
-    </Panel>
   )
 }
 
@@ -688,14 +871,16 @@ function FlowBar({ label, value, total, tone }: { label: string; value: number; 
 function OrderFlow({
   query,
   results,
+  fillRate,
 }: {
   query: ReturnType<typeof useBacktests>
   results: import('../types').BacktestResults | null
+  fillRate: number | null
 }) {
   const rpnl = results ? Number.parseFloat(results.realized_pnl) : 0
   const upnl = results ? Number.parseFloat(results.unrealized_pnl) : 0
   return (
-    <Section title="Backtest order flow" description="What the latest backtest run did with its orders — created, filled and rejected.">
+    <Section icon={<Zap size={16} />} title="Backtest order flow" description="What the latest backtest run did with its orders — created, filled and rejected.">
       <Panel className="p-5">
         {query.isLoading ? (
           <div className="skeleton h-28 w-full" />
@@ -710,7 +895,10 @@ function OrderFlow({
             </div>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
               <StatCard icon={<Activity size={13} />} label="Realized P&L" value={fmtMoney(results.realized_pnl)} tone={rpnl >= 0 ? 'profit' : 'risk'} hint="closed positions" />
-              <StatCard icon={<Gauge size={13} />} label="Unrealized P&L" value={fmtMoney(results.unrealized_pnl)} tone={upnl >= 0 ? 'profit' : 'risk'} hint="open at run end" />
+              <StatCard icon={<GaugeIcon size={13} />} label="Unrealized P&L" value={fmtMoney(results.unrealized_pnl)} tone={upnl >= 0 ? 'profit' : 'risk'} hint="open at run end" />
+              {fillRate != null && (
+                <StatCard icon={<Percent size={13} />} label="Fill rate" value={`${Math.round(fillRate * 100)}%`} hint={`${results.orders_filled} of ${results.orders_created} orders`} />
+              )}
             </div>
           </div>
         )}

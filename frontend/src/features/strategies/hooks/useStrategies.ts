@@ -22,10 +22,10 @@ export function useSetStrategyStatus() {
   })
 }
 
-export function useSignals(strategyId: string) {
+export function useSignals(strategyId: string, limit = 100) {
   return useQuery({
-    queryKey: ['signals', strategyId],
-    queryFn: () => strategiesService.getSignals(strategyId),
+    queryKey: ['signals', strategyId, limit],
+    queryFn: () => strategiesService.getSignals(strategyId, limit),
     enabled: Boolean(strategyId),
   })
 }
