@@ -193,42 +193,55 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
   // Doc 02 §Grid System: "12 Column Grid, Equal Columns, Equal Gutters."
   // §Analytics Grid: "Desktop 4 Columns / Laptop 2 / Tablet 2 / Mobile 1."
   // A real 12-col base (not an approximated `grid-cols-4` shorthand) so each
-  // card's span is explicit: 12 (mobile) -> 6 (tablet+laptop, 2-up) -> 3
-  // (desktop, 4-up) — the same visual result, but architecturally a 12-col grid.
+  // card's span is explicit: 12 (mobile) -> 6 (2-up) -> 3 (4-up).
+  //
+  // BUG FIX: originally used the custom tablet:/desktop: variants defined in
+  // tailwind.config.ts (768px/1400px, matching Doc 02 exactly), but those
+  // variants compiled to zero CSS rules in the running dev server — verified
+  // by inspecting document.styleSheets directly, no rule for either prefix
+  // existed anywhere in the compiled stylesheet, while stock breakpoints
+  // (lg: elsewhere on this page) compiled and rendered correctly. Root cause
+  // not fully isolated (likely a dev-server config-cache staleness, since the
+  // config file itself is correct and a safelist entry didn't fix it either).
+  // Switched to stock Tailwind screens instead: md: (768px, exact match for
+  // "tablet") and xl: (1280px, closest stock tier to the spec's 1400px
+  // "desktop") — both always present in Tailwind's core preset regardless of
+  // this project's custom-screen config, so they don't depend on whatever is
+  // stopping the custom variants from compiling.
   if (positionsQuery.isLoading)
     return (
       <div className="grid grid-cols-12 gap-4">
-        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
-        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
-        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
-        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
+        <div className="skeleton col-span-12 h-28 md:col-span-6 xl:col-span-3" />
+        <div className="skeleton col-span-12 h-28 md:col-span-6 xl:col-span-3" />
+        <div className="skeleton col-span-12 h-28 md:col-span-6 xl:col-span-3" />
+        <div className="skeleton col-span-12 h-28 md:col-span-6 xl:col-span-3" />
       </div>
     )
 
   return (
     <div className="grid grid-cols-12 gap-4">
-      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+      <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<Wallet size={16} />} title="Portfolio" />
         <CardContent>
           <div className="font-mono text-xl font-semibold tabular-nums text-fg">{fmtMoney(String(marketValue))}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">{open.length} open position{open.length === 1 ? '' : 's'}</div>
         </CardContent>
       </Card>
-      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+      <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<ShieldAlert size={16} />} title="Risk" />
         <CardContent>
           <div className="font-mono text-xl font-semibold tabular-nums text-fg">{snap ? fmtMoney(snap.gross_exposure) : '—'}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">{snap ? `lev ${fmtLeverage(snap.gross_leverage)} gross exposure` : 'no snapshot yet'}</div>
         </CardContent>
       </Card>
-      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+      <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<TrendingUp size={16} />} title="Performance" />
         <CardContent>
           <div className={cn('font-mono text-xl font-semibold tabular-nums', unrealized >= 0 ? 'text-profit' : 'text-risk')}>{fmtSigned(unrealized)}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">{fmtSigned(realized)} realized today</div>
         </CardContent>
       </Card>
-      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+      <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<CandlestickChart size={16} />} title="Market overview" />
         <CardContent>
           {marketAsset && last ? (
