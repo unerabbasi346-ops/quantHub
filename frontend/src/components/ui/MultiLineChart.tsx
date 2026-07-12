@@ -27,8 +27,10 @@ interface MultiLineChartProps {
 }
 
 // Deliberate order so the common fast/slow pair is most distinct: brand violet,
-// info blue, amber, green — resolved from theme (theme-correct in both modes).
-const SERIES_COLORS = (t: ChartTheme) => [t.accent, t.info, t.warning, t.profit]
+// a cooler cyan-leaning info blend, amber, and a deeper orange-leaning risk
+// blend — resolved from theme tokens (theme-correct in both modes), not
+// literal hex, so the palette still recolors across the light/dark toggle.
+const SERIES_COLORS = (t: ChartTheme) => [t.accent, t.alpha('info', 0.85), t.warning, t.alpha('risk', 0.75)]
 
 export function MultiLineChart({
   labels,
@@ -61,14 +63,18 @@ export function MultiLineChart({
             valueFormatter: (v: unknown) => valueFormat(v as number),
           }),
           legend: {
-            bottom: 0,
+            top: 8,
+            right: 8,
             icon: 'circle',
             itemWidth: 8,
             itemHeight: 8,
+            backgroundColor: theme.alpha('surface', 0.5),
+            borderRadius: 6,
+            padding: [4, 8],
             textStyle: { color: theme.fgMuted, fontFamily: theme.fontMono, fontSize: 11 },
             data: series.map((s) => s.name),
           },
-          grid: { left: 52, right: 14, top: 12, bottom: 40 },
+          grid: { left: 52, right: 14, top: 40, bottom: 24 },
           xAxis: { type: 'category', data: labels, boundaryGap: false, ...axis, splitLine: { show: false } },
           yAxis: {
             type: 'value',
@@ -76,13 +82,28 @@ export function MultiLineChart({
             ...axis,
             axisLabel: { ...axis.axisLabel, formatter: (v: number) => valueFormat(v) },
           },
-          series: series.map((s) => ({
+          series: series.map((s, i) => ({
             name: s.name,
             type: 'line',
             data: s.values,
-            smooth: false,
+            smooth: 0.2,
             showSymbol: false,
             lineStyle: { width: 2 },
+            // Primary (first) series gets a soft gradient fill so it reads as
+            // the lead indicator; the rest stay plain lines to avoid clutter.
+            areaStyle:
+              i === 0
+                ? {
+                    color: {
+                      type: 'linear',
+                      x: 0, y: 0, x2: 0, y2: 1,
+                      colorStops: [
+                        { offset: 0, color: theme.alpha('accent', 0.15) },
+                        { offset: 1, color: theme.alpha('accent', 0) },
+                      ],
+                    },
+                  }
+                : undefined,
           })),
         }
       }}

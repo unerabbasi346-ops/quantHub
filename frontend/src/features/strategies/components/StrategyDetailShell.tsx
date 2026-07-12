@@ -52,15 +52,11 @@ import {
   EmptyState,
   ErrorState,
   Heatmap,
-  Histogram,
-  InstitutionalTable,
-  type InstitutionalColumnDef,
   MultiLineChart,
   Panel,
   Section,
   SkeletonTable,
   StatCard,
-  pnlBadgeVariant,
   type BadgeVariant,
   type Series,
 } from '@/components/ui'
@@ -72,9 +68,9 @@ import { useBacktests, useSignals, useStrategies } from '../hooks/useStrategies'
 import type { Signal, Strategy } from '../types'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
 import { consecutiveRuns, monthlyConvictionGrid, signalPoints } from '../analytics'
-import { BacktestRunsTable } from './tables'
-import { ConsecutiveRunsChart, ConvictionEquityChart, SignalTimelineScatter } from './charts'
-import { PendingMetricTile, RealMetricTile, RealRingTile } from './metric-tiles'
+import { ConsecutiveRunsChart, ConvictionEquityChart, SignalStrengthDistributionChart, SignalTimelineScatter } from './charts'
+import { BacktestReturnTile, PendingMetricTile, RealMetricTile, RealRingTile } from './metric-tiles'
+import { BacktestRunCards, RecentSignalRows } from './rich-lists'
 
 // Signal history depth for the detail workspace's derived analytics (monthly
 // heatmap, timeline scatter, streaks) — the backend caps at 1000; the flat
@@ -436,14 +432,15 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
             <PendingMetricTile label="Max drawdown" ticket="F-21" shell="bar" />
             <RealMetricTile icon={<Activity size={11} />} label="Total signals" value={signals.length} />
             <RealRingTile label="Valid rate" value={validity} hint={`${validCount}/${signals.length}`} />
-            <RealMetricTile
-              icon={<Target size={11} />}
-              label="Backtest return"
-              value={fmtReturnPct(latest?.total_return ?? null)}
-              tone={retNum == null ? 'default' : retNum >= 0 ? 'profit' : 'risk'}
-            />
             <RealMetricTile icon={<Hash size={11} />} label="Trade count" value={tradeCount ?? '—'} />
             <PendingMetricTile label="Profit factor" ticket="F-21" shell="number" />
+            <BacktestReturnTile
+              label="Backtest return"
+              valueText={fmtReturnPct(latest?.total_return ?? null)}
+              positive={retNum == null ? null : retNum >= 0}
+              sparkline={points.map((p) => p.value)}
+              hint={latest ? 'latest run' : 'no backtest yet'}
+            />
           </Panel>
         </Section>
       </div>
@@ -478,15 +475,15 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Section
           icon={<BarChart3 size={16} />}
-          title="Conviction distribution"
-          description="How this strategy's signal values are spread — red below zero, green above."
+          title="Signal strength distribution"
+          description="How this strategy's signal strength is spread — red below zero, green above."
         >
           <Panel className="p-4">
             {signalsQuery.isLoading ? (
               <div className="skeleton h-[200px] w-full" />
             ) : signalValues.length >= 2 ? (
               <>
-                <Histogram values={signalValues} height={200} />
+                <SignalStrengthDistributionChart values={signalValues} height={200} />
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-fg-subtle">
                   <span>min <span className="font-mono text-fg-muted">{fmtSignal(String(Math.min(...signalValues)))}</span></span>
                   <span>median <span className="font-mono text-fg-muted">{fmtSignal(String(median(signalValues)))}</span></span>
@@ -507,9 +504,9 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         </Section>
       </div>
 
-      {/* Indicator overlay — real recorded metadata series (kept from the prior
+      {/* Strategy indicators — real recorded metadata series (kept from the prior
           layout; the new spec doesn't remove it and it's genuine data). */}
-      <Section icon={<LineChartIcon size={16} />} title="Indicator overlay" description="The numeric series this strategy records with each signal, over time.">
+      <Section icon={<LineChartIcon size={16} />} title="Strategy indicators" description="The numeric series this strategy records with each signal, over time.">
         <Panel className="p-4">
           {signalsQuery.isLoading ? (
             <div className="skeleton h-[240px] w-full" />
@@ -578,11 +575,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         {backtestsQuery.isSuccess && backtests.length === 0 && (
           <EmptyState title="No backtests" description="This strategy has no backtest runs." />
         )}
-        {backtestsQuery.isSuccess && backtests.length > 0 && (
-          <Panel className="overflow-hidden">
-            <BacktestRunsTable backtests={backtests} exportFilename={`${strategy.name}-backtests`} />
-          </Panel>
-        )}
+        {backtestsQuery.isSuccess && backtests.length > 0 && <BacktestRunCards backtests={backtests} />}
       </Section>
 
       {/* Market Analytics + Risk Analytics — Doc 06 lists both as sections
@@ -598,7 +591,11 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
 
       {/* Supporting widgets */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <RecentSignals query={signalsQuery} signals={signals} />
+        <RecentSignals
+          query={signalsQuery}
+          signals={signals}
+          symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null}
+        />
         <BacktestPanel query={backtestsQuery} latest={latest} count={backtests.length} />
       </div>
     </>
@@ -750,57 +747,30 @@ function Meta({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function RecentSignals({ query, signals }: { query: ReturnType<typeof useSignals>; signals: Signal[] }) {
+function RecentSignals({
+  query,
+  signals,
+  symbol,
+}: {
+  query: ReturnType<typeof useSignals>
+  signals: Signal[]
+  symbol: string | null
+}) {
   const recent = [...signals].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()).slice(0, 8)
   return (
     <Section
       title="Recent signals"
-      description="Most recent signals emitted by this strategy."
+      description="Most recent signals emitted by this strategy — signal strength, direction and validation at a glance."
       actions={query.isSuccess ? <Badge variant="neutral">{signals.length}</Badge> : null}
     >
-      <Panel className="overflow-hidden">
-        {query.isLoading && <div className="p-4"><SkeletonTable rows={5} cols={3} /></div>}
-        {query.isError && <div className="p-4"><ErrorState description="Could not load signals." onRetry={() => query.refetch()} /></div>}
-        {query.isSuccess && recent.length === 0 && <div className="p-6"><EmptyState icon={<ListChecks size={20} />} title="No signals" description="This strategy has emitted no signals yet." /></div>}
-        {query.isSuccess && recent.length > 0 && <RecentSignalTable signals={recent} />}
-      </Panel>
+      {query.isLoading && <div className="rounded-xl border border-border/60 p-4"><SkeletonTable rows={5} cols={3} /></div>}
+      {query.isError && <ErrorState description="Could not load signals." onRetry={() => query.refetch()} />}
+      {query.isSuccess && recent.length === 0 && (
+        <Panel className="p-6"><EmptyState icon={<ListChecks size={20} />} title="No signals" description="This strategy has emitted no signals yet." /></Panel>
+      )}
+      {query.isSuccess && recent.length > 0 && <RecentSignalRows signals={recent} symbol={symbol} />}
     </Section>
   )
-}
-
-function RecentSignalTable({ signals }: { signals: Signal[] }) {
-  const columns = useMemo<InstitutionalColumnDef<Signal>[]>(
-    () => [
-      {
-        id: 'ts',
-        header: 'Time',
-        accessorFn: (s) => new Date(s.ts).getTime(),
-        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.ts)}</span>,
-      },
-      {
-        id: 'value',
-        header: 'Conviction',
-        accessorFn: (s) => Number.parseFloat(s.value),
-        cell: ({ row }) => (
-          <Badge variant={pnlBadgeVariant(Number.parseFloat(row.original.value))}>{fmtSignal(row.original.value)}</Badge>
-        ),
-        meta: { numeric: true },
-      },
-      {
-        accessorKey: 'validation_status',
-        header: 'Validation',
-        cell: ({ getValue }) => {
-          const status = getValue<Signal['validation_status']>()
-          return <Badge variant={status === 'VALID' ? 'profit' : 'warning'}>{status}</Badge>
-        },
-      },
-    ],
-    [],
-  )
-
-  // A capped "8 most recent" preview widget — no search/export chrome, just
-  // the one shared table engine (Doc 01: "no custom table implementation").
-  return <InstitutionalTable data={signals} columns={columns} getRowId={(s) => s.id} />
 }
 
 function BacktestPanel({
