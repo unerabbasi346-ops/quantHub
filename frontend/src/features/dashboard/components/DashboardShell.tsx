@@ -2,6 +2,10 @@
 //   §Layout: "responsive grid, modular widgets"; §Dashboards.
 // Doc 08 — Frontend Architecture (QH-008 v1.0) §Architecture: the dashboard
 //   COMPOSES feature hooks — no data logic is reimplemented here.
+// handbook/ui/visual_engineering/02_LAYOUT_GRID_SYSTEM §Dashboard Sections
+//   and 10_DASHBOARD_MASTER_BLUEPRINT §Primary Layout: the MANDATORY fixed
+//   section order — Hero -> Analytics Grid -> Strategy Workspace ->
+//   Portfolio Intelligence -> Market Activity Feed -> Footer.
 // Per Doc 00 §14.11
 //
 // DASHBOARD REBUILD (owner request):
@@ -14,10 +18,16 @@
 //     removed too — the strategy hero supersedes them.
 // The remaining widgets are the real, non-market operational overview
 // (portfolio, execution, risk). Every number is real and cites its source.
+//
+// PHASE 1 ARCHITECTURE PASS: HeroSection (real market chart + Intelligence
+// Workspace) now leads the page as the true Doc 02/10 Hero. StrategySection
+// moves to the Strategy Workspace slot below Analytics. The remaining
+// widgets split into their own Portfolio Intelligence and Market Activity
+// Feed sections (previously one merged grid) to match the mandated order.
 'use client'
 
-import type { ReactNode } from 'react'
-import { ArrowLeftRight, Gauge, LayoutDashboard, ShieldAlert, Wallet } from 'lucide-react'
+import { useMemo, type ReactNode } from 'react'
+import { ArrowLeftRight, CandlestickChart, Gauge, LayoutDashboard, ShieldAlert, TrendingUp, Wallet } from 'lucide-react'
 import {
   Badge,
   Card,
@@ -25,27 +35,29 @@ import {
   CardHeader,
   CardTitle,
   CryptoIcon,
+  DonutChart,
   EmptyState,
   ErrorState,
+  InstitutionalTable,
+  type InstitutionalColumnDef,
   PageHeader,
   Ring,
   StatCard,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   pnlBadgeVariant,
   type BadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
-import type { Portfolio } from '@/features/portfolio/types'
+import type { Portfolio, Position } from '@/features/portfolio/types'
 import { useOrders } from '@/features/execution/hooks/useExecution'
 import type { Order } from '@/features/execution/types'
 import { useRiskSnapshot } from '@/features/risk/hooks/useRisk'
+import { useSyncStore } from '@/lib/store/sync'
+import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
+import { HeroSection } from './HeroSection'
 import { StrategySection } from './StrategySection'
+
+const PREFERRED_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT']
 
 const fmtMoney = (v: string | null) =>
   v == null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -80,7 +92,7 @@ export function DashboardShell() {
   const portfolioId = activePortfolio?.id ?? ''
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       <PageHeader
         icon={<LayoutDashboard size={18} />}
         title="Dashboard"
@@ -93,8 +105,18 @@ export function DashboardShell() {
         }
       />
 
-      {/* Strategy hero — always shown (reads the strategy registry directly, not
-          gated on a portfolio existing). */}
+      {/* Hero Intelligence Area (Doc 02/10): real market chart (70%) + real
+          engine status workspace (30%) — always shown. */}
+      <HeroSection />
+
+      {portfoliosQuery.isSuccess && activePortfolio && (
+        // Analytics Grid (Doc 10 §Analytics Grid: "Directly below Hero.
+        // Contains: Portfolio, Risk, Performance, Market Overview.").
+        <AnalyticsGrid portfolioId={portfolioId} />
+      )}
+
+      {/* Strategy Workspace — reads the strategy registry directly, not
+          gated on a portfolio existing. */}
       <StrategySection />
 
       {portfoliosQuery.isLoading && <div className="skeleton h-24 w-full" />}
@@ -107,43 +129,126 @@ export function DashboardShell() {
 
       {portfoliosQuery.isSuccess && activePortfolio && (
         <>
-          <KpiStrip portfolioId={portfolioId} />
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* Portfolio Intelligence (Doc 10 §Portfolio Section: "Portfolio
+              Value, Allocation, PnL, Exposure"). */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
             <PortfolioSummaryWidget portfolioId={portfolioId} className="lg:col-span-2" />
+            <AllocationWidget portfolioId={portfolioId} />
             <RiskSnapshotWidget portfolioId={portfolioId} />
+          </div>
+
+          {/* Market Activity Feed */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <RecentExecutionsWidget portfolioId={portfolioId} className="lg:col-span-2" />
             <ExecutionSummaryWidget portfolioId={portfolioId} />
           </div>
         </>
       )}
+
+      <DashboardFooter />
     </div>
   )
 }
 
-function KpiStrip({ portfolioId }: { portfolioId: string }) {
+// Footer (Doc 02/10 fixed section order: ... Feed -> Footer). Presentation
+// only — states the platform's real, current operating scope; nothing
+// fabricated (Doc 00 §14.5).
+function DashboardFooter() {
+  return (
+    <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-6 text-[11px] text-fg-subtle">
+      <span>QuantHub — institutional quantitative intelligence platform.</span>
+      <span>Single-user local deployment · Doc 00 §14.11</span>
+    </footer>
+  )
+}
+
+// Analytics Grid (Doc 10): exactly four cards, one per named domain —
+// Portfolio / Risk / Performance / Market Overview — not an undifferentiated
+// stat strip. Every figure reads from a hook already used elsewhere in the
+// app (Positions/Risk/Markets) — no new endpoint, no fabricated number.
+function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
   const positionsQuery = usePositions(portfolioId)
   const riskQuery = useRiskSnapshot(portfolioId)
   const open = (positionsQuery.data ?? []).filter((p) => !p.is_closed)
+  const marketValue = open.reduce((s, p) => s + Number.parseFloat(p.market_value), 0)
   const unrealized = open.reduce((s, p) => s + Number.parseFloat(p.unrealized_pnl), 0)
   const realized = open.reduce((s, p) => s + Number.parseFloat(p.realized_pnl_today), 0)
   const snap = riskQuery.data
 
+  const syncedSymbol = useSyncStore((s) => s.selectedAssetSymbol)
+  const assetsQuery = useAssets()
+  const assets = assetsQuery.data ?? []
+  const marketAsset =
+    (syncedSymbol ? assets.find((a) => a.symbol === syncedSymbol) : undefined) ??
+    PREFERRED_SYMBOLS.map((sym) => assets.find((a) => a.symbol === sym)).find(Boolean) ??
+    assets[0] ??
+    null
+  const barsQuery = useBars(marketAsset?.id ?? '', '1h')
+  const bars = barsQuery.data ?? []
+  const last = bars.at(-1)
+  const first24 = bars.slice(-24)
+  const dayChange = last && first24[0] ? Number.parseFloat(last.close) - Number.parseFloat(first24[0].close) : null
+  const dayChangePct = dayChange != null && first24[0] ? (dayChange / Number.parseFloat(first24[0].close)) * 100 : null
+
+  // Doc 02 §Grid System: "12 Column Grid, Equal Columns, Equal Gutters."
+  // §Analytics Grid: "Desktop 4 Columns / Laptop 2 / Tablet 2 / Mobile 1."
+  // A real 12-col base (not an approximated `grid-cols-4` shorthand) so each
+  // card's span is explicit: 12 (mobile) -> 6 (tablet+laptop, 2-up) -> 3
+  // (desktop, 4-up) — the same visual result, but architecturally a 12-col grid.
   if (positionsQuery.isLoading)
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="skeleton h-20" />
-        <div className="skeleton h-20" />
-        <div className="skeleton h-20" />
-        <div className="skeleton h-20" />
+      <div className="grid grid-cols-12 gap-4">
+        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
+        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
+        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
+        <div className="skeleton col-span-12 h-28 tablet:col-span-6 desktop:col-span-3" />
       </div>
     )
 
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-      <StatCard label="Unrealized P&L" value={fmtSigned(unrealized)} tone={unrealized >= 0 ? 'profit' : 'risk'} />
-      <StatCard label="Realized today" value={fmtSigned(realized)} tone={realized >= 0 ? 'profit' : 'risk'} />
-      <StatCard label="Gross exposure" value={snap ? fmtMoney(snap.gross_exposure) : '—'} hint={snap ? `lev ${fmtLeverage(snap.gross_leverage)}` : undefined} />
-      <StatCard label="Open positions" value={open.length} />
+    <div className="grid grid-cols-12 gap-4">
+      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+        <WidgetHead icon={<Wallet size={16} />} title="Portfolio" />
+        <CardContent>
+          <div className="font-mono text-xl font-semibold tabular-nums text-fg">{fmtMoney(String(marketValue))}</div>
+          <div className="mt-1 text-[11px] text-fg-subtle">{open.length} open position{open.length === 1 ? '' : 's'}</div>
+        </CardContent>
+      </Card>
+      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+        <WidgetHead icon={<ShieldAlert size={16} />} title="Risk" />
+        <CardContent>
+          <div className="font-mono text-xl font-semibold tabular-nums text-fg">{snap ? fmtMoney(snap.gross_exposure) : '—'}</div>
+          <div className="mt-1 text-[11px] text-fg-subtle">{snap ? `lev ${fmtLeverage(snap.gross_leverage)} gross exposure` : 'no snapshot yet'}</div>
+        </CardContent>
+      </Card>
+      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+        <WidgetHead icon={<TrendingUp size={16} />} title="Performance" />
+        <CardContent>
+          <div className={cn('font-mono text-xl font-semibold tabular-nums', unrealized >= 0 ? 'text-profit' : 'text-risk')}>{fmtSigned(unrealized)}</div>
+          <div className="mt-1 text-[11px] text-fg-subtle">{fmtSigned(realized)} realized today</div>
+        </CardContent>
+      </Card>
+      <Card elevation="elevated" className="col-span-12 tablet:col-span-6 desktop:col-span-3">
+        <WidgetHead icon={<CandlestickChart size={16} />} title="Market overview" />
+        <CardContent>
+          {marketAsset && last ? (
+            <>
+              <div className="flex items-center gap-2">
+                <CryptoIcon symbol={marketAsset.symbol} size={18} />
+                <span className="font-mono text-xl font-semibold tabular-nums text-fg">{fmtMoney(last.close)}</span>
+              </div>
+              <div className="mt-1 text-[11px] text-fg-subtle">
+                {marketAsset.symbol}
+                {dayChangePct != null && (
+                  <span className={dayChange! >= 0 ? 'text-profit' : 'text-risk'}> · {dayChange! >= 0 ? '+' : ''}{dayChangePct.toFixed(2)}% 24h</span>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-fg-muted">No ingested instrument yet.</div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -153,8 +258,36 @@ function PortfolioSummaryWidget({ portfolioId, className }: { portfolioId: strin
   const open = (query.data ?? []).filter((p) => !p.is_closed)
   const top = [...open].sort((a, b) => a.sequence_number - b.sequence_number).slice(0, 5)
 
+  const columns = useMemo<InstitutionalColumnDef<Position>[]>(
+    () => [
+      {
+        id: 'symbol',
+        header: 'Symbol',
+        accessorFn: (p) => p.symbol ?? '',
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <CryptoIcon symbol={row.original.symbol ?? '?'} size={20} />
+            <span className="font-medium text-fg">{row.original.symbol ?? '—'}</span>
+          </div>
+        ),
+      },
+      { id: 'quantity', header: 'Qty', accessorFn: (p) => Number.parseFloat(p.quantity), cell: ({ row }) => fmtQty(row.original.quantity), meta: { numeric: true } },
+      { id: 'market_value', header: 'Market value', accessorFn: (p) => Number.parseFloat(p.market_value), cell: ({ row }) => fmtMoney(row.original.market_value), meta: { numeric: true } },
+      {
+        id: 'unrealized',
+        header: 'Unrealized',
+        accessorFn: (p) => Number.parseFloat(p.unrealized_pnl),
+        cell: ({ row }) => (
+          <Badge variant={pnlBadgeVariant(Number.parseFloat(row.original.unrealized_pnl))}>{fmtSigned(Number.parseFloat(row.original.unrealized_pnl))}</Badge>
+        ),
+        meta: { numeric: true },
+      },
+    ],
+    [],
+  )
+
   return (
-    <Card elevation="glow" className={className}>
+    <Card elevation="elevated" className={className}>
       <WidgetHead
         icon={<Wallet size={16} />}
         title="Portfolio summary"
@@ -165,29 +298,37 @@ function PortfolioSummaryWidget({ portfolioId, className }: { portfolioId: strin
         {query.isError && <ErrorState description="Could not load positions." onRetry={() => query.refetch()} />}
         {query.isSuccess && open.length === 0 && <EmptyState title="No open positions" description="This portfolio holds no open positions." />}
         {query.isSuccess && open.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow><TableHead>Symbol</TableHead><TableHead>Qty</TableHead><TableHead>Market value</TableHead><TableHead>Unrealized</TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {top.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <CryptoIcon symbol={p.symbol ?? '?'} size={20} />
-                      <span className="font-medium text-fg">{p.symbol ?? '—'}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell numeric>{fmtQty(p.quantity)}</TableCell>
-                  <TableCell numeric>{fmtMoney(p.market_value)}</TableCell>
-                  <TableCell numeric><Badge variant={pnlBadgeVariant(Number.parseFloat(p.unrealized_pnl))}>{fmtSigned(Number.parseFloat(p.unrealized_pnl))}</Badge></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <InstitutionalTable data={top} columns={columns} getRowId={(p) => p.id} />
         )}
         {query.isSuccess && open.length > 0 && (
           <SourceNote>live portfolio positions</SourceNote>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// Allocation (Doc 10 §Portfolio Section: "Portfolio Value, Allocation, PnL,
+// Exposure") — same real open-position market values as the Portfolio page's
+// own allocation donut, sized for the dashboard grid.
+function AllocationWidget({ portfolioId }: { portfolioId: string }) {
+  const query = usePositions(portfolioId)
+  const open = (query.data ?? []).filter((p) => !p.is_closed)
+  const totalMarketValue = open.reduce((s, p) => s + Number.parseFloat(p.market_value), 0)
+  const allocation = open
+    .map((p) => ({ name: p.symbol ?? p.asset_id, value: Math.abs(Number.parseFloat(p.market_value)) }))
+    .filter((d) => d.value > 0)
+    .sort((a, b) => b.value - a.value)
+
+  return (
+    <Card elevation="elevated">
+      <WidgetHead icon={<Wallet size={16} />} title="Allocation" />
+      <CardContent>
+        {query.isLoading && <div className="skeleton h-40 w-full" />}
+        {query.isError && <ErrorState description="Could not load positions." onRetry={() => query.refetch()} />}
+        {query.isSuccess && allocation.length === 0 && <EmptyState title="No allocation" description="No open positions to allocate." />}
+        {allocation.length > 0 && (
+          <DonutChart data={allocation} height={180} centerLabel="value" centerValue={fmtMoney(String(totalMarketValue))} valueFormat={(v) => fmtMoney(String(v))} />
         )}
       </CardContent>
     </Card>
@@ -198,7 +339,7 @@ function RiskSnapshotWidget({ portfolioId }: { portfolioId: string }) {
   const query = useRiskSnapshot(portfolioId)
   const snap = query.data ?? null
   return (
-    <Card elevation="glow">
+    <Card elevation="elevated">
       <WidgetHead
         icon={<ShieldAlert size={16} />}
         title="Risk snapshot"
@@ -238,8 +379,32 @@ function orderStatusVariant(status: Order['status']): BadgeVariant {
 function RecentExecutionsWidget({ portfolioId, className }: { portfolioId: string; className?: string }) {
   const query = useOrders(portfolioId)
   const recent = [...(query.data ?? [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 6)
+
+  const columns = useMemo<InstitutionalColumnDef<Order>[]>(
+    () => [
+      { id: 'created_at', header: 'Time', accessorFn: (o) => new Date(o.created_at).getTime(), cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.created_at)}</span> },
+      { id: 'symbol', header: 'Symbol', accessorFn: (o) => o.symbol ?? '', cell: ({ row }) => <span className="font-medium text-fg">{row.original.symbol ?? '—'}</span> },
+      {
+        accessorKey: 'side',
+        header: 'Side',
+        cell: ({ getValue }) => {
+          const side = getValue<Order['side']>()
+          return <span className={cn('font-medium', side === 'BUY' ? 'text-profit' : 'text-risk')}>{side}</span>
+        },
+      },
+      { id: 'quantity', header: 'Qty', accessorFn: (o) => Number.parseFloat(o.quantity), cell: ({ row }) => fmtQty(row.original.quantity), meta: { numeric: true } },
+      { id: 'average_price', header: 'Avg price', accessorFn: (o) => (o.average_price === null ? -Infinity : Number.parseFloat(o.average_price)), cell: ({ row }) => fmtMoney(row.original.average_price), meta: { numeric: true, hideBelow: 'tablet' } },
+      {
+        accessorKey: 'status',
+        header: 'Status',
+        cell: ({ getValue }) => <Badge variant={orderStatusVariant(getValue<Order['status']>())}>{getValue<Order['status']>()}</Badge>,
+      },
+    ],
+    [],
+  )
+
   return (
-    <Card elevation="glow" className={className}>
+    <Card elevation="elevated" className={className}>
       <WidgetHead
         icon={<ArrowLeftRight size={16} />}
         title="Recent executions"
@@ -250,23 +415,7 @@ function RecentExecutionsWidget({ portfolioId, className }: { portfolioId: strin
         {query.isError && <ErrorState description="Could not load orders." onRetry={() => query.refetch()} />}
         {query.isSuccess && recent.length === 0 && <EmptyState title="No orders" description="No orders placed for this portfolio." />}
         {query.isSuccess && recent.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow><TableHead>Time</TableHead><TableHead>Symbol</TableHead><TableHead>Side</TableHead><TableHead>Qty</TableHead><TableHead>Avg price</TableHead><TableHead>Status</TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {recent.map((o) => (
-                <TableRow key={o.id}>
-                  <TableCell className="whitespace-nowrap text-fg-muted">{fmtTime(o.created_at)}</TableCell>
-                  <TableCell className="font-medium text-fg">{o.symbol ?? '—'}</TableCell>
-                  <TableCell><span className={cn('font-medium', o.side === 'BUY' ? 'text-profit' : 'text-risk')}>{o.side}</span></TableCell>
-                  <TableCell numeric>{fmtQty(o.quantity)}</TableCell>
-                  <TableCell numeric>{fmtMoney(o.average_price)}</TableCell>
-                  <TableCell><Badge variant={orderStatusVariant(o.status)}>{o.status}</Badge></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <InstitutionalTable data={recent} columns={columns} getRowId={(o) => o.id} />
         )}
         {query.isSuccess && recent.length > 0 && (
           <SourceNote>the portfolio's live order history</SourceNote>
@@ -292,7 +441,7 @@ function ExecutionSummaryWidget({ portfolioId }: { portfolioId: string }) {
   const approvalRate = today.length ? approved / today.length : 0
 
   return (
-    <Card elevation="glow">
+    <Card elevation="elevated">
       <WidgetHead
         icon={<Gauge size={16} />}
         title="Execution summary"
