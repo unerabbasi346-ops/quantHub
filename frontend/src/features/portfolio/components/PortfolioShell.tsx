@@ -15,25 +15,21 @@
 // CapitalConfig component.
 'use client'
 
-import { useState } from 'react'
-import { Wallet } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { TrendingDown, TrendingUp, Wallet } from 'lucide-react'
 import {
   Badge,
   DonutChart,
   EmptyState,
   ErrorState,
+  InstitutionalTable,
+  type InstitutionalColumnDef,
   PageHeader,
   Panel,
   Section,
   SkeletonStats,
   SkeletonTable,
   StatCard,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   CryptoIcon,
   pnlBadgeVariant,
 } from '@/components/ui'
@@ -70,7 +66,7 @@ export function PortfolioShell() {
   const activePortfolio = portfolios.find((p) => p.id === activeId) ?? null
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       <PageHeader
         icon={<Wallet size={18} />}
         title="Portfolio"
@@ -119,7 +115,7 @@ export function PortfolioShell() {
           </div>
         </Section>
 
-        <div className="min-w-0 space-y-8">
+        <div className="min-w-0 space-y-14">
           {activePortfolio ? (
             <PortfolioDetail portfolio={activePortfolio} />
           ) : (
@@ -201,8 +197,14 @@ function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
         </Section>
       )}
 
-      {/* Capital configuration (honest F-19 labeling) */}
-      <CapitalConfig portfolio={portfolio} />
+      {/* Capital configuration (honest F-19 labeling) — integrates the REAL
+          open-position market value as a utilization figure, not a standalone card. */}
+      <CapitalConfig portfolio={portfolio} openMarketValue={totalMarketValue} />
+
+      {/* Contributors — real per-position P&L ranking, ties the allocation
+          donut and the positions table together (Doc 07 §Top/Bottom
+          Contributors), honestly scoped to whatever positions actually exist. */}
+      {!positionsQuery.isLoading && open.length > 0 && <Contributors positions={open} />}
 
       <Section
         title="Positions"
@@ -217,23 +219,7 @@ function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
         )}
         {positionsQuery.isSuccess && positions.length > 0 && (
           <Panel className="overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Asset</TableHead>
-                  <TableHead>Quantity</TableHead>
-                  <TableHead>Avg Entry</TableHead>
-                  <TableHead>Market Value</TableHead>
-                  <TableHead>Unrealized P&amp;L</TableHead>
-                  <TableHead>Realized P&amp;L (today)</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {positions.map((position) => (
-                  <PositionRow key={position.id} position={position} />
-                ))}
-              </TableBody>
-            </Table>
+            <PositionTable positions={positions} />
           </Panel>
         )}
       </Section>
@@ -241,34 +227,132 @@ function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
   )
 }
 
-function PositionRow({ position }: { position: Position }) {
+function ContributorRow({ position }: { position: Position }) {
   const symbol = position.symbol ?? position.asset_id
+  const pnl = Number.parseFloat(position.unrealized_pnl)
   return (
-    <TableRow>
-      <TableCell>
-        <div className="flex items-center gap-2.5">
-          <CryptoIcon symbol={symbol} size={22} />
-          <div className="min-w-0">
-            <div className="font-medium text-fg">{symbol}</div>
-            {position.exchange && (
-              <div className="text-[11px] uppercase tracking-wide text-fg-subtle">{position.exchange}</div>
-            )}
-          </div>
-        </div>
-      </TableCell>
-      <TableCell numeric>{fmtQty(position.quantity)}</TableCell>
-      <TableCell numeric>{fmtMoney(position.average_entry_price)}</TableCell>
-      <TableCell numeric>{fmtMoney(position.market_value)}</TableCell>
-      <TableCell numeric>
-        <Badge variant={pnlBadgeVariant(Number.parseFloat(position.unrealized_pnl))}>
-          {fmtPnl(position.unrealized_pnl)}
-        </Badge>
-      </TableCell>
-      <TableCell numeric>
-        <Badge variant={pnlBadgeVariant(Number.parseFloat(position.realized_pnl_today))}>
-          {fmtPnl(position.realized_pnl_today)}
-        </Badge>
-      </TableCell>
-    </TableRow>
+    <div className="flex items-center gap-3 py-2">
+      <CryptoIcon symbol={symbol} size={22} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-fg">{symbol}</div>
+        <div className="text-[11px] text-fg-subtle">{fmtMoney(position.market_value)} mkt value</div>
+      </div>
+      <Badge variant={pnlBadgeVariant(pnl)}>{fmtPnl(pnl)}</Badge>
+    </div>
+  )
+}
+
+function Contributors({ positions }: { positions: Position[] }) {
+  const ranked = [...positions].sort((a, b) => Number.parseFloat(b.unrealized_pnl) - Number.parseFloat(a.unrealized_pnl))
+  const winners = ranked.filter((p) => Number.parseFloat(p.unrealized_pnl) > 0).slice(0, 5)
+  const losers = ranked
+    .filter((p) => Number.parseFloat(p.unrealized_pnl) < 0)
+    .slice(-5)
+    .reverse()
+
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <Section title="Top contributors" description="Open positions with the largest unrealized gain.">
+        <Panel className="divide-y divide-border/70 px-4">
+          {winners.length > 0 ? (
+            winners.map((p) => <ContributorRow key={p.id} position={p} />)
+          ) : (
+            <div className="flex items-center gap-2 py-6 text-sm text-fg-muted">
+              <TrendingUp size={16} className="text-fg-subtle" /> No position is currently profitable.
+            </div>
+          )}
+        </Panel>
+      </Section>
+      <Section title="Bottom contributors" description="Open positions with the largest unrealized loss.">
+        <Panel className="divide-y divide-border/70 px-4">
+          {losers.length > 0 ? (
+            losers.map((p) => <ContributorRow key={p.id} position={p} />)
+          ) : (
+            <div className="flex items-center gap-2 py-6 text-sm text-fg-muted">
+              <TrendingDown size={16} className="text-fg-subtle" /> No position is currently underwater.
+            </div>
+          )}
+        </Panel>
+      </Section>
+    </div>
+  )
+}
+
+function PositionTable({ positions }: { positions: Position[] }) {
+  const columns = useMemo<InstitutionalColumnDef<Position>[]>(
+    () => [
+      {
+        id: 'asset',
+        header: 'Asset',
+        accessorFn: (p) => p.symbol ?? p.asset_id,
+        cell: ({ row }) => {
+          const p = row.original
+          const symbol = p.symbol ?? p.asset_id
+          return (
+            <div className="flex items-center gap-2.5">
+              <CryptoIcon symbol={symbol} size={22} />
+              <div className="min-w-0">
+                <div className="font-medium text-fg">{symbol}</div>
+                {p.exchange && <div className="text-[11px] uppercase tracking-wide text-fg-subtle">{p.exchange}</div>}
+              </div>
+            </div>
+          )
+        },
+      },
+      {
+        id: 'quantity',
+        header: 'Quantity',
+        accessorFn: (p) => Number.parseFloat(p.quantity),
+        cell: ({ row }) => fmtQty(row.original.quantity),
+        meta: { numeric: true },
+      },
+      {
+        id: 'average_entry_price',
+        header: 'Avg Entry',
+        accessorFn: (p) => Number.parseFloat(p.average_entry_price),
+        cell: ({ row }) => fmtMoney(row.original.average_entry_price),
+        meta: { numeric: true, hideBelow: 'tablet' },
+      },
+      {
+        id: 'market_value',
+        header: 'Market Value',
+        accessorFn: (p) => Number.parseFloat(p.market_value),
+        cell: ({ row }) => fmtMoney(row.original.market_value),
+        meta: { numeric: true },
+      },
+      {
+        id: 'unrealized_pnl',
+        header: 'Unrealized P&L',
+        accessorFn: (p) => Number.parseFloat(p.unrealized_pnl),
+        cell: ({ row }) => (
+          <Badge variant={pnlBadgeVariant(Number.parseFloat(row.original.unrealized_pnl))}>
+            {fmtPnl(row.original.unrealized_pnl)}
+          </Badge>
+        ),
+        meta: { numeric: true },
+      },
+      {
+        id: 'realized_pnl_today',
+        header: 'Realized P&L (today)',
+        accessorFn: (p) => Number.parseFloat(p.realized_pnl_today),
+        cell: ({ row }) => (
+          <Badge variant={pnlBadgeVariant(Number.parseFloat(row.original.realized_pnl_today))}>
+            {fmtPnl(row.original.realized_pnl_today)}
+          </Badge>
+        ),
+        meta: { numeric: true, hideBelow: 'laptop' },
+      },
+    ],
+    [],
+  )
+
+  return (
+    <InstitutionalTable
+      data={positions}
+      columns={columns}
+      getRowId={(p) => p.id}
+      searchPlaceholder="Search positions…"
+      exportFilename="portfolio-positions"
+    />
   )
 }

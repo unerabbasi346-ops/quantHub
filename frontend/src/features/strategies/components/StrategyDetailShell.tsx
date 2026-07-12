@@ -12,7 +12,7 @@
 // strategy (with a loading transition — nothing stays static).
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -26,14 +26,18 @@ import {
   Gauge,
   LineChart as LineChartIcon,
   ListChecks,
+  ShieldQuestion,
   Target,
   TerminalSquare,
 } from 'lucide-react'
 import {
   Badge,
+  CryptoIcon,
   EmptyState,
   ErrorState,
   Histogram,
+  InstitutionalTable,
+  type InstitutionalColumnDef,
   LineChart,
   MultiLineChart,
   Panel,
@@ -41,12 +45,6 @@ import {
   Section,
   SkeletonTable,
   StatCard,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   pnlBadgeVariant,
   type BadgeVariant,
   type LinePoint,
@@ -54,9 +52,12 @@ import {
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { EASE_OUT } from '@/lib/motion'
+import { useSyncStore } from '@/lib/store/sync'
+import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
 import { useBacktests, useSignals, useStrategies } from '../hooks/useStrategies'
 import type { Signal, Strategy } from '../types'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
+import { BacktestRunsTable } from './tables'
 
 const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
 const fmtMoney = (v: string | null) =>
@@ -194,6 +195,13 @@ export function StrategyDetailShell({ id }: { id: string }) {
   // data is cached, so nothing stays static from the previous selection.
   const [pendingId, setPendingId] = useState<string | null>(null)
   useEffect(() => setPendingId(null), [id])
+
+  // Global Synchronization (Doc 11): whichever strategy this page lands on
+  // (direct link or in-page switch) becomes the shared selection, so the
+  // /strategies list and Dashboard reflect it on the next visit.
+  const setSyncedStrategyId = useSyncStore((s) => s.setSelectedStrategyId)
+  useEffect(() => setSyncedStrategyId(id), [id, setSyncedStrategyId])
+
   const select = (nextId: string) => {
     if (nextId === id) return
     setPendingId(nextId)
@@ -379,6 +387,35 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
       {/* Backtest order flow — real counts from the latest backtest run */}
       <OrderFlow query={backtestsQuery} results={results} />
 
+      {/* Full run history — Doc 06 "Backtest Analytics": every run, not just
+          the latest, browsable in place (no navigating away from the workspace). */}
+      <Section
+        title="Backtest runs"
+        description="Every backtest recorded for this strategy."
+        actions={backtestsQuery.isSuccess ? <Badge variant="neutral">{backtests.length}</Badge> : null}
+      >
+        {backtestsQuery.isLoading && <SkeletonTable rows={3} cols={5} />}
+        {backtestsQuery.isError && <ErrorState description="Could not load backtests." onRetry={() => backtestsQuery.refetch()} />}
+        {backtestsQuery.isSuccess && backtests.length === 0 && (
+          <EmptyState title="No backtests" description="This strategy has no backtest runs." />
+        )}
+        {backtestsQuery.isSuccess && backtests.length > 0 && (
+          <Panel className="overflow-hidden">
+            <BacktestRunsTable backtests={backtests} exportFilename={`${strategy.name}-backtests`} />
+          </Panel>
+        )}
+      </Section>
+
+      {/* Market Analytics + Risk Analytics — Doc 06 lists both as sections
+          every strategy workspace owns. Market Context is real (reuses the
+          same asset/bar data the Markets page renders, for this strategy's
+          configured symbol). Strategy-level risk is honestly deferred: risk
+          is computed per-portfolio (see the Risk workspace), not per-strategy
+          yet, so this is a disclosure, not a fabricated score. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <MarketContext symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null} />
+        <RiskDisclosure />
+      </div>
 
       {/* Supporting widgets */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -386,6 +423,86 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         <BacktestPanel query={backtestsQuery} latest={latest} count={backtests.length} />
       </div>
     </>
+  )
+}
+
+// ── Market Analytics: the strategy's configured instrument, real price/24h
+//    change from the same feed Markets renders — ties Strategy ↔ Market
+//    together as one connected surface (VE_16) instead of an isolated card. ──
+function MarketContext({ symbol }: { symbol: string | null }) {
+  const assetsQuery = useAssets()
+  const assets = assetsQuery.data ?? []
+  const asset = symbol ? assets.find((a) => a.symbol === symbol) : undefined
+  const barsQuery = useBars(asset?.id ?? '', '1h')
+  const bars = barsQuery.data ?? []
+  const last = bars.at(-1)
+  const prev = bars.at(-2)
+  const change = last && prev ? Number.parseFloat(last.close) - Number.parseFloat(prev.close) : null
+  const changePct = change != null && prev ? (change / Number.parseFloat(prev.close)) * 100 : null
+
+  return (
+    <Section title="Market context" description="The strategy's configured instrument, live from the same feed Markets renders.">
+      <Panel className="p-5">
+        {!symbol ? (
+          <div className="flex h-24 items-center justify-center text-sm text-fg-muted">
+            This strategy&apos;s configuration doesn&apos;t name a single symbol.
+          </div>
+        ) : assetsQuery.isLoading || barsQuery.isLoading ? (
+          <div className="skeleton h-24 w-full" />
+        ) : !asset ? (
+          <div className="flex h-24 items-center justify-center text-sm text-fg-muted">
+            {symbol} isn&apos;t a registered instrument yet.
+          </div>
+        ) : (
+          <div className="flex items-center gap-4">
+            <CryptoIcon symbol={asset.symbol} size={32} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-fg">{asset.symbol}</div>
+              <div className="text-[11px] uppercase tracking-wide text-fg-subtle">{asset.exchange} · 1h</div>
+            </div>
+            {last ? (
+              <div className="text-right">
+                <div className="font-mono text-lg font-semibold tabular-nums text-fg">
+                  {Number.parseFloat(last.close).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                {changePct != null && (
+                  <div className={cn('font-mono text-xs tabular-nums', change! >= 0 ? 'text-profit' : 'text-risk')}>
+                    {change! >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="text-xs text-fg-subtle">no bars yet</span>
+            )}
+          </div>
+        )}
+      </Panel>
+    </Section>
+  )
+}
+
+// ── Risk Analytics: honest deferral, matching the Risk workspace's own
+//    "Not computed" pattern rather than inventing a per-strategy score. ──
+function RiskDisclosure() {
+  return (
+    <Section title="Risk analytics" description="Per-strategy risk attribution.">
+      <Panel className="flex items-start gap-3 p-5">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warning-soft text-warning">
+          <ShieldQuestion size={16} />
+        </span>
+        <div>
+          <div className="flex items-center gap-2 text-sm font-medium text-fg">
+            Not computed <Badge variant="warning">deferred</Badge>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-fg-muted">
+            Risk (exposure, leverage, VaR) is computed per-portfolio today, not per-strategy — see the Risk workspace
+            for the portfolios this strategy trades in. A strategy-level attribution would need to trace positions
+            back to originating signals, which the platform doesn&apos;t do yet. Shown honestly rather than as a
+            fabricated score.
+          </p>
+        </div>
+      </Panel>
+    </Section>
   )
 }
 
@@ -462,25 +579,45 @@ function RecentSignals({ query, signals }: { query: ReturnType<typeof useSignals
         {query.isLoading && <div className="p-4"><SkeletonTable rows={5} cols={3} /></div>}
         {query.isError && <div className="p-4"><ErrorState description="Could not load signals." onRetry={() => query.refetch()} /></div>}
         {query.isSuccess && recent.length === 0 && <div className="p-6"><EmptyState icon={<ListChecks size={20} />} title="No signals" description="This strategy has emitted no signals yet." /></div>}
-        {query.isSuccess && recent.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow><TableHead>Time</TableHead><TableHead>Conviction</TableHead><TableHead>Validation</TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {recent.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="whitespace-nowrap text-fg-muted">{fmtTime(s.ts)}</TableCell>
-                  <TableCell numeric><Badge variant={pnlBadgeVariant(Number.parseFloat(s.value))}>{fmtSignal(s.value)}</Badge></TableCell>
-                  <TableCell><Badge variant={s.validation_status === 'VALID' ? 'profit' : 'warning'}>{s.validation_status}</Badge></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+        {query.isSuccess && recent.length > 0 && <RecentSignalTable signals={recent} />}
       </Panel>
     </Section>
   )
+}
+
+function RecentSignalTable({ signals }: { signals: Signal[] }) {
+  const columns = useMemo<InstitutionalColumnDef<Signal>[]>(
+    () => [
+      {
+        id: 'ts',
+        header: 'Time',
+        accessorFn: (s) => new Date(s.ts).getTime(),
+        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.ts)}</span>,
+      },
+      {
+        id: 'value',
+        header: 'Conviction',
+        accessorFn: (s) => Number.parseFloat(s.value),
+        cell: ({ row }) => (
+          <Badge variant={pnlBadgeVariant(Number.parseFloat(row.original.value))}>{fmtSignal(row.original.value)}</Badge>
+        ),
+        meta: { numeric: true },
+      },
+      {
+        accessorKey: 'validation_status',
+        header: 'Validation',
+        cell: ({ getValue }) => {
+          const status = getValue<Signal['validation_status']>()
+          return <Badge variant={status === 'VALID' ? 'profit' : 'warning'}>{status}</Badge>
+        },
+      },
+    ],
+    [],
+  )
+
+  // A capped "8 most recent" preview widget — no search/export chrome, just
+  // the one shared table engine (Doc 01: "no custom table implementation").
+  return <InstitutionalTable data={signals} columns={columns} getRowId={(s) => s.id} />
 }
 
 function BacktestPanel({

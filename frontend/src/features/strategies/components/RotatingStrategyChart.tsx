@@ -9,9 +9,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import { Brain, Pause } from 'lucide-react'
-import { Badge, LineChart } from '@/components/ui'
+import { Badge, LineChart, glassSurface } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { useReveal } from '@/lib/motion'
 import type { StrategyPerformance } from '../hooks/useStrategyPerformance'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_TOOLTIP } from '../labels'
 
@@ -42,9 +44,16 @@ export function RotatingStrategyChart({ items }: { items: StrategyPerformance[] 
   const reference = isReferenceStrategy(current.strategy.name)
   const canPlot = current.convictionPoints.length >= 2
 
+  // Same 'card' kind Card/Panel/HeroSection's shells use — a glass surface
+  // self-reveals as a shell, its content cascading in a beat later.
+  // Non-glow (VE_13: glow reserved for the Hero Chart / AI Workspace / active
+  // controls / focus states — this carousel is a secondary chart below the
+  // Hero, and giving it the same halo would create a competing focal point).
+  const reveal = useReveal('card')
   return (
-    <div
-      className="relative flex h-full flex-col rounded-xl bg-surface-raised p-5 shadow-glow"
+    <motion.div
+      {...reveal}
+      className={cn(glassSurface('elevated'), 'flex h-full flex-col p-5')}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
@@ -53,9 +62,6 @@ export function RotatingStrategyChart({ items }: { items: StrategyPerformance[] 
       aria-label="Strategy performance carousel"
       aria-roledescription="carousel"
     >
-      {/* faint violet top hairline to match the glow-card language */}
-      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/25 to-transparent" />
-
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
@@ -129,6 +135,6 @@ export function RotatingStrategyChart({ items }: { items: StrategyPerformance[] 
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }

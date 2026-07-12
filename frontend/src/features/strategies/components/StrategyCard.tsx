@@ -15,6 +15,7 @@ import Link from 'next/link'
 import { ArrowUpRight, Brain } from 'lucide-react'
 import { Badge, Card, Sparkline } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { useSyncStore } from '@/lib/store/sync'
 import type { StrategyPerformance } from '../hooks/useStrategyPerformance'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
 
@@ -72,10 +73,18 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
   const last = ordered.at(-1)
   const conviction = last ? Number.parseFloat(last.value) : null
   const asset = typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null
+  // Global Synchronization (Doc 11): opening a strategy from anywhere makes
+  // it the default selection everywhere else (e.g. the /strategies list).
+  const setSyncedStrategyId = useSyncStore((s) => s.setSelectedStrategyId)
 
   return (
-    <Card elevation="glow" interactive className="group h-full">
-      <Link href={`/strategies/${strategy.id}`} className="flex h-full flex-col gap-4 p-5" aria-label={`Open ${strategy.name} detail`}>
+    <Card elevation="elevated" interactive className="group h-full">
+      <Link
+        href={`/strategies/${strategy.id}`}
+        className="flex h-full flex-col gap-4 p-5"
+        aria-label={`Open ${strategy.name} detail`}
+        onClick={() => setSyncedStrategyId(strategy.id)}
+      >
         {/* Header: name + status/reference badges */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2.5">

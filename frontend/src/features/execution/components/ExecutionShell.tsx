@@ -9,7 +9,7 @@
 // asset rows carry a crypto icon; the signal-lineage column is preserved.
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowLeftRight } from 'lucide-react'
 import {
   Badge,
@@ -18,28 +18,31 @@ import {
   type DonutSlice,
   EmptyState,
   ErrorState,
+  InstitutionalTable,
+  type InstitutionalColumnDef,
   PageHeader,
   Panel,
   Ring,
   Section,
   SkeletonTable,
   StatCard,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   type BadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { usePortfolios } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio } from '@/features/portfolio/types'
-import { useOrders } from '../hooks/useExecution'
-import type { Order, OrderStatus } from '../types'
+import { useExecutions, useOrders } from '../hooks/useExecution'
+import type { Execution, Order, OrderStatus } from '../types'
 
 const fmtQty = (v: string) => Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 8 })
 const fmtPrice = (v: string | null) => (v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+const fmtTime = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+// "What's pending" — created or risk-validated but not yet filled/rejected
+// (Doc 14 §10.7.4 lifecycle: CREATED -> VALIDATED -> FILLED | REJECTED).
+const PENDING_STATUSES: OrderStatus[] = ['CREATED', 'VALIDATED']
+
+type StatusFilter = 'ALL' | 'PENDING' | 'FILLED' | 'REJECTED'
 
 function orderStatusBadgeVariant(status: OrderStatus): BadgeVariant {
   switch (status) {
@@ -58,7 +61,7 @@ export function ExecutionShell() {
   const activePortfolio = portfolios.find((p) => p.id === activeId) ?? null
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       <PageHeader
         icon={<ArrowLeftRight size={18} />}
         title="Execution"
@@ -108,7 +111,18 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
   const orders = query.data ?? []
   const filled = orders.filter((o) => o.status === 'FILLED').length
   const rejected = orders.filter((o) => o.status === 'REJECTED').length
+  const pending = orders.filter((o) => PENDING_STATUSES.includes(o.status)).length
   const fillRate = orders.length ? filled / orders.length : 0
+
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const visibleOrders =
+    statusFilter === 'ALL'
+      ? orders
+      : statusFilter === 'PENDING'
+        ? orders.filter((o) => PENDING_STATUSES.includes(o.status))
+        : orders.filter((o) => o.status === statusFilter)
+  const selectedOrder = orders.find((o) => o.id === selectedOrderId) ?? null
 
   // Real order-status distribution (Doc 04 "Order Distribution" donut). Counts
   // are genuine lifecycle states; tones are semantic (filled=profit, etc.).
@@ -124,12 +138,13 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
     .filter((d) => d.value > 0)
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       {query.isSuccess && orders.length > 0 && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_auto]">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatCard label="Orders" value={orders.length} />
             <StatCard label="Filled" value={filled} tone="profit" />
+            <StatCard label="Pending" value={pending} tone={pending ? 'warning' : 'default'} />
             <StatCard label="Rejected" value={rejected} tone={rejected ? 'risk' : 'default'} />
           </div>
           <Panel className="flex flex-col items-center justify-center gap-1.5 px-8 py-4">
@@ -154,55 +169,214 @@ function Blotter({ portfolio }: { portfolio: Portfolio }) {
 
       <Section
         title={`${portfolio.name} · orders`}
-        actions={query.isSuccess ? <Badge variant="neutral">{orders.length}</Badge> : null}
+        description="Click a row to see its real fills below."
+        actions={
+          query.isSuccess ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-raised p-0.5">
+                {(['ALL', 'PENDING', 'FILLED', 'REJECTED'] as StatusFilter[]).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setStatusFilter(s)}
+                    className={cn(
+                      'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                      statusFilter === s ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg',
+                    )}
+                  >
+                    {s === 'ALL' ? 'All' : s === 'PENDING' ? 'Pending' : s === 'FILLED' ? 'Filled' : 'Rejected'}
+                  </button>
+                ))}
+              </div>
+              <Badge variant="neutral">{visibleOrders.length}</Badge>
+            </div>
+          ) : null
+        }
       >
         {query.isLoading && <SkeletonTable rows={6} cols={7} />}
         {query.isError && <ErrorState description="Could not load orders." onRetry={() => query.refetch()} />}
         {query.isSuccess && orders.length === 0 && (
           <EmptyState icon={<ArrowLeftRight size={20} />} title="No orders" description="This portfolio has placed no orders." />
         )}
-        {query.isSuccess && orders.length > 0 && (
-          <Panel className="overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Asset</TableHead><TableHead>Side</TableHead><TableHead>Status</TableHead>
-                  <TableHead>Quantity</TableHead><TableHead>Filled</TableHead><TableHead>Avg Price</TableHead><TableHead>Signal</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orders.map((order) => (<OrderRow key={order.id} order={order} />))}
-              </TableBody>
-            </Table>
-          </Panel>
+        {query.isSuccess && orders.length > 0 && visibleOrders.length === 0 && (
+          <EmptyState title="No orders in this state" description="Nothing matches the selected status filter." />
+        )}
+        {query.isSuccess && visibleOrders.length > 0 && (
+          <OrderTable orders={visibleOrders} selectedOrderId={selectedOrderId} onSelectOrder={(o) => setSelectedOrderId(o.id === selectedOrderId ? null : o.id)} />
         )}
       </Section>
+
+      {selectedOrder && <OrderFills order={selectedOrder} onClose={() => setSelectedOrderId(null)} />}
     </div>
   )
 }
 
-function OrderRow({ order }: { order: Order }) {
+// Real fill-level detail for the selected order — the `useExecutions` hook
+// already existed but was never called anywhere; wiring it here is what makes
+// "what filled" genuinely readable instead of just an aggregate status badge.
+function OrderFills({ order, onClose }: { order: Order; onClose: () => void }) {
+  const query = useExecutions(order.id)
+  const executions = query.data ?? []
   const symbol = order.symbol ?? order.asset_id
+
   return (
-    <TableRow>
-      <TableCell>
-        <div className="flex items-center gap-2.5">
-          <CryptoIcon symbol={symbol} size={20} />
-          <span className="font-medium text-fg">{symbol}</span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <span className={cn('font-medium', order.side === 'BUY' ? 'text-profit' : 'text-risk')}>{order.side}</span>
-      </TableCell>
-      <TableCell><Badge variant={orderStatusBadgeVariant(order.status)}>{order.status}</Badge></TableCell>
-      <TableCell numeric>{fmtQty(order.quantity)}</TableCell>
-      <TableCell numeric>{fmtQty(order.filled_quantity)}</TableCell>
-      <TableCell numeric>{fmtPrice(order.average_price)}</TableCell>
-      <TableCell>
-        {order.signal_id ? (
-          <span className="font-mono text-xs text-fg-muted" title={order.signal_id}>{order.signal_id.slice(0, 8)}…</span>
-        ) : <span className="text-fg-muted">—</span>}
-      </TableCell>
-    </TableRow>
+    <Section
+      title={`Fills for ${symbol} · ${order.side} ${fmtQty(order.quantity)}`}
+      description="Individual executions recorded against this order."
+      actions={
+        <button onClick={onClose} className="text-xs text-fg-muted transition-colors hover:text-fg">
+          Close
+        </button>
+      }
+    >
+      <Panel className="overflow-hidden">
+        {query.isLoading && <SkeletonTable rows={2} cols={5} />}
+        {query.isError && <ErrorState description="Could not load fills." onRetry={() => query.refetch()} />}
+        {query.isSuccess && executions.length === 0 && (
+          <EmptyState title="No fills recorded" description="This order has no execution records yet." />
+        )}
+        {query.isSuccess && executions.length > 0 && <ExecutionTable executions={executions} />}
+      </Panel>
+    </Section>
+  )
+}
+
+function ExecutionTable({ executions }: { executions: Execution[] }) {
+  const columns = useMemo<InstitutionalColumnDef<Execution>[]>(
+    () => [
+      {
+        id: 'executed_at',
+        header: 'Time',
+        accessorFn: (e) => new Date(e.executed_at).getTime(),
+        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.executed_at)}</span>,
+      },
+      {
+        id: 'quantity',
+        header: 'Quantity',
+        accessorFn: (e) => Number.parseFloat(e.quantity),
+        cell: ({ row }) => fmtQty(row.original.quantity),
+        meta: { numeric: true },
+      },
+      {
+        id: 'price',
+        header: 'Price',
+        accessorFn: (e) => Number.parseFloat(e.price),
+        cell: ({ row }) => fmtPrice(row.original.price),
+        meta: { numeric: true },
+      },
+      {
+        id: 'commission',
+        header: 'Commission',
+        accessorFn: (e) => Number.parseFloat(e.commission),
+        cell: ({ row }) => fmtPrice(row.original.commission),
+        meta: { numeric: true, hideBelow: 'tablet' },
+      },
+      {
+        id: 'net_amount',
+        header: 'Net Amount',
+        accessorFn: (e) => Number.parseFloat(e.net_amount),
+        cell: ({ row }) => fmtPrice(row.original.net_amount),
+        meta: { numeric: true },
+      },
+      {
+        accessorKey: 'venue',
+        header: 'Venue',
+        cell: ({ getValue }) => <span className="uppercase text-fg-muted">{getValue<string>()}</span>,
+        meta: { hideBelow: 'laptop' },
+      },
+    ],
+    [],
+  )
+  return <InstitutionalTable data={executions} columns={columns} getRowId={(e) => e.id} />
+}
+
+function OrderTable({
+  orders,
+  selectedOrderId,
+  onSelectOrder,
+}: {
+  orders: Order[]
+  selectedOrderId: string | null
+  onSelectOrder: (order: Order) => void
+}) {
+  const columns = useMemo<InstitutionalColumnDef<Order>[]>(
+    () => [
+      {
+        id: 'asset',
+        header: 'Asset',
+        accessorFn: (o) => o.symbol ?? o.asset_id,
+        cell: ({ getValue }) => (
+          <div className="flex items-center gap-2.5">
+            <CryptoIcon symbol={String(getValue())} size={20} />
+            <span className="font-medium text-fg">{String(getValue())}</span>
+          </div>
+        ),
+      },
+      {
+        accessorKey: 'side',
+        header: 'Side',
+        cell: ({ getValue }) => {
+          const side = getValue<Order['side']>()
+          return <span className={cn('font-medium', side === 'BUY' ? 'text-profit' : 'text-risk')}>{side}</span>
+        },
+      },
+      {
+        accessorKey: 'status',
+        header: 'Status',
+        cell: ({ getValue }) => {
+          const status = getValue<OrderStatus>()
+          return <Badge variant={orderStatusBadgeVariant(status)}>{status}</Badge>
+        },
+      },
+      {
+        id: 'quantity',
+        header: 'Quantity',
+        accessorFn: (o) => Number.parseFloat(o.quantity),
+        cell: ({ row }) => fmtQty(row.original.quantity),
+        meta: { numeric: true },
+      },
+      {
+        id: 'filled_quantity',
+        header: 'Filled',
+        accessorFn: (o) => Number.parseFloat(o.filled_quantity),
+        cell: ({ row }) => fmtQty(row.original.filled_quantity),
+        meta: { numeric: true, hideBelow: 'tablet' },
+      },
+      {
+        id: 'average_price',
+        header: 'Avg Price',
+        accessorFn: (o) => (o.average_price === null ? -Infinity : Number.parseFloat(o.average_price)),
+        cell: ({ row }) => fmtPrice(row.original.average_price),
+        meta: { numeric: true, hideBelow: 'laptop' },
+      },
+      {
+        accessorKey: 'signal_id',
+        header: 'Signal',
+        enableSorting: false,
+        cell: ({ getValue }) => {
+          const signalId = getValue<Order['signal_id']>()
+          return signalId ? (
+            <span className="font-mono text-xs text-fg-muted" title={signalId}>{signalId.slice(0, 8)}…</span>
+          ) : (
+            <span className="text-fg-muted">—</span>
+          )
+        },
+        meta: { hideBelow: 'laptop' },
+      },
+    ],
+    [],
+  )
+
+  return (
+    <Panel className="overflow-hidden">
+      <InstitutionalTable
+        data={orders}
+        columns={columns}
+        getRowId={(o) => o.id}
+        searchPlaceholder="Search orders…"
+        exportFilename="execution-orders"
+        onRowClick={onSelectOrder}
+        isRowSelected={(o) => o.id === selectedOrderId}
+      />
+    </Panel>
   )
 }

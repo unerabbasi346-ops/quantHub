@@ -14,13 +14,15 @@
 //    selected instrument are overlaid on the candles.
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { CandlestickChart } from 'lucide-react'
 import {
   Badge,
   CryptoIcon,
   EmptyState,
   ErrorState,
+  InstitutionalTable,
+  type InstitutionalColumnDef,
   PageHeader,
   Panel,
   Section,
@@ -28,11 +30,13 @@ import {
   StatCard,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { useSyncStore } from '@/lib/store/sync'
 import { usePortfolios } from '@/features/portfolio/hooks/usePortfolio'
 import { useOrders } from '@/features/execution/hooks/useExecution'
 import { useAssets, useBars } from '../hooks/useMarkets'
 import type { Asset, OHLCVBar } from '../types'
 import { PriceChart, type FillMarker } from './PriceChart'
+import { CorrelationMatrix } from './CorrelationMatrix'
 
 const num = (v: string) => Number.parseFloat(v)
 const fmtPrice = (v: string | number) =>
@@ -80,13 +84,24 @@ function resample(bars: OHLCVBar[], tf: Timeframe): OHLCVBar[] {
 export function MarketsShell() {
   const assetsQuery = useAssets()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Global Synchronization (Doc 11): an asset selected elsewhere (currently
+  // just the Dashboard Hero, which reads this) is the default instrument
+  // this page opens on; picking one here re-publishes it for every page.
+  const syncedSymbol = useSyncStore((s) => s.selectedAssetSymbol)
+  const setSyncedSymbol = useSyncStore((s) => s.setSelectedAssetSymbol)
 
   const assets = assetsQuery.data ?? []
-  const activeId = selectedId ?? assets[0]?.id ?? ''
+  const syncedId = syncedSymbol ? assets.find((a) => a.symbol === syncedSymbol)?.id : undefined
+  const activeId = selectedId ?? syncedId ?? assets[0]?.id ?? ''
   const activeAsset = assets.find((a) => a.id === activeId) ?? null
 
+  const selectAsset = (asset: Asset) => {
+    setSelectedId(asset.id)
+    setSyncedSymbol(asset.symbol)
+  }
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       <PageHeader
         icon={<CandlestickChart size={18} />}
         title="Markets"
@@ -107,7 +122,7 @@ export function MarketsShell() {
               with the instrument count; the list scrolls within its own panel. */}
           <div className="max-h-[32rem] space-y-1 overflow-y-auto overscroll-contain pr-1 qh-scroll">
             {assets.map((asset) => (
-              <AssetRow key={asset.id} asset={asset} selected={asset.id === activeId} onSelect={() => setSelectedId(asset.id)} />
+              <AssetRow key={asset.id} asset={asset} selected={asset.id === activeId} onSelect={() => selectAsset(asset)} />
             ))}
           </div>
         </Section>
@@ -189,9 +204,10 @@ function AssetDetail({ asset }: { asset: Asset }) {
   const dayChangePct = dayChange != null && first24[0] ? (dayChange / num(first24[0].close)) * 100 : null
   const hi = first24.length ? Math.max(...first24.map((b) => num(b.high))) : null
   const lo = first24.length ? Math.min(...first24.map((b) => num(b.low))) : null
+  const vol24 = first24.length ? first24.reduce((s, b) => s + num(b.volume), 0) : null
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       <Section
         title={`${asset.symbol} · price`}
         description={
@@ -243,7 +259,7 @@ function AssetDetail({ asset }: { asset: Asset }) {
 
       {/* Stat strip fills the space that used to sit empty beside the table */}
       {last && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <StatCard label="Last price" value={fmtPrice(last.close)} />
           <StatCard
             label="24h change"
@@ -252,48 +268,53 @@ function AssetDetail({ asset }: { asset: Asset }) {
           />
           <StatCard label="24h high" value={hi != null ? fmtPrice(hi) : '—'} />
           <StatCard label="24h low" value={lo != null ? fmtPrice(lo) : '—'} />
+          <StatCard label="24h volume" value={vol24 != null ? fmtVolume(vol24) : '—'} />
         </div>
       )}
 
       {barsQuery.isSuccess && view.length > 0 && <RecentBars bars={view} tf={tf} />}
+
+      {/* Doc 08 §Required Visualizations: Correlation Matrix belongs on
+          Markets — real 13-instrument price-return correlation, same
+          component the Risk workspace uses for market context. */}
+      <CorrelationMatrix />
     </div>
   )
 }
 
 function RecentBars({ bars, tf }: { bars: OHLCVBar[]; tf: Timeframe }) {
-  const recent = [...bars].reverse().slice(0, 15)
+  const recent = [...bars].reverse().slice(0, 50)
+  const columns = useMemo<InstitutionalColumnDef<OHLCVBar>[]>(
+    () => [
+      {
+        id: 'ts',
+        header: 'Time',
+        accessorFn: (b) => new Date(b.ts).getTime(),
+        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.ts)}</span>,
+      },
+      { id: 'open', header: 'Open', accessorFn: (b) => num(b.open), cell: ({ row }) => fmtPrice(row.original.open), meta: { numeric: true } },
+      { id: 'high', header: 'High', accessorFn: (b) => num(b.high), cell: ({ row }) => fmtPrice(row.original.high), meta: { numeric: true, hideBelow: 'tablet' } },
+      { id: 'low', header: 'Low', accessorFn: (b) => num(b.low), cell: ({ row }) => fmtPrice(row.original.low), meta: { numeric: true, hideBelow: 'tablet' } },
+      {
+        id: 'close',
+        header: 'Close',
+        accessorFn: (b) => num(b.close),
+        cell: ({ row }) => {
+          const bar = row.original
+          const upBar = num(bar.close) >= num(bar.open)
+          return <span className={upBar ? 'text-profit' : 'text-risk'}>{fmtPrice(bar.close)}</span>
+        },
+        meta: { numeric: true },
+      },
+      { id: 'volume', header: 'Volume', accessorFn: (b) => num(b.volume), cell: ({ row }) => fmtVolume(row.original.volume), meta: { numeric: true, hideBelow: 'laptop' } },
+    ],
+    [],
+  )
+
   return (
     <Section title="Recent bars" actions={<Badge variant="neutral">{bars.length} {tf} bars</Badge>}>
       <Panel className="overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-[11px] uppercase tracking-wider text-fg-subtle">
-              <th className="px-4 py-2.5 text-left font-semibold">Time</th>
-              <th className="px-4 py-2.5 text-right font-semibold">Open</th>
-              <th className="px-4 py-2.5 text-right font-semibold">High</th>
-              <th className="px-4 py-2.5 text-right font-semibold">Low</th>
-              <th className="px-4 py-2.5 text-right font-semibold">Close</th>
-              <th className="px-4 py-2.5 text-right font-semibold">Volume</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/70">
-            {recent.map((bar) => {
-              const upBar = num(bar.close) >= num(bar.open)
-              return (
-                <tr key={bar.ts} className="transition-colors hover:bg-surface-hover/60">
-                  <td className="px-4 py-2.5 text-fg-muted">{fmtTime(bar.ts)}</td>
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{fmtPrice(bar.open)}</td>
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{fmtPrice(bar.high)}</td>
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{fmtPrice(bar.low)}</td>
-                  <td className={cn('px-4 py-2.5 text-right font-mono tabular-nums', upBar ? 'text-profit' : 'text-risk')}>
-                    {fmtPrice(bar.close)}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-fg-muted">{fmtVolume(bar.volume)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <InstitutionalTable data={recent} columns={columns} getRowId={(b) => b.ts} exportFilename="market-bars" />
       </Panel>
     </Section>
   )

@@ -18,38 +18,32 @@
 // only — no history/rollback is offered because none exists; a caption says so.
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Brain, Power } from 'lucide-react'
 import {
   Badge,
   Button,
   EmptyState,
   ErrorState,
+  InstitutionalTable,
+  type InstitutionalColumnDef,
   LineChart,
   PageHeader,
   Ring,
   Section,
   SkeletonTable,
-  Stat,
   StatCard,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   pnlBadgeVariant,
   type BadgeVariant,
   type LinePoint,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { useSyncStore } from '@/lib/store/sync'
 import { useBacktests, useSetStrategyStatus, useSignals, useStrategies } from '../hooks/useStrategies'
 import type { Backtest, Signal, Strategy } from '../types'
+import { BacktestRunsTable, fmtMoney, fmtReturnPct } from './tables'
 
 // ── formatters (display-only; API strings are the source of truth) ──
-const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
-const fmtMoney = (v: string | null) =>
-  v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtSignal = (v: string) => {
   const n = Number.parseFloat(v)
   const s = n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })
@@ -71,18 +65,6 @@ function strategyStatusVariant(status: string): BadgeVariant {
       return 'neutral'
   }
 }
-function backtestStatusVariant(status: string): BadgeVariant {
-  switch (status.toUpperCase()) {
-    case 'COMPLETED':
-      return 'profit'
-    case 'RUNNING':
-      return 'info'
-    case 'FAILED':
-      return 'risk'
-    default:
-      return 'neutral'
-  }
-}
 
 type TabKey = 'overview' | 'performance' | 'signals' | 'backtest'
 const TABS: { key: TabKey; label: string }[] = [
@@ -95,13 +77,23 @@ const TABS: { key: TabKey; label: string }[] = [
 export function StrategiesShell() {
   const strategiesQuery = useStrategies()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Global Synchronization (Doc 11): a strategy picked on another page (e.g.
+  // the Dashboard's Strategy Workspace) is the default scope this page opens
+  // with, instead of always falling back to the first registered strategy.
+  const syncedStrategyId = useSyncStore((s) => s.selectedStrategyId)
+  const setSyncedStrategyId = useSyncStore((s) => s.setSelectedStrategyId)
 
   const strategies = strategiesQuery.data ?? []
-  const activeId = selectedId ?? strategies[0]?.id ?? ''
+  const activeId = selectedId ?? syncedStrategyId ?? strategies[0]?.id ?? ''
   const activeStrategy = strategies.find((s) => s.id === activeId) ?? null
 
+  const selectStrategy = (id: string) => {
+    setSelectedId(id)
+    setSyncedStrategyId(id)
+  }
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       <PageHeader
         icon={<Brain size={18} />}
         title="Strategies"
@@ -123,7 +115,7 @@ export function StrategiesShell() {
               return (
                 <button
                   key={strategy.id}
-                  onClick={() => setSelectedId(strategy.id)}
+                  onClick={() => selectStrategy(strategy.id)}
                   aria-current={selected ? 'true' : undefined}
                   className={cn(
                     'flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
@@ -333,38 +325,63 @@ function SignalsTab({ query, signals }: { query: ReturnType<typeof useSignals>; 
       )}
       {query.isSuccess && signals.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Value (conviction)</TableHead>
-                <TableHead>Validation</TableHead>
-                <TableHead>Detail</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {signals.map((signal) => {
-                const meta = Object.entries(signal.metadata)
-                return (
-                  <TableRow key={signal.id}>
-                    <TableCell className="whitespace-nowrap text-fg-muted">{fmtTime(signal.ts)}</TableCell>
-                    <TableCell numeric>
-                      <Badge variant={pnlBadgeVariant(Number.parseFloat(signal.value))}>{fmtSignal(signal.value)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={signal.validation_status === 'VALID' ? 'profit' : 'warning'}>{signal.validation_status}</Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-fg-muted">
-                      {meta.length === 0 ? '—' : meta.map(([k, v]) => `${k}=${v}`).join('  ')}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+          <SignalTable signals={signals} />
         </div>
       )}
     </Section>
+  )
+}
+
+function SignalTable({ signals }: { signals: Signal[] }) {
+  const columns = useMemo<InstitutionalColumnDef<Signal>[]>(
+    () => [
+      {
+        id: 'ts',
+        header: 'Time',
+        accessorFn: (s) => new Date(s.ts).getTime(),
+        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.ts)}</span>,
+      },
+      {
+        id: 'value',
+        header: 'Value (conviction)',
+        accessorFn: (s) => Number.parseFloat(s.value),
+        cell: ({ row }) => (
+          <Badge variant={pnlBadgeVariant(Number.parseFloat(row.original.value))}>{fmtSignal(row.original.value)}</Badge>
+        ),
+        meta: { numeric: true },
+      },
+      {
+        accessorKey: 'validation_status',
+        header: 'Validation',
+        cell: ({ getValue }) => {
+          const status = getValue<Signal['validation_status']>()
+          return <Badge variant={status === 'VALID' ? 'profit' : 'warning'}>{status}</Badge>
+        },
+      },
+      {
+        id: 'detail',
+        header: 'Detail',
+        enableSorting: false,
+        accessorFn: (s) => Object.entries(s.metadata).map(([k, v]) => `${k}=${v}`).join('  '),
+        cell: ({ getValue }) => {
+          const detail = getValue<string>()
+          return <span className="font-mono text-xs text-fg-muted">{detail || '—'}</span>
+        },
+        meta: { hideBelow: 'laptop' },
+      },
+    ],
+    [],
+  )
+
+  return (
+    <InstitutionalTable
+      data={signals}
+      columns={columns}
+      getRowId={(s) => s.id}
+      searchPlaceholder="Search signals…"
+      exportFilename="strategy-signals"
+      initialSorting={[{ id: 'ts', desc: true }]}
+    />
   )
 }
 
@@ -388,40 +405,7 @@ function BacktestTab({ query, backtests }: { query: ReturnType<typeof useBacktes
         )}
         {query.isSuccess && backtests.length > 0 && (
           <div className="overflow-hidden rounded-xl border border-border bg-surface-raised shadow-sm">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Run</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Fills</TableHead>
-                  <TableHead>Total Return</TableHead>
-                  <TableHead>Final Capital</TableHead>
-                  <TableHead>Determinism Hash</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {backtests.map((b) => (
-                  <TableRow key={b.id}>
-                    <TableCell className="font-medium text-fg">{b.name}</TableCell>
-                    <TableCell><Badge variant={backtestStatusVariant(b.status)}>{b.status}</Badge></TableCell>
-                    <TableCell numeric>{b.results?.orders_filled ?? b.trade_count ?? '—'}</TableCell>
-                    <TableCell numeric>
-                      {b.total_return === null ? '—' : (
-                        <Badge variant={pnlBadgeVariant(Number.parseFloat(b.total_return))}>{fmtReturnPct(b.total_return)}</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell numeric>{fmtMoney(b.final_capital)}</TableCell>
-                    <TableCell>
-                      {b.reproducibility_hash ? (
-                        <span className="font-mono text-xs text-fg-muted" title={b.reproducibility_hash}>
-                          {b.reproducibility_hash.slice(0, 12)}…
-                        </span>
-                      ) : <span className="text-fg-muted">—</span>}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <BacktestRunsTable backtests={backtests} />
           </div>
         )}
       </Section>

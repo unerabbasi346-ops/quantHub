@@ -11,24 +11,20 @@
 // market correlation, NOT portfolio risk (unrelated to F-18).
 'use client'
 
-import { useState } from 'react'
-import { ShieldAlert } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { AlertTriangle, Check, ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import {
   Badge,
   EmptyState,
   ErrorState,
+  InstitutionalTable,
+  type InstitutionalColumnDef,
   PageHeader,
   Panel,
   Ring,
   Section,
   SkeletonTable,
   StatCard,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   type BadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
@@ -60,7 +56,7 @@ export function RiskShell() {
   const activePortfolio = portfolios.find((p) => p.id === activeId) ?? null
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-14">
       <PageHeader
         icon={<ShieldAlert size={18} />}
         title="Risk"
@@ -91,10 +87,11 @@ export function RiskShell() {
           </div>
         </Section>
 
-        <div className="min-w-0 space-y-8">
+        <div className="min-w-0 space-y-14">
           {activePortfolio ? (
             <>
               <Snapshot portfolio={activePortfolio} />
+              <NeedsAttention portfolio={activePortfolio} />
               <Limits portfolio={activePortfolio} />
               <Assessments portfolio={activePortfolio} />
               <CorrelationMatrix />
@@ -169,6 +166,55 @@ function Snapshot({ portfolio }: { portfolio: Portfolio }) {
   )
 }
 
+// "What requires attention" — real limits currently in breach or warning,
+// surfaced immediately instead of requiring a scan of the full limits table.
+function NeedsAttention({ portfolio }: { portfolio: Portfolio }) {
+  const query = useRiskLimits(portfolio.id)
+  const limits = query.data ?? []
+  const flagged = limits
+    .filter((l) => l.status === 'breach' || l.status === 'warning')
+    .sort((a, b) => (a.status === b.status ? 0 : a.status === 'breach' ? -1 : 1))
+
+  if (query.isLoading || query.isError || limits.length === 0) return null
+
+  return (
+    <Section title="Needs attention" description="Governed limits currently at or beyond their warning threshold.">
+      {flagged.length === 0 ? (
+        <Panel className="flex items-center gap-3 p-5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-profit-soft text-profit">
+            <ShieldCheck size={16} />
+          </span>
+          <p className="text-sm text-fg-muted">All {limits.length} governed limits are within range.</p>
+        </Panel>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {flagged.map((l) => (
+            <Panel key={l.limit_id} className={cn('flex items-center gap-3 p-4', l.status === 'breach' && 'border-risk/30')}>
+              <span
+                className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                  l.status === 'breach' ? 'bg-risk-soft text-risk' : 'bg-warning-soft text-warning',
+                )}
+              >
+                <AlertTriangle size={16} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate font-mono text-sm text-fg">{l.metric_name}</span>
+                  <Badge variant={limitStatusVariant(l.status)}>{l.status}</Badge>
+                </div>
+                <div className="text-[11px] text-fg-subtle">
+                  {l.current_value ?? '—'} of {l.limit_value} limit · {fmtUtilPct(l.utilization)} utilized
+                </div>
+              </div>
+            </Panel>
+          ))}
+        </div>
+      )}
+    </Section>
+  )
+}
+
 function Limits({ portfolio }: { portfolio: Portfolio }) {
   const query = useRiskLimits(portfolio.id)
   const limits = query.data ?? []
@@ -181,69 +227,254 @@ function Limits({ portfolio }: { portfolio: Portfolio }) {
       )}
       {query.isSuccess && limits.length > 0 && (
         <Panel className="overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Metric</TableHead><TableHead>Evaluation</TableHead><TableHead>Limit</TableHead>
-                <TableHead>Warning</TableHead><TableHead>Current</TableHead><TableHead>Utilization</TableHead><TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {limits.map((limit) => (<LimitRow key={limit.limit_id} limit={limit} />))}
-            </TableBody>
-          </Table>
+          <LimitTable limits={limits} />
         </Panel>
       )}
     </Section>
   )
 }
 
-function LimitRow({ limit }: { limit: RiskLimit }) {
-  const isPreTrade = limit.evaluation === 'pre_trade'
+function LimitTable({ limits }: { limits: RiskLimit[] }) {
+  const columns = useMemo<InstitutionalColumnDef<RiskLimit>[]>(
+    () => [
+      {
+        accessorKey: 'metric_name',
+        header: 'Metric',
+        cell: ({ getValue }) => <span className="font-mono text-fg">{getValue<string>()}</span>,
+      },
+      {
+        accessorKey: 'evaluation',
+        header: 'Evaluation',
+        cell: ({ getValue }) => {
+          const isPreTrade = getValue<string>() === 'pre_trade'
+          return <Badge variant={isPreTrade ? 'info' : 'neutral'}>{isPreTrade ? 'per-order' : 'continuous'}</Badge>
+        },
+      },
+      {
+        id: 'limit_value',
+        header: 'Limit',
+        accessorFn: (l) => Number.parseFloat(l.limit_value),
+        cell: ({ row }) => row.original.limit_value,
+        meta: { numeric: true },
+      },
+      {
+        id: 'warning_threshold',
+        header: 'Warning',
+        accessorFn: (l) => Number.parseFloat(l.warning_threshold),
+        cell: ({ row }) => row.original.warning_threshold,
+        meta: { numeric: true, hideBelow: 'tablet' },
+      },
+      {
+        id: 'current_value',
+        header: 'Current',
+        accessorFn: (l) => (l.current_value === null ? -Infinity : Number.parseFloat(l.current_value)),
+        cell: ({ row }) => row.original.current_value ?? '—',
+        meta: { numeric: true },
+      },
+      {
+        id: 'utilization',
+        header: 'Utilization',
+        accessorFn: (l) => (l.utilization === null ? -Infinity : Number.parseFloat(l.utilization)),
+        cell: ({ row }) => fmtUtilPct(row.original.utilization),
+        meta: { numeric: true, hideBelow: 'laptop' },
+      },
+      {
+        accessorKey: 'status',
+        header: 'Status',
+        cell: ({ getValue }) => {
+          const status = getValue<string | null>()
+          return status ? (
+            <Badge variant={limitStatusVariant(status)}>{status}</Badge>
+          ) : (
+            <span className="text-fg-muted" title="Evaluated per order (pre-trade)">—</span>
+          )
+        },
+      },
+    ],
+    [],
+  )
+
   return (
-    <TableRow>
-      <TableCell><span className="font-mono text-fg">{limit.metric_name}</span></TableCell>
-      <TableCell><Badge variant={isPreTrade ? 'info' : 'neutral'}>{isPreTrade ? 'per-order' : 'continuous'}</Badge></TableCell>
-      <TableCell numeric>{limit.limit_value}</TableCell>
-      <TableCell numeric>{limit.warning_threshold}</TableCell>
-      <TableCell numeric>{limit.current_value ?? '—'}</TableCell>
-      <TableCell numeric>{fmtUtilPct(limit.utilization)}</TableCell>
-      <TableCell>
-        {limit.status ? <Badge variant={limitStatusVariant(limit.status)}>{limit.status}</Badge> : <span className="text-fg-muted" title="Evaluated per order (pre-trade)">—</span>}
-      </TableCell>
-    </TableRow>
+    <InstitutionalTable
+      data={limits}
+      columns={columns}
+      getRowId={(l) => l.limit_id}
+      searchPlaceholder="Search limits…"
+      exportFilename="risk-limits"
+    />
   )
 }
 
+// REDESIGNED (Doc 10 §Pre-Trade Risk Assessment: "SHALL be completely
+// redesigned. The current implementation SHALL NOT be reused.") — a flat
+// table was the forbidden pattern; this is a master-detail inspector.
+// Selecting an assessment reveals its full Risk Checklist (every individual
+// gate the order was evaluated against, previously fetched but only ever
+// summarized as a tooltip) and a real Checks-Passed ratio. What the doc also
+// asks for — a multi-factor Trade Approval Score, Exposure Simulation,
+// Capital Impact waterfall, and an AI Risk Report — would require inputs
+// (projected post-trade exposure, a capital ledger, a real AI backend) this
+// platform doesn't compute; per Data Honesty those are left out rather than
+// faked, not silently renamed into something they aren't.
 function Assessments({ portfolio }: { portfolio: Portfolio }) {
   const query = useRiskAssessments(portfolio.id)
   const assessments = query.data ?? []
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selected = assessments.find((a) => a.check_id === selectedId) ?? assessments[0] ?? null
+
   return (
-    <Section title="Pre-trade assessments" description="Most recent pre-trade risk-gate evaluations." actions={query.isSuccess ? <Badge variant="neutral">{assessments.length}</Badge> : null}>
+    <Section
+      title="Pre-trade assessments"
+      description="Every pre-trade risk-gate evaluation, with its full checklist — click a row to inspect."
+      actions={query.isSuccess ? <Badge variant="neutral">{assessments.length}</Badge> : null}
+    >
       {query.isLoading && <SkeletonTable rows={4} cols={4} />}
       {query.isError && <ErrorState description="Could not load assessments." onRetry={() => query.refetch()} />}
       {query.isSuccess && assessments.length === 0 && (
         <EmptyState title="No assessments" description="No pre-trade risk assessments have been recorded." />
       )}
       {query.isSuccess && assessments.length > 0 && (
-        <Panel className="overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow><TableHead>Time</TableHead><TableHead>Order</TableHead><TableHead>Decision</TableHead><TableHead>Reason</TableHead></TableRow>
-            </TableHeader>
-            <TableBody>
-              {assessments.map((a) => (
-                <TableRow key={a.check_id}>
-                  <TableCell className="whitespace-nowrap text-fg-muted">{fmtTime(a.assessed_at)}</TableCell>
-                  <TableCell><span className="font-mono text-xs text-fg-muted" title={a.order_id}>{a.order_id.slice(0, 8)}…</span></TableCell>
-                  <TableCell><Badge variant={a.authorized ? 'profit' : 'risk'}>{a.authorized ? 'APPROVED' : 'REJECTED'}</Badge></TableCell>
-                  <TableCell>{a.rejection_reason ? <span className="text-sm text-fg">{a.rejection_reason}</span> : <span className="text-fg-muted">—</span>}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Panel>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]">
+          <Panel className="overflow-hidden">
+            <AssessmentTable assessments={assessments} selectedId={selected?.check_id ?? null} onSelect={(a) => setSelectedId(a.check_id)} />
+          </Panel>
+          <AssessmentDetail assessment={selected} />
+        </div>
       )}
     </Section>
+  )
+}
+
+function AssessmentTable({
+  assessments,
+  selectedId,
+  onSelect,
+}: {
+  assessments: PreTradeAssessment[]
+  selectedId: string | null
+  onSelect: (a: PreTradeAssessment) => void
+}) {
+  const columns = useMemo<InstitutionalColumnDef<PreTradeAssessment>[]>(
+    () => [
+      {
+        id: 'assessed_at',
+        header: 'Time',
+        accessorFn: (a) => new Date(a.assessed_at).getTime(),
+        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.assessed_at)}</span>,
+      },
+      {
+        accessorKey: 'order_id',
+        header: 'Order',
+        enableSorting: false,
+        cell: ({ getValue }) => {
+          const orderId = getValue<string>()
+          return <span className="font-mono text-xs text-fg-muted" title={orderId}>{orderId.slice(0, 8)}…</span>
+        },
+      },
+      {
+        id: 'authorized',
+        header: 'Decision',
+        accessorFn: (a) => (a.authorized ? 'APPROVED' : 'REJECTED'),
+        cell: ({ row }) => (
+          <Badge variant={row.original.authorized ? 'profit' : 'risk'}>
+            {row.original.authorized ? 'APPROVED' : 'REJECTED'}
+          </Badge>
+        ),
+      },
+      {
+        id: 'checks',
+        header: 'Checks passed',
+        enableSorting: false,
+        accessorFn: (a) => a.individual_checks.filter((c) => c.passed).length,
+        cell: ({ row }) => {
+          const checks = row.original.individual_checks
+          if (checks.length === 0) return <span className="text-fg-muted">—</span>
+          const passed = checks.filter((c) => c.passed).length
+          return (
+            <span className={passed === checks.length ? 'text-fg-muted' : 'text-risk'}>
+              {passed}/{checks.length}
+            </span>
+          )
+        },
+      },
+    ],
+    [],
+  )
+
+  return (
+    <InstitutionalTable
+      data={assessments}
+      columns={columns}
+      getRowId={(a) => a.check_id}
+      searchPlaceholder="Search assessments…"
+      exportFilename="risk-assessments"
+      initialSorting={[{ id: 'assessed_at', desc: true }]}
+      onRowClick={onSelect}
+      isRowSelected={(a) => a.check_id === selectedId}
+    />
+  )
+}
+
+// The real Risk Checklist — one row per gate the order was actually
+// evaluated against, not a summary count.
+function AssessmentDetail({ assessment }: { assessment: PreTradeAssessment | null }) {
+  if (!assessment) {
+    return (
+      <Panel className="flex items-center justify-center p-6 text-sm text-fg-muted">Select an assessment to inspect its checklist.</Panel>
+    )
+  }
+  const checks = assessment.individual_checks
+  const passed = checks.filter((c) => c.passed).length
+  const rate = checks.length ? passed / checks.length : 0
+
+  return (
+    <Panel className="space-y-4 p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-mono text-xs text-fg-subtle" title={assessment.order_id}>{assessment.order_id.slice(0, 8)}…</div>
+          <div className="text-[11px] text-fg-subtle">{fmtTime(assessment.assessed_at)}</div>
+        </div>
+        <Badge variant={assessment.authorized ? 'profit' : 'risk'}>{assessment.authorized ? 'APPROVED' : 'REJECTED'}</Badge>
+      </div>
+
+      {assessment.rejection_reason && (
+        <p className="rounded-lg border border-risk/25 bg-risk-soft/30 px-3 py-2 text-xs leading-relaxed text-fg">
+          {assessment.rejection_reason}
+        </p>
+      )}
+
+      {checks.length > 0 && (
+        <div className="flex items-center gap-3 border-t border-border pt-4">
+          <Ring value={rate} size={56} thickness={6} tone={rate === 1 ? 'profit' : 'warning'} centerLabel={`${passed}/${checks.length}`} />
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">Checks passed</div>
+            <div className="text-xs text-fg-muted">every gate this order was evaluated against</div>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2 border-t border-border pt-4">
+        {checks.length === 0 ? (
+          <p className="text-sm text-fg-muted">No individual checks were recorded for this assessment.</p>
+        ) : (
+          checks.map((c) => (
+            <div key={c.check_name} className="flex items-start gap-2.5">
+              <span
+                className={cn(
+                  'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
+                  c.passed ? 'bg-profit-soft text-profit' : 'bg-risk-soft text-risk',
+                )}
+              >
+                {c.passed ? <Check size={12} /> : <X size={12} />}
+              </span>
+              <div className="min-w-0">
+                <div className="font-mono text-xs text-fg">{c.check_name}</div>
+                {c.detail && <div className="text-[11px] text-fg-subtle">{c.detail}</div>}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </Panel>
   )
 }

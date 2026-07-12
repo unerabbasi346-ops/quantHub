@@ -12,18 +12,41 @@
 
 import { useState } from 'react'
 import { CircleDollarSign, Info } from 'lucide-react'
-import { Badge, Button, Panel, Section } from '@/components/ui'
+import { Badge, Button, Panel, Ring, Section } from '@/components/ui'
 import { useSetCapital } from '../hooks/usePortfolio'
 import type { Portfolio } from '../types'
 
-function fmtMoney(value: string): string {
-  return Number.parseFloat(value).toLocaleString(undefined, {
+function fmtMoney(value: string | number): string {
+  return Number(value).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
 }
 
-export function CapitalConfig({ portfolio }: { portfolio: Portfolio }) {
+// Capital Utilization — integrates the operator-set capital figure with REAL
+// open-position market value (Doc 07 §Capital Efficiency, honestly scoped:
+// only utilization/idle-capital are derivable from what the platform tracks
+// today, not the full "Capital Rotation / Margin Usage" widget set).
+function Utilization({ configuredCapital, openMarketValue }: { configuredCapital: string; openMarketValue: number }) {
+  const capital = Number.parseFloat(configuredCapital)
+  if (!(capital > 0)) return null
+  const utilization = Math.min(openMarketValue / capital, 1)
+  const idle = Math.max(capital - openMarketValue, 0)
+  return (
+    <div className="flex items-center gap-4 border-t border-border pt-4">
+      <Ring value={utilization} size={64} thickness={7} tone={utilization > 0.9 ? 'warning' : 'info'} centerLabel={`${Math.round(utilization * 100)}%`} />
+      <div className="min-w-0">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">Capital utilization</div>
+        <div className="text-sm text-fg-muted">
+          {fmtMoney(openMarketValue)} deployed of {fmtMoney(capital)} configured
+        </div>
+        <div className="text-[11px] text-fg-subtle">{fmtMoney(idle)} idle</div>
+      </div>
+    </div>
+  )
+}
+
+export function CapitalConfig({ portfolio, openMarketValue = 0 }: { portfolio: Portfolio; openMarketValue?: number }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const mutation = useSetCapital(portfolio.id)
@@ -114,6 +137,8 @@ export function CapitalConfig({ portfolio }: { portfolio: Portfolio }) {
         {mutation.isError && (
           <p className="mt-3 text-sm text-risk">Could not save capital. Please try again.</p>
         )}
+
+        {current && <Utilization configuredCapital={current} openMarketValue={openMarketValue} />}
 
         {/* Honest F-19 disclosure — always visible, never buried */}
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/25 bg-warning-soft/40 px-3 py-2.5">
