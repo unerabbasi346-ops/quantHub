@@ -123,14 +123,22 @@ export function TopBar() {
   // the nav and the right-hand utilities resolve a beat later — a left-to-right
   // "chrome coming online" feel. No filter here (it would fight the bar's own
   // backdrop-blur); a crisp opacity + slide is enough above the page wash.
-  const enter = (delay: number) =>
-    reduce
-      ? {}
-      : {
-          initial: { opacity: 0, y: -8 },
-          animate: { opacity: 1, y: 0 },
-          transition: { duration: DURATION.text, ease: EASE_OUT, delay },
-        }
+  // BUG THIS FIXES (Phase 5 — same root cause `lib/motion/reveal.ts` already
+  // documents): `useReducedMotion()` reports `false` on the server and on
+  // client hydration's first render, then flips to `true` a render or two
+  // later for a real reduced-motion user. The old `reduce ? {} : {...}`
+  // withheld `initial`/`animate`/`transition` entirely on that later render —
+  // but withholding `animate` tells framer to stop asserting ANY target, not
+  // to jump to a visible one, so these 3 elements (header, primary nav, right
+  // utilities) froze at whatever opacity/y they'd reached the instant `reduce`
+  // flipped, sometimes still invisible. The fix: always assert the SAME
+  // `animate` target and only zero out the motion when reduced, so framer
+  // unconditionally lands on the resolved (visible) style every render.
+  const enter = (delay: number) => ({
+    initial: reduce ? false : { opacity: 0, y: -8 },
+    animate: { opacity: 1, y: 0 },
+    transition: reduce ? { duration: 0 } : { duration: DURATION.text, ease: EASE_OUT, delay },
+  })
 
   const [moreOpen, setMoreOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)

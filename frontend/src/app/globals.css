@@ -138,11 +138,13 @@
 
 html {
   color-scheme: dark;
-  /* Distinctive-but-robust type identity: a clean grotesque for UI text
-   * and a strong monospace for all financial figures (the "terminal"
-   * character). System stacks only — no network font fetch, so it renders
-   * identically offline / in the screenshot harness. */
-  --font-sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  /* Doc 07 §Font Family: Inter, self-hosted via next/font (see app/layout.tsx)
+   * — no runtime network fetch, renders identically offline / in the
+   * screenshot harness. System sans is the fallback chain only, for the
+   * brief pre-hydration instant before the font-face is active. Monospace
+   * stays a strong system stack for all financial figures (the "terminal"
+   * character); Doc 07 governs prose typography, not the numeric face. */
+  --font-sans: var(--font-inter), 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'Cascadia Code', 'JetBrains Mono', 'SF Mono', ui-monospace, Consolas, 'Roboto Mono', monospace;
 }
 [data-theme='light'] {
