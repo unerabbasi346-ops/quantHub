@@ -12,17 +12,27 @@
 // is never mistaken for portfolio risk.
 'use client'
 
+import type { ReactNode } from 'react'
 import { Info } from 'lucide-react'
 import { Badge, EmptyState, ErrorState, Heatmap, Panel, Section } from '@/components/ui'
 import { useCorrelation } from '../hooks/useMarkets'
 
-export function CorrelationMatrix() {
+export function CorrelationMatrix({
+  title = 'Price correlation',
+  icon,
+}: {
+  /** Caller-supplied title (Markets' analytics grid labels this "Cross-asset
+   *  correlation"; Risk's usage keeps the original "Price correlation"). */
+  title?: string
+  icon?: ReactNode
+}) {
   const query = useCorrelation('1h')
   const data = query.data
 
   return (
     <Section
-      title="Price correlation"
+      icon={icon}
+      title={title}
       description="Pairwise correlation of hourly price returns across ingested instruments."
       actions={data ? <Badge variant="neutral">{data.sample_size} obs · {data.interval}</Badge> : null}
     >

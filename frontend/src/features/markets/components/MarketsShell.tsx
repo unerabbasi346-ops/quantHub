@@ -1,52 +1,50 @@
 // Governing specification: Doc 06 — UI/UX Design System (QH-006 v1.0)
 //   §Layout / §Data Visualization; §Interaction Standards.
 // Doc 08 — Frontend Architecture (QH-008 v1.0) §Architecture / §State Management.
-// Per Doc 00 §14.11
+// handbook/ui/visual_engineering/13_VISUAL_DNA — Image 4 (EchoFi)/Image 3
+//   (Voltrex) visual standard. Per Doc 00 §14.11
 //
-// REDESIGN + FEATURES (owner push):
-//  - asset rows carry a real crypto icon + an inline price sparkline (not just
-//    text + number);
-//  - the candlestick chart gains a TIMEFRAME TOGGLE (1h / 4h / 1D). Only 1h is
-//    ingested, so 4h/1D are HONESTLY DERIVED by client-side resampling of the
-//    1h series (labeled "derived") — a real interactive choice from real data,
-//    never fabricated bars;
-//  - real BUY/SELL FILL MARKERS from the portfolio's filled orders for the
-//    selected instrument are overlaid on the candles.
+// DENSE MARKETS REBUILD (owner request) — four sections:
+//  1. Horizontally scrolling real-data asset pill strip (Voltrex-style).
+//  2. Full-width primary candlestick chart (TradingView Lightweight Charts,
+//     kept) + volume + real BUY/SELL fill markers (now showing each fill's
+//     implied direction/size/leverage from the real signals API) + a right
+//     stats panel (price/24h range/volume/funding for perpetuals).
+//  3. Three-column analytics grid: correlation matrix (existing, reused),
+//     volume ranking, 24h performance ranking — all real, computed client-side.
+//  4. Two-column market intelligence: funding-rate history (perpetuals only,
+//     honest disclosure for spot) + a computed price-statistics panel
+//     (replaces the old Recent Bars table).
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useQueries } from '@tanstack/react-query'
 import { CandlestickChart } from 'lucide-react'
-import {
-  Badge,
-  CryptoIcon,
-  EmptyState,
-  ErrorState,
-  InstitutionalTable,
-  type InstitutionalColumnDef,
-  PageHeader,
-  Panel,
-  Section,
-  Sparkline,
-  StatCard,
-} from '@/components/ui'
-import { cn } from '@/lib/utils/cn'
+import { PageHeader } from '@/components/ui'
 import { useSyncStore } from '@/lib/store/sync'
 import { usePortfolios } from '@/features/portfolio/hooks/usePortfolio'
 import { useOrders } from '@/features/execution/hooks/useExecution'
-import { useAssets, useBars } from '../hooks/useMarkets'
+import { useStrategies } from '@/features/strategies/hooks/useStrategies'
+import { strategiesService } from '@/features/strategies/services/strategies.service'
+import type { Signal } from '@/features/strategies/types'
+import { computePriceStats, num, rankByPerformance, rankByVolume } from '../analytics'
+import { useAllBars, useAssets, useBars, useFundingRates } from '../hooks/useMarkets'
 import type { Asset, OHLCVBar } from '../types'
-import { PriceChart, type FillMarker } from './PriceChart'
-import { CorrelationMatrix } from './CorrelationMatrix'
+import type { FillMarker } from './PriceChart'
+import { AssetStatsStrip } from './AssetStatsStrip'
+import { MarketChartSection, type Timeframe } from './MarketChartSection'
+import { AnalyticsGrid } from './AnalyticsGrid'
+import { MarketIntelligence } from './MarketIntelligence'
 
-const num = (v: string) => Number.parseFloat(v)
-const fmtPrice = (v: string | number) =>
-  Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtVolume = (v: string | number) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+// Signal history depth for the marker-tooltip join — enough to cover any
+// order placed against a strategy's real signal history (mirrors the
+// Strategy detail workspace's own SIGNAL_HISTORY_LIMIT).
+const SIGNAL_HISTORY_LIMIT = 1000
+// Wide bar window for the selected asset's price-statistics panel (30-day
+// return needs ~720 hourly bars; the backend caps at 1000).
+const PRICE_STATS_BAR_LIMIT = 1000
 
 // ── client-side timeframe resampling (honest: derived from the 1h series) ──
-type Timeframe = '1h' | '4h' | '1D'
 const TIMEFRAMES: Timeframe[] = ['1h', '4h', '1D']
 
 function bucketKey(tf: Timeframe, ts: string): string {
@@ -81,241 +79,160 @@ function resample(bars: OHLCVBar[], tf: Timeframe): OHLCVBar[] {
   })
 }
 
+// Every strategy's real signal history, keyed by signal id — the join table
+// for marker tooltips (order.signal_id -> direction/implied_size_usdt/
+// implied_leverage). Small platform (a handful of strategies), so fetching
+// each strategy's full signal feed is proportionate. Uses useQueries (a
+// SINGLE hook call over an array of query configs) rather than calling
+// useSignals per-strategy in a loop — the latter would violate the Rules of
+// Hooks the moment the strategy count changes between renders (e.g. while
+// useStrategies is still loading) — the same pattern already established in
+// features/strategies/hooks/useStrategyPerformance.ts.
+function useSignalsById(): Map<string, Signal> {
+  const strategiesQuery = useStrategies()
+  const strategies = strategiesQuery.data ?? []
+  const signalQueries = useQueries({
+    queries: strategies.map((s) => ({
+      queryKey: ['signals', s.id, SIGNAL_HISTORY_LIMIT],
+      queryFn: () => strategiesService.getSignals(s.id, SIGNAL_HISTORY_LIMIT),
+      enabled: Boolean(s.id),
+    })),
+  })
+  return useMemo(() => {
+    const map = new Map<string, Signal>()
+    for (const q of signalQueries) {
+      for (const s of q.data ?? []) map.set(s.id, s)
+    }
+    return map
+  }, [signalQueries])
+}
+
 export function MarketsShell() {
   const assetsQuery = useAssets()
+  const assets = useMemo(() => assetsQuery.data ?? [], [assetsQuery.data])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  // Global Synchronization (Doc 11): an asset selected elsewhere (currently
-  // just the Dashboard Hero, which reads this) is the default instrument
-  // this page opens on; picking one here re-publishes it for every page.
+  const [tf, setTf] = useState<Timeframe>('1h')
+
+  // Global Synchronization (Doc 11): an asset selected elsewhere (Dashboard
+  // Hero) is the default instrument this page opens on.
   const syncedSymbol = useSyncStore((s) => s.selectedAssetSymbol)
   const setSyncedSymbol = useSyncStore((s) => s.setSelectedAssetSymbol)
 
-  const assets = assetsQuery.data ?? []
   const syncedId = syncedSymbol ? assets.find((a) => a.symbol === syncedSymbol)?.id : undefined
-  const activeId = selectedId ?? syncedId ?? assets[0]?.id ?? ''
-  const activeAsset = assets.find((a) => a.id === activeId) ?? null
 
   const selectAsset = (asset: Asset) => {
     setSelectedId(asset.id)
     setSyncedSymbol(asset.symbol)
   }
 
-  return (
-    <div className="space-y-14">
-      <PageHeader
-        icon={<CandlestickChart size={18} />}
-        title="Markets"
-        subtitle="Live OHLCV market data — Phase 1 ingested bars."
-      />
+  // Every asset's 1h bars in one batch (Section 1 pill strip, Section 3
+  // rankings) — the selected asset's chart reads the SAME cached query
+  // (identical key), so this is not a duplicate fetch for the active asset.
+  const allBarsQueries = useAllBars(assets, '1h')
+  const barsByAssetId = useMemo(() => {
+    const map = new Map<string, OHLCVBar[]>()
+    assets.forEach((a, i) => map.set(a.id, allBarsQueries[i]?.data ?? []))
+    return map
+  }, [assets, allBarsQueries])
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[19rem_1fr]">
-        <Section
-          title="Instruments"
-          actions={assetsQuery.isSuccess ? <Badge variant="neutral">{assets.length}</Badge> : null}
-        >
-          {assetsQuery.isLoading && <div className="skeleton h-40 w-full" />}
-          {assetsQuery.isError && <ErrorState description="Could not load assets." onRetry={() => assetsQuery.refetch()} />}
-          {assetsQuery.isSuccess && assets.length === 0 && (
-            <EmptyState icon={<CandlestickChart size={20} />} title="No assets" description="No tradable assets are registered yet." />
-          )}
-          {/* Fixed-height, internally scrollable list — the page no longer grows
-              with the instrument count; the list scrolls within its own panel. */}
-          <div className="max-h-[32rem] space-y-1 overflow-y-auto overscroll-contain pr-1 qh-scroll">
-            {assets.map((asset) => (
-              <AssetRow key={asset.id} asset={asset} selected={asset.id === activeId} onSelect={() => selectAsset(asset)} />
-            ))}
-          </div>
-        </Section>
+  // Default selection prefers the first asset that actually HAS ingested
+  // bars (some registered instruments have no OHLCV history yet) — falls
+  // back to assets[0] while bars are still loading, then self-corrects once
+  // real data arrives. Never silently picks a data-less instrument once a
+  // real one is known to exist.
+  const firstAssetWithBars = assets.find((a) => (barsByAssetId.get(a.id)?.length ?? 0) > 0)?.id
+  const activeId = selectedId ?? syncedId ?? firstAssetWithBars ?? assets[0]?.id ?? ''
+  const activeAsset = assets.find((a) => a.id === activeId) ?? null
 
-        <div className="min-w-0">
-          {activeAsset ? (
-            <AssetDetail asset={activeAsset} />
-          ) : (
-            !assetsQuery.isLoading &&
-            !assetsQuery.isError && (
-              <EmptyState icon={<CandlestickChart size={20} />} title="No asset selected" description="Select an instrument to view its chart." />
-            )
-          )}
-        </div>
-      </div>
-    </div>
+  const activeBars = barsByAssetId.get(activeId) ?? []
+  const view = resample(activeBars, tf)
+  const activeBarsQueryIndex = assets.findIndex((a) => a.id === activeId)
+  const activeBarsQuery = activeBarsQueryIndex >= 0 ? allBarsQueries[activeBarsQueryIndex] : undefined
+
+  const volumeRanking = useMemo(
+    () => rankByVolume(assets.map((a) => ({ assetId: a.id, symbol: a.symbol, bars: barsByAssetId.get(a.id) ?? [] }))),
+    [assets, barsByAssetId],
   )
-}
-
-function AssetRow({ asset, selected, onSelect }: { asset: Asset; selected: boolean; onSelect: () => void }) {
-  const barsQuery = useBars(asset.id, '1h')
-  const bars = barsQuery.data ?? []
-  const closes = bars.slice(-24).map((b) => num(b.close))
-  const last = bars.at(-1)
-  const prev = bars.at(-2)
-  const change = last && prev ? num(last.close) - num(prev.close) : null
-  const changePct = change != null && prev ? (change / num(prev.close)) * 100 : null
-
-  return (
-    <button
-      onClick={onSelect}
-      aria-current={selected ? 'true' : undefined}
-      className={cn(
-        'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
-        selected ? 'border-accent/40 bg-accent-soft' : 'border-transparent hover:bg-surface-hover',
-      )}
-    >
-      <CryptoIcon symbol={asset.symbol} size={26} />
-      <div className="min-w-0 flex-1">
-        <div className={cn('truncate text-sm font-medium', selected ? 'text-accent' : 'text-fg')}>{asset.symbol}</div>
-        <div className="text-[11px] uppercase tracking-wide text-fg-subtle">{asset.exchange}</div>
-      </div>
-      {closes.length > 1 && <Sparkline data={closes} width={64} height={24} />}
-      <div className="text-right">
-        {last ? (
-          <>
-            <div className="font-mono text-sm font-semibold tabular-nums text-fg">{fmtPrice(last.close)}</div>
-            {changePct != null && (
-              <div className={cn('font-mono text-[11px] tabular-nums', change! >= 0 ? 'text-profit' : 'text-risk')}>
-                {change! >= 0 ? '+' : ''}{changePct.toFixed(2)}%
-              </div>
-            )}
-          </>
-        ) : (
-          <span className="text-xs text-fg-subtle">…</span>
-        )}
-      </div>
-    </button>
+  const performanceRanking = useMemo(
+    () => rankByPerformance(assets.map((a) => ({ assetId: a.id, symbol: a.symbol, bars: barsByAssetId.get(a.id) ?? [] }))),
+    [assets, barsByAssetId],
   )
-}
 
-function AssetDetail({ asset }: { asset: Asset }) {
-  const [tf, setTf] = useState<Timeframe>('1h')
-  const barsQuery = useBars(asset.id, '1h')
-  const bars = barsQuery.data ?? []
-  const view = resample(bars, tf)
+  // Funding rates — only meaningful for PERPETUAL; the hook itself gates the
+  // network call on this so a SPOT selection never fires it.
+  const isPerp = activeAsset?.instrument_type === 'PERPETUAL'
+  const fundingQuery = useFundingRates(activeId, Boolean(isPerp))
 
-  // Real fill markers: the first portfolio's FILLED orders for THIS instrument.
+  // Wider bar window for the price-statistics panel (30d return needs ~720
+  // hourly bars — the default 500-bar cache doesn't cover it).
+  const priceStatsBarsQuery = useBars(activeId, '1h', PRICE_STATS_BAR_LIMIT)
+  const priceStats = useMemo(() => computePriceStats(priceStatsBarsQuery.data ?? []), [priceStatsBarsQuery.data])
+
+  // Real fill markers, enriched with the real implied-sizing fields from the
+  // signal that produced each fill (order.signal_id -> Signal). An order with
+  // no signal_id (manually placed) or an unresolved signal_id simply omits
+  // those fields — never a fabricated value.
+  const signalsById = useSignalsById()
   const portfoliosQuery = usePortfolios()
   const portfolioId = portfoliosQuery.data?.[0]?.id ?? ''
   const ordersQuery = useOrders(portfolioId)
   const markers: FillMarker[] = (ordersQuery.data ?? [])
-    .filter((o) => o.asset_id === asset.id && o.status === 'FILLED')
-    .map((o) => ({ time: Math.floor(Date.parse(o.created_at) / 1000), side: o.side }))
+    .filter((o) => o.asset_id === activeId && o.status === 'FILLED')
+    .map((o) => {
+      const signal = o.signal_id ? signalsById.get(o.signal_id) : undefined
+      return {
+        time: Math.floor(Date.parse(o.created_at) / 1000),
+        side: o.side,
+        direction: signal?.direction,
+        impliedSizeUsdt: signal?.implied_size_usdt,
+        impliedLeverage: signal?.implied_leverage,
+      }
+    })
 
-  const last = bars.at(-1)
-  const first24 = bars.slice(-24)
-  const dayChange = last && first24[0] ? num(last.close) - num(first24[0].close) : null
-  const dayChangePct = dayChange != null && first24[0] ? (dayChange / num(first24[0].close)) * 100 : null
-  const hi = first24.length ? Math.max(...first24.map((b) => num(b.high))) : null
-  const lo = first24.length ? Math.min(...first24.map((b) => num(b.low))) : null
-  const vol24 = first24.length ? first24.reduce((s, b) => s + num(b.volume), 0) : null
+  const latestFunding = fundingQuery.data?.at(-1) ?? null
 
   return (
-    <div className="space-y-14">
-      <Section
-        title={`${asset.symbol} · price`}
-        description={
-          <span className="flex items-center gap-2">
-            <span>{asset.exchange} · {tf}{tf !== '1h' && <span className="text-fg-subtle"> (derived)</span>}</span>
-            {markers.length > 0 && (
-              <span className="text-fg-subtle">· {markers.length} fills overlaid</span>
-            )}
-          </span>
-        }
-        actions={
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-raised p-0.5">
-            {TIMEFRAMES.map((t) => (
-              <button
-                key={t}
-                onClick={() => setTf(t)}
-                className={cn(
-                  'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                  tf === t ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg',
-                )}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        }
-      >
-        <Panel className="p-4">
-          {barsQuery.isLoading && <div className="skeleton h-[420px] w-full" />}
-          {barsQuery.isError && <ErrorState description="Could not load bars." onRetry={() => barsQuery.refetch()} />}
-          {barsQuery.isSuccess && view.length === 0 && (
-            <EmptyState title="No bars" description={`No bars ingested for ${asset.symbol} yet.`} />
-          )}
-          {barsQuery.isSuccess && view.length > 0 && (
-            <>
-              <div className="mb-3 flex items-center gap-4">
-                {markers.length > 0 && (
-                  <div className="flex items-center gap-3 text-[11px] text-fg-muted">
-                    <span className="flex items-center gap-1"><span className="text-profit">▲</span> Buy fill</span>
-                    <span className="flex items-center gap-1"><span className="text-risk">▼</span> Sell fill</span>
-                  </div>
-                )}
-              </div>
-              <PriceChart bars={view} markers={markers} />
-            </>
-          )}
-        </Panel>
-      </Section>
+    <div className="space-y-8">
+      <PageHeader
+        icon={<CandlestickChart size={18} />}
+        title="Markets"
+        subtitle="Live OHLCV market data, cross-asset analytics, and perpetual funding — Phase 1/S-10 ingested data."
+      />
 
-      {/* Stat strip fills the space that used to sit empty beside the table */}
-      {last && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-          <StatCard label="Last price" value={fmtPrice(last.close)} />
-          <StatCard
-            label="24h change"
-            value={dayChangePct != null ? `${dayChange! >= 0 ? '+' : ''}${dayChangePct.toFixed(2)}%` : '—'}
-            tone={dayChange != null ? (dayChange >= 0 ? 'profit' : 'risk') : 'default'}
+      {assetsQuery.isLoading && <div className="skeleton h-16 w-full rounded-full" />}
+      {assetsQuery.isError && <div className="text-sm text-risk">Could not load assets.</div>}
+
+      {activeAsset && (
+        <>
+          <AssetStatsStrip assets={assets} barsByAssetId={barsByAssetId} selectedId={activeId} onSelect={selectAsset} />
+
+          <MarketChartSection
+            asset={activeAsset}
+            assets={assets}
+            onSelectAsset={selectAsset}
+            tf={tf}
+            setTf={setTf}
+            bars={view}
+            barsLoading={Boolean(activeBarsQuery?.isLoading)}
+            barsError={Boolean(activeBarsQuery?.isError)}
+            onRetry={() => activeBarsQuery?.refetch()}
+            markers={markers}
+            latestFunding={latestFunding}
           />
-          <StatCard label="24h high" value={hi != null ? fmtPrice(hi) : '—'} />
-          <StatCard label="24h low" value={lo != null ? fmtPrice(lo) : '—'} />
-          <StatCard label="24h volume" value={vol24 != null ? fmtVolume(vol24) : '—'} />
-        </div>
+
+          <AnalyticsGrid volumeRanking={volumeRanking} performanceRanking={performanceRanking} selectedAssetId={activeId} />
+
+          <MarketIntelligence
+            asset={activeAsset}
+            fundingRates={fundingQuery.data ?? []}
+            fundingLoading={Boolean(isPerp) && fundingQuery.isLoading}
+            fundingError={Boolean(isPerp) && fundingQuery.isError}
+            onRetryFunding={() => fundingQuery.refetch()}
+            priceStats={priceStats}
+            barCount={priceStatsBarsQuery.data?.length ?? 0}
+          />
+        </>
       )}
-
-      {barsQuery.isSuccess && view.length > 0 && <RecentBars bars={view} tf={tf} />}
-
-      {/* Doc 08 §Required Visualizations: Correlation Matrix belongs on
-          Markets — real 13-instrument price-return correlation, same
-          component the Risk workspace uses for market context. */}
-      <CorrelationMatrix />
     </div>
-  )
-}
-
-function RecentBars({ bars, tf }: { bars: OHLCVBar[]; tf: Timeframe }) {
-  const recent = [...bars].reverse().slice(0, 50)
-  const columns = useMemo<InstitutionalColumnDef<OHLCVBar>[]>(
-    () => [
-      {
-        id: 'ts',
-        header: 'Time',
-        accessorFn: (b) => new Date(b.ts).getTime(),
-        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.ts)}</span>,
-      },
-      { id: 'open', header: 'Open', accessorFn: (b) => num(b.open), cell: ({ row }) => fmtPrice(row.original.open), meta: { numeric: true } },
-      { id: 'high', header: 'High', accessorFn: (b) => num(b.high), cell: ({ row }) => fmtPrice(row.original.high), meta: { numeric: true, hideBelow: 'tablet' } },
-      { id: 'low', header: 'Low', accessorFn: (b) => num(b.low), cell: ({ row }) => fmtPrice(row.original.low), meta: { numeric: true, hideBelow: 'tablet' } },
-      {
-        id: 'close',
-        header: 'Close',
-        accessorFn: (b) => num(b.close),
-        cell: ({ row }) => {
-          const bar = row.original
-          const upBar = num(bar.close) >= num(bar.open)
-          return <span className={upBar ? 'text-profit' : 'text-risk'}>{fmtPrice(bar.close)}</span>
-        },
-        meta: { numeric: true },
-      },
-      { id: 'volume', header: 'Volume', accessorFn: (b) => num(b.volume), cell: ({ row }) => fmtVolume(row.original.volume), meta: { numeric: true, hideBelow: 'laptop' } },
-    ],
-    [],
-  )
-
-  return (
-    <Section title="Recent bars" actions={<Badge variant="neutral">{bars.length} {tf} bars</Badge>}>
-      <Panel className="overflow-hidden">
-        <InstitutionalTable data={recent} columns={columns} getRowId={(b) => b.ts} exportFilename="market-bars" />
-      </Panel>
-    </Section>
   )
 }

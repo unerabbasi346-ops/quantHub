@@ -18,6 +18,21 @@ export interface Asset {
   name: string | null
   currency: string
   is_active: boolean
+  // SPOT | PERPETUAL (migration e7a3c1f5b9d2 / S-10). A SPOT instrument has
+  // no funding concept — callers use this to decide whether to even ask for
+  // funding-rate data, not the funding endpoint (which just returns empty).
+  instrument_type: string
+}
+
+// A market_data.funding_rates row (Doc 14 §10.9.5) — PERPETUAL-only periodic
+// financing cashflow. Empty for a SPOT asset_id (never ingested), not an error.
+export interface FundingRate {
+  asset_id: UUID
+  funding_time: ISOTimestamp
+  funding_rate: string
+  mark_price: string | null
+  next_funding_time: ISOTimestamp | null
+  interval_hours: number | null
 }
 
 export interface OHLCVBar {

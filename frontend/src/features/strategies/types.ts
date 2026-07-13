@@ -34,6 +34,14 @@ export interface Signal {
   validation_status: string
   metadata: Record<string, string>
   created_at: ISOTimestamp | null
+  // Computed on-the-fly by the API (never stored) — see
+  // domain/strategy_engine/implied_sizing.py. implied_size_usdt is null when
+  // the strategy has no linked portfolio or that portfolio's capital was
+  // never configured (F-19: never fabricated). These are sizing SUGGESTIONS,
+  // not executed positions.
+  direction: string
+  implied_size_usdt: string | null
+  implied_leverage: string
 }
 
 // The engine's self-describing §10.3.7 result summary (Decimals already

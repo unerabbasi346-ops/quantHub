@@ -40,7 +40,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
-from quant_hub.api.dependencies import AssetRepo, OHLCVRepo
+from quant_hub.api.dependencies import AssetRepo, FundingRateRepo, OHLCVRepo
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
 from quant_hub.domain.market_data.correlation import compute_return_correlations
 
@@ -48,7 +48,13 @@ router = APIRouter(tags=["markets"])
 
 
 class AssetOut(BaseModel):
-    """API shape of a market_data.assets row — Doc 09 field names (snake_case)."""
+    """API shape of a market_data.assets row — Doc 09 field names (snake_case).
+
+    `instrument_type` (SPOT | PERPETUAL, migration e7a3c1f5b9d2 / S-10) lets a
+    client decide whether funding-rate data is even meaningful for this
+    instrument — a SPOT asset has no funding concept and the funding-rates
+    endpoint below legitimately returns an empty list for one, not an error.
+    """
 
     id: UUID
     symbol: str
@@ -57,6 +63,7 @@ class AssetOut(BaseModel):
     name: str | None
     currency: str
     is_active: bool
+    instrument_type: str = "SPOT"
 
 
 class OHLCVBarOut(BaseModel):
@@ -207,3 +214,46 @@ async def get_correlation(
             matrix=[list(row) for row in result.matrix],
         )
     )
+
+
+# ── Funding rates (perpetuals only) — Doc 14 §10.9.5 "Financing Costs" ──────
+# S-10: funding is a PERPETUAL-only cashflow series (market_data.funding_rates,
+# migration e7a3c1f5b9d2). A SPOT asset_id has no funding rows by construction
+# (nothing ever ingests them for SPOT) — this endpoint therefore returns an
+# honest empty list for a SPOT asset rather than a 400/404; the caller (asset's
+# own instrument_type, exposed above) is what decides whether to even show a
+# funding UI, not this endpoint refusing the request.
+class FundingRateOut(BaseModel):
+    """API shape of a market_data.funding_rates row — Doc 14 §10.9.5."""
+
+    asset_id: UUID
+    funding_time: datetime
+    funding_rate: Decimal
+    mark_price: Decimal | None = None
+    next_funding_time: datetime | None = None
+    interval_hours: int | None = None
+
+    @field_serializer("funding_rate", "mark_price", when_used="json")
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
+
+
+@router.get(
+    "/assets/{asset_id}/funding-rates",
+    response_model=ResponseEnvelope[list[FundingRateOut]],
+    summary="Get perpetual funding-rate history for an asset (empty for SPOT)",
+)
+async def get_asset_funding_rates(
+    asset_id: UUID,
+    asset_repo: AssetRepo,
+    funding_repo: FundingRateRepo,
+    limit: int = Query(100, ge=1, le=1000, description="Max most-recent funding observations"),
+) -> ResponseEnvelope[list[FundingRateOut]]:
+    if await asset_repo.get_by_id(asset_id) is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Asset {asset_id} not found",
+        )
+    rates = await funding_repo.get_funding_rates(asset_id, limit)
+    return ok([FundingRateOut.model_validate(r, from_attributes=True) for r in rates])

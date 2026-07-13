@@ -18,21 +18,32 @@ import {
   IChartApi,
   ISeriesApi,
   LineStyle,
+  MouseEventParams,
   SeriesMarker,
   Time,
   UTCTimestamp,
   createChart,
 } from 'lightweight-charts'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useReveal } from '@/lib/motion'
 import { useUIStore } from '@/lib/store/ui'
+import { cn } from '@/lib/utils/cn'
 import type { OHLCVBar } from '../types'
 
 // A real fill to overlay on the candles (owner request: BUY/SELL fill markers).
+// The three `implied*` fields are the real GET .../signals response fields
+// (direction/implied_size_usdt/implied_leverage — see
+// domain/strategy_engine/implied_sizing.py) for the signal that produced this
+// order's fill, joined in by the caller (MarketsShell). Undefined when the
+// order carries no signal_id or the signal couldn't be resolved — the
+// tooltip then simply omits that row rather than showing a fabricated value.
 export interface FillMarker {
   time: number // unix seconds
   side: 'BUY' | 'SELL'
+  direction?: string
+  impliedSizeUsdt?: string | null
+  impliedLeverage?: string
 }
 
 // Resolve a Doc 06 theme token (an HSL triplet CSS var, e.g. "152 60% 42%")
@@ -139,7 +150,21 @@ export function PriceChart({ bars, markers = [] }: { bars: OHLCVBar[]; markers?:
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
+  const markersRef = useRef<FillMarker[]>(markers)
+  // Half the gap between consecutive bars (seconds) — a marker's `time` is
+  // the fill's exact timestamp (e.g. 21:32:52), NOT snapped to a bar
+  // boundary, while the crosshair's `param.time` always snaps to the nearest
+  // bar's exact time (e.g. 21:00:00). An exact-equality lookup would never
+  // match, so the hover handler below buckets a marker to "the bar it falls
+  // within" using this tolerance instead of requiring equality.
+  const barSpacingRef = useRef(3600)
   const theme = useUIStore((s) => s.theme)
+  // Hover tooltip for a marker's implied sizing (direction/implied_size_usdt/
+  // implied_leverage) — LWC draws markers straight to canvas with no native
+  // per-marker hover hook, so this tracks the crosshair's snapped time/point
+  // and looks up any marker(s) whose real fill time falls within the hovered
+  // bar (same coordinate space `setMarkers` already uses below).
+  const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; markers: FillMarker[] } | null>(null)
   // Same 'cardContent' kind Chart.tsx's ECharts bridge uses for its own host —
   // this is the lightweight-charts engine's equivalent "Background" materialize
   // step (Doc 11 Animation Sequence), since LWC has no setOption-staging
@@ -167,13 +192,43 @@ export function PriceChart({ bars, markers = [] }: { bars: OHLCVBar[]; markers?:
     seriesRef.current = series
     volumeSeriesRef.current = volumeSeries
 
+    const onCrosshairMove = (param: MouseEventParams) => {
+      if (!param.time || !param.point) {
+        setHoverInfo(null)
+        return
+      }
+      const hoveredTime = param.time as number
+      const tolerance = barSpacingRef.current / 2
+      const nearby = markersRef.current.filter((m) => Math.abs(m.time - hoveredTime) <= tolerance)
+      if (nearby.length === 0) {
+        setHoverInfo(null)
+        return
+      }
+      setHoverInfo({ x: param.point.x, y: param.point.y, markers: nearby })
+    }
+    chart.subscribeCrosshairMove(onCrosshairMove)
+
     return () => {
+      chart.unsubscribeCrosshairMove(onCrosshairMove)
       chart.remove()
       chartRef.current = null
       seriesRef.current = null
       volumeSeriesRef.current = null
     }
   }, [])
+
+  // Keep the crosshair handler's marker lookup current without re-subscribing.
+  useEffect(() => {
+    markersRef.current = markers
+  }, [markers])
+
+  // Recompute the bar-bucketing tolerance whenever the series changes (a
+  // timeframe switch changes the gap from 1h to 4h/1D).
+  useEffect(() => {
+    if (bars.length < 2) return
+    const gap = Math.abs(Date.parse(bars[1].ts) - Date.parse(bars[0].ts)) / 1000
+    if (gap > 0) barSpacingRef.current = gap
+  }, [bars])
 
   // Feed data. parseFloat is deliberate: the API sends precision-preserving
   // Decimal STRINGS (shown exactly in the bars table), but a <canvas> plots
@@ -267,8 +322,38 @@ export function PriceChart({ bars, markers = [] }: { bars: OHLCVBar[]; markers?:
   }, [theme])
 
   return (
-    <motion.div {...reveal} className="h-[420px] w-full">
+    <motion.div {...reveal} className="relative h-[420px] w-full">
       <div ref={containerRef} className="h-full w-full" />
+      {hoverInfo && (
+        <div
+          className="pointer-events-none absolute z-10 min-w-[11rem] rounded-lg border border-border/50 bg-surface-raised/90 px-3 py-2 text-xs shadow-lg backdrop-blur-md"
+          style={{
+            left: Math.min(hoverInfo.x + 12, (containerRef.current?.clientWidth ?? 400) - 180),
+            top: Math.max(hoverInfo.y - 12, 8),
+          }}
+        >
+          {hoverInfo.markers.map((m, i) => (
+            <div key={i} className={cn(i > 0 && 'mt-2 border-t border-border/50 pt-2')}>
+              <div className={cn('font-semibold', m.side === 'BUY' ? 'text-profit' : 'text-risk')}>
+                {m.side === 'BUY' ? '▲ Buy fill' : '▼ Sell fill'}
+                {m.direction && <span className="ml-1.5 font-normal text-fg-subtle">· {m.direction}</span>}
+              </div>
+              {m.impliedSizeUsdt != null ? (
+                <div className="mt-0.5 font-mono text-fg-muted">
+                  implied size <span className="text-fg">{Number.parseFloat(m.impliedSizeUsdt).toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT</span>
+                </div>
+              ) : (
+                <div className="mt-0.5 text-fg-subtle">implied size — n/a</div>
+              )}
+              {m.impliedLeverage && (
+                <div className="font-mono text-fg-muted">
+                  leverage <span className="text-fg">{Number.parseFloat(m.impliedLeverage).toFixed(1)}x</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </motion.div>
   )
 }
