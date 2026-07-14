@@ -9,6 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from uuid import UUID
 
+from quant_hub.domain.analytics.entities import ComputedMetrics, EquityPoint
 from quant_hub.domain.backtesting.entities import BacktestConfig, BacktestResult
 
 
@@ -35,3 +36,26 @@ class BacktestRepository(ABC):
 
     @abstractmethod
     async def list_by_strategy(self, strategy_id: UUID) -> list[object]: ...
+
+    # F-21 (migration c7d3f9a2e5b8): the real per-step equity curve and its
+    # derived metric suite, closing the gap BacktestResult's docstring flags.
+    @abstractmethod
+    async def save_equity_curve(self, backtest_id: UUID, points: list[EquityPoint]) -> None:
+        """Persist the full per-step equity curve for one completed backtest."""
+        ...
+
+    @abstractmethod
+    async def save_computed_metrics(self, metrics: ComputedMetrics) -> None:
+        """Persist the Doc 14 §10.3.7 metric suite for one completed backtest."""
+        ...
+
+    @abstractmethod
+    async def get_computed_metrics(self, backtest_id: UUID) -> ComputedMetrics | None: ...
+
+    @abstractmethod
+    async def get_latest_completed_by_strategy(self, strategy_id: UUID) -> object | None:
+        """Most recently COMPLETED backtest row for `strategy_id`, or None if
+        the strategy has no completed backtest — the metrics API's "most
+        recent backtest run" lookup.
+        """
+        ...

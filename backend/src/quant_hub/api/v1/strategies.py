@@ -329,6 +329,80 @@ async def get_strategy_backtests(
     return ok([_serialize_backtest_row(row) for row in rows])
 
 
+class ComputedMetricsOut(BaseModel):
+    """API shape of analytics.backtest_computed_metrics (F-21, migration
+    c7d3f9a2e5b8) — the Doc 14 §10.3.7 metric suite for a strategy's most
+    recent COMPLETED backtest. Every field is `null` when it genuinely could
+    not be computed (see domain/analytics/metrics_engine.py's insufficient-
+    data gating and the infinite-profit_factor persistence note) — never a
+    fabricated number.
+    """
+
+    backtest_id: UUID
+    win_rate: Decimal | None
+    sharpe_ratio: Decimal | None
+    sortino_ratio: Decimal | None
+    max_drawdown_pct: Decimal | None
+    calmar_ratio: Decimal | None
+    profit_factor: Decimal | None
+    expectancy_per_trade: Decimal | None
+
+    @field_serializer(
+        "win_rate", "sharpe_ratio", "sortino_ratio", "max_drawdown_pct",
+        "calmar_ratio", "profit_factor", "expectancy_per_trade", when_used="json",
+    )
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
+
+
+@router.get(
+    "/strategies/{strategy_id}/metrics",
+    response_model=ResponseEnvelope[ComputedMetricsOut],
+    summary="Get computed performance metrics for a strategy's most recent completed backtest",
+)
+async def get_strategy_metrics(
+    strategy_id: UUID,
+    strategy_repo: StrategyRepo,
+    backtest_repo: BacktestRepo,
+) -> ResponseEnvelope[ComputedMetricsOut]:
+    if await strategy_repo.get_by_id(strategy_id) is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} not found",
+        )
+    latest = await backtest_repo.get_latest_completed_by_strategy(strategy_id)
+    if latest is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} has no completed backtest to compute metrics from",
+        )
+    metrics = await backtest_repo.get_computed_metrics(latest["id"])
+    if metrics is None:
+        # A COMPLETED backtest that predates this feature (ran before
+        # migration c7d3f9a2e5b8) has no computed-metrics row at all — every
+        # field renders as an honest null rather than raising.
+        return ok(
+            ComputedMetricsOut(
+                backtest_id=latest["id"], win_rate=None, sharpe_ratio=None, sortino_ratio=None,
+                max_drawdown_pct=None, calmar_ratio=None, profit_factor=None, expectancy_per_trade=None,
+            )
+        )
+    return ok(
+        ComputedMetricsOut(
+            backtest_id=metrics.backtest_run_id,
+            win_rate=metrics.win_rate,
+            sharpe_ratio=metrics.sharpe_ratio,
+            sortino_ratio=metrics.sortino_ratio,
+            max_drawdown_pct=metrics.max_drawdown_pct,
+            calmar_ratio=metrics.calmar_ratio,
+            profit_factor=metrics.profit_factor,
+            expectancy_per_trade=metrics.expectancy_per_trade,
+        )
+    )
+
+
 class StrategyStatusIn(BaseModel):
     """Body for the Activate/Deactivate control — a governed §10.2.6 transition."""
 

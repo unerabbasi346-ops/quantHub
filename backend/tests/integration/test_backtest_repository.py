@@ -19,6 +19,7 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from quant_hub.domain.analytics.entities import ComputedMetrics, EquityPoint
 from quant_hub.domain.backtesting.entities import BacktestConfig, BacktestResult
 from quant_hub.persistence.repositories.backtesting import SQLAlchemyBacktestRepository
 
@@ -115,3 +116,103 @@ async def test_list_by_strategy_running_backtest_has_null_metrics(
     assert rows[0]["trade_count"] is None
     assert rows[0]["results"] is None
     assert rows[0]["reproducibility_hash"] is None
+
+
+# ── F-21: equity curve + computed metrics (migration c7d3f9a2e5b8) ─────────
+
+async def test_save_and_read_equity_curve(db_session: AsyncSession) -> None:
+    repo = SQLAlchemyBacktestRepository(db_session)
+    strategy_id = await _mk_strategy(db_session)
+    backtest_id = await repo.create(_config(), strategy_id)
+    await repo.complete(backtest_id, _result())
+
+    points = [
+        EquityPoint(step=0, ts=_T0, portfolio_value=Decimal("1000000"), return_pct=Decimal("0")),
+        EquityPoint(step=1, ts=_T0 + timedelta(hours=1), portfolio_value=Decimal("1000500"), return_pct=Decimal("0.0005")),
+        EquityPoint(step=2, ts=_T0 + timedelta(hours=2), portfolio_value=Decimal("999800"), return_pct=Decimal("-0.0007")),
+    ]
+    await repo.save_equity_curve(backtest_id, points)
+
+    rows = (
+        await db_session.execute(
+            text(
+                "SELECT step, portfolio_value, return_pct FROM analytics.backtest_equity_curve "
+                "WHERE backtest_run_id = :id ORDER BY step"
+            ),
+            {"id": backtest_id},
+        )
+    ).all()
+    assert len(rows) == 3
+    assert rows[1].portfolio_value == Decimal("1000500.00000000")
+    assert rows[2].return_pct == Decimal("-0.00070000")
+
+
+async def test_save_and_read_computed_metrics(db_session: AsyncSession) -> None:
+    repo = SQLAlchemyBacktestRepository(db_session)
+    strategy_id = await _mk_strategy(db_session)
+    backtest_id = await repo.create(_config(), strategy_id)
+    await repo.complete(backtest_id, _result())
+
+    metrics = ComputedMetrics(
+        backtest_run_id=backtest_id,
+        win_rate=Decimal("0.55"),
+        sharpe_ratio=Decimal("1.234567"),
+        sortino_ratio=Decimal("1.5"),
+        max_drawdown_pct=Decimal("12.5"),
+        calmar_ratio=Decimal("0.8"),
+        profit_factor=Decimal("2.1"),
+        expectancy_per_trade=Decimal("15.50"),
+    )
+    await repo.save_computed_metrics(metrics)
+
+    fetched = await repo.get_computed_metrics(backtest_id)
+    assert fetched is not None
+    assert fetched.win_rate == Decimal("0.550000")
+    assert fetched.sharpe_ratio == Decimal("1.234567")
+    assert fetched.profit_factor == Decimal("2.100000")
+
+
+async def test_infinite_profit_factor_persists_as_null(db_session: AsyncSession) -> None:
+    # Postgres NUMERIC has no Infinity literal — an all-wins backtest's
+    # genuinely unbounded profit_factor (metrics_engine.compute_profit_factor)
+    # must round-trip as NULL, never raise or silently become 0.
+    repo = SQLAlchemyBacktestRepository(db_session)
+    strategy_id = await _mk_strategy(db_session)
+    backtest_id = await repo.create(_config(), strategy_id)
+    await repo.complete(backtest_id, _result())
+
+    metrics = ComputedMetrics(
+        backtest_run_id=backtest_id, win_rate=Decimal("1"), sharpe_ratio=None,
+        sortino_ratio=None, max_drawdown_pct=Decimal("0"), calmar_ratio=None,
+        profit_factor=Decimal("Infinity"), expectancy_per_trade=Decimal("10"),
+    )
+    await repo.save_computed_metrics(metrics)
+
+    fetched = await repo.get_computed_metrics(backtest_id)
+    assert fetched is not None
+    assert fetched.profit_factor is None
+
+
+async def test_get_latest_completed_by_strategy(db_session: AsyncSession) -> None:
+    repo = SQLAlchemyBacktestRepository(db_session)
+    strategy_id = await _mk_strategy(db_session)
+
+    running_id = await repo.create(_config(), strategy_id)  # never completed
+    completed_id = await repo.create(_config(), strategy_id)
+    await repo.complete(completed_id, _result())
+
+    latest = await repo.get_latest_completed_by_strategy(strategy_id)
+    assert latest is not None
+    assert latest["id"] == completed_id
+    assert latest["status"] == "COMPLETED"
+    assert running_id != latest["id"]
+
+
+async def test_get_latest_completed_by_strategy_none_when_no_completed_runs(
+    db_session: AsyncSession,
+) -> None:
+    repo = SQLAlchemyBacktestRepository(db_session)
+    strategy_id = await _mk_strategy(db_session)
+    await repo.create(_config(), strategy_id)  # RUNNING only
+
+    assert await repo.get_latest_completed_by_strategy(strategy_id) is None

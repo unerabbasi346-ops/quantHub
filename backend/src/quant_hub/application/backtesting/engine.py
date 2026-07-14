@@ -34,6 +34,8 @@ from quant_hub.application.execution.service import ExecutionService
 from quant_hub.application.execution.order_generation_service import OrderGenerationService
 from quant_hub.application.strategy_engine.signal_recording_service import SignalRecordingService
 from quant_hub.application.trading.cycle import TradingCycle
+from quant_hub.domain.analytics.entities import EquityPoint
+from quant_hub.domain.analytics.metrics_engine import compute_all_metrics
 from quant_hub.domain.backtesting.entities import BacktestConfig, BacktestResult
 from quant_hub.domain.backtesting.interfaces import BacktestRepository
 from quant_hub.domain.market_data.entities import AssetRef
@@ -120,6 +122,24 @@ class BacktestEngine:
         bars_processed = signals_generated = orders_created = orders_filled = orders_rejected = 0
         fills: list[tuple[str, str, str, str]] = []  # (bar_ts, side, quantity, price) — deterministic
 
+        # F-21 (migration c7d3f9a2e5b8): the real per-step equity curve this
+        # engine did not previously accumulate. Step 0 is the baseline
+        # (initial_capital, before any bar) so drawdown/return-series
+        # computation has a true starting peak, not an implicit one.
+        equity_points: list[EquityPoint] = [
+            EquityPoint(step=0, ts=config.start, portfolio_value=config.initial_capital, return_pct=_ZERO)
+        ]
+        # Realized P&L deltas from closing events — derived from the same
+        # real position math as the equity curve (position.realized_pnl_today
+        # only ACCUMULATES within one backtest run; nothing resets it mid-run,
+        # unlike the paper-trading runner's daily boundary), so a step's
+        # increase in realized_pnl_today IS exactly that step's fill(s)
+        # realized P&L. This needs no new schema/lineage — it reuses the
+        # existing Step 3.6 position math already running in this loop.
+        trade_pnls: list[Decimal] = []
+        prev_equity = config.initial_capital
+        prev_realized = _ZERO
+
         for i in range(len(all_bars)):
             bars_processed += 1
             bar = all_bars[i]
@@ -147,6 +167,26 @@ class BacktestEngine:
             orders_filled += outcome.orders_filled
             orders_rejected += outcome.orders_rejected
             fills.extend(outcome.fills)
+
+            # Mark-to-market at EVERY bar (not only fill bars) — a bar with no
+            # signal/order this step still needs its equity marked against
+            # the current price, or the curve would only move on fill bars.
+            position = await self._positions.get_by_portfolio_and_asset(portfolio_id, asset_id)
+            qty = position.quantity if position is not None else _ZERO
+            avg_entry = position.average_entry_price if position is not None else _ZERO
+            cur_realized = position.realized_pnl_today if position is not None else _ZERO
+            unrealized_mtm = (bar.close - avg_entry) * qty if qty != _ZERO else _ZERO
+            step_equity = config.initial_capital + cur_realized + unrealized_mtm
+            step_return = (step_equity - prev_equity) / prev_equity if prev_equity != _ZERO else _ZERO
+            equity_points.append(
+                EquityPoint(step=i + 1, ts=bar.ts, portfolio_value=step_equity, return_pct=step_return)
+            )
+            prev_equity = step_equity
+
+            step_realized_delta = cur_realized - prev_realized
+            if step_realized_delta != _ZERO:
+                trade_pnls.append(step_realized_delta)
+            prev_realized = cur_realized
 
         # Final marks from the position Step 3.6 maintains.
         final = await self._positions.get_by_portfolio_and_asset(portfolio_id, asset_id)
@@ -182,4 +222,15 @@ class BacktestEngine:
             reproducibility_hash=reproducibility_hash,
         )
         await self._backtests.complete(backtest_id, result)
+
+        # F-21: persist the real equity curve + its derived metric suite.
+        # Additive only — does not touch `result`/reproducibility_hash above.
+        await self._backtests.save_equity_curve(backtest_id, equity_points)
+        metrics = compute_all_metrics(
+            backtest_id,
+            [p.portfolio_value for p in equity_points],
+            trade_pnls,
+        )
+        await self._backtests.save_computed_metrics(metrics)
+
         return backtest_id, result

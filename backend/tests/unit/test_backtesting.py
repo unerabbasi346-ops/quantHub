@@ -186,12 +186,20 @@ class _FakeExecution:
 class _FakeBacktests:
     def __init__(self) -> None:
         self.result = None
+        self.equity_curve = None
+        self.computed_metrics = None
 
     async def create(self, config, strategy_id) -> UUID:
         return uuid7()
 
     async def complete(self, backtest_id, result) -> None:
         self.result = result
+
+    async def save_equity_curve(self, backtest_id, points) -> None:
+        self.equity_curve = points
+
+    async def save_computed_metrics(self, metrics) -> None:
+        self.computed_metrics = metrics
 
 
 def _engine(bars: list[OHLCVBar], execution=None):

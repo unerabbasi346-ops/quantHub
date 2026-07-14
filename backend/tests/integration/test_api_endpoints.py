@@ -380,3 +380,78 @@ async def test_strategy_orders_unknown_strategy_404(api) -> None:
     client, _ = api
     resp = await client.get("/v1/strategies/00000000-0000-0000-0000-000000000000/orders")
     assert resp.status_code == 404
+
+
+# ── GET /v1/strategies/{id}/metrics (F-21, migration c7d3f9a2e5b8) ─────────
+@pytest.mark.asyncio
+async def test_metrics_unknown_strategy_404(api) -> None:
+    client, _ = api
+    resp = await client.get("/v1/strategies/00000000-0000-0000-0000-000000000000/metrics")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_metrics_404s_when_no_completed_backtest(api) -> None:
+    client, session = api
+    sid = await _seed_strategy(session, "metrics-no-backtest-test")
+    resp = await client.get(f"/v1/strategies/{sid}/metrics")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_metrics_returns_real_computed_values(api) -> None:
+    client, session = api
+    sid = await _seed_strategy(session, "metrics-real-test")
+    bt_row = await session.execute(
+        text(
+            "INSERT INTO analytics.backtests "
+            "(strategy_id, name, status, config, start_date, end_date, initial_capital, completed_at) "
+            "VALUES (:sid, 'mt', 'COMPLETED', '{}'::jsonb, '2026-01-01', '2026-01-02', 100000, now()) "
+            "RETURNING id"
+        ),
+        {"sid": sid},
+    )
+    backtest_id = bt_row.scalar_one()
+    await session.execute(
+        text(
+            "INSERT INTO analytics.backtest_computed_metrics "
+            "(backtest_run_id, win_rate, sharpe_ratio, sortino_ratio, max_drawdown_pct, "
+            " calmar_ratio, profit_factor, expectancy_per_trade) "
+            "VALUES (:id, 0.6, 1.5, 2.0, 12.5, 0.8, 2.5, 10.25)"
+        ),
+        {"id": backtest_id},
+    )
+
+    resp = await client.get(f"/v1/strategies/{sid}/metrics")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["backtest_id"] == str(backtest_id)
+    assert data["win_rate"] == "0.600000"
+    assert data["sharpe_ratio"] == "1.500000"
+    assert data["profit_factor"] == "2.500000"
+
+
+@pytest.mark.asyncio
+async def test_metrics_completed_backtest_without_metrics_row_returns_nulls(api) -> None:
+    # A COMPLETED backtest that predates the metrics feature has no
+    # analytics.backtest_computed_metrics row — every field is an honest
+    # null, not a 404 and not a fabricated number.
+    client, session = api
+    sid = await _seed_strategy(session, "metrics-legacy-backtest-test")
+    bt_row = await session.execute(
+        text(
+            "INSERT INTO analytics.backtests "
+            "(strategy_id, name, status, config, start_date, end_date, initial_capital, completed_at) "
+            "VALUES (:sid, 'legacy', 'COMPLETED', '{}'::jsonb, '2026-01-01', '2026-01-02', 100000, now()) "
+            "RETURNING id"
+        ),
+        {"sid": sid},
+    )
+    backtest_id = bt_row.scalar_one()
+
+    resp = await client.get(f"/v1/strategies/{sid}/metrics")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["backtest_id"] == str(backtest_id)
+    assert data["sharpe_ratio"] is None
+    assert data["win_rate"] is None

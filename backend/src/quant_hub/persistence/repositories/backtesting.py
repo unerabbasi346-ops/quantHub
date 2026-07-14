@@ -10,13 +10,25 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import text
 
+from quant_hub.domain.analytics.entities import ComputedMetrics, EquityPoint
 from quant_hub.domain.backtesting.entities import BacktestConfig, BacktestResult
 from quant_hub.domain.backtesting.interfaces import BacktestRepository
 from quant_hub.persistence.repositories.base import BaseRepository
+
+
+def _finite_or_none(value: Decimal | None) -> Decimal | None:
+    """Postgres NUMERIC has no Infinity literal (unlike NaN) — a genuinely
+    unbounded metric (e.g. profit_factor with zero losing trades,
+    metrics_engine.compute_profit_factor's documented Decimal('Infinity'))
+    is stored as NULL rather than raising a DB error or fabricating a cap."""
+    if value is None or not value.is_finite():
+        return None
+    return value
 
 
 def _config_to_json(config: BacktestConfig) -> dict:
@@ -125,6 +137,104 @@ class SQLAlchemyBacktestRepository(BaseRepository[object], BacktestRepository):
                 """
             ),
             {"id": backtest_id},
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else dict(row)
+
+    async def save_equity_curve(self, backtest_id: UUID, points: list[EquityPoint]) -> None:
+        """Bulk-insert the full per-step equity curve (F-21, migration
+        c7d3f9a2e5b8). One INSERT per point — a backtest's bar count is
+        bounded (hundreds, not millions) so a single multi-row statement
+        isn't warranted; mirrors the per-row insert style every other
+        repository in this codebase uses (no ORM bulk helpers, Doc 09).
+        """
+        if not points:
+            return
+        stmt = text(
+            """
+            INSERT INTO analytics.backtest_equity_curve
+                (backtest_run_id, step, ts, portfolio_value, return_pct)
+            VALUES
+                (:backtest_run_id, :step, :ts, :portfolio_value, :return_pct)
+            """
+        )
+        for p in points:
+            await self._session.execute(
+                stmt,
+                {
+                    "backtest_run_id": backtest_id,
+                    "step": p.step,
+                    "ts": p.ts,
+                    "portfolio_value": p.portfolio_value,
+                    "return_pct": p.return_pct,
+                },
+            )
+
+    async def save_computed_metrics(self, metrics: ComputedMetrics) -> None:
+        stmt = text(
+            """
+            INSERT INTO analytics.backtest_computed_metrics
+                (backtest_run_id, win_rate, sharpe_ratio, sortino_ratio,
+                 max_drawdown_pct, calmar_ratio, profit_factor, expectancy_per_trade)
+            VALUES
+                (:backtest_run_id, :win_rate, :sharpe_ratio, :sortino_ratio,
+                 :max_drawdown_pct, :calmar_ratio, :profit_factor, :expectancy_per_trade)
+            """
+        )
+        await self._session.execute(
+            stmt,
+            {
+                "backtest_run_id": metrics.backtest_run_id,
+                "win_rate": metrics.win_rate,
+                "sharpe_ratio": metrics.sharpe_ratio,
+                "sortino_ratio": metrics.sortino_ratio,
+                "max_drawdown_pct": metrics.max_drawdown_pct,
+                "calmar_ratio": metrics.calmar_ratio,
+                "profit_factor": _finite_or_none(metrics.profit_factor),
+                "expectancy_per_trade": metrics.expectancy_per_trade,
+            },
+        )
+
+    async def get_computed_metrics(self, backtest_id: UUID) -> ComputedMetrics | None:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT backtest_run_id, win_rate, sharpe_ratio, sortino_ratio,
+                       max_drawdown_pct, calmar_ratio, profit_factor, expectancy_per_trade
+                FROM analytics.backtest_computed_metrics
+                WHERE backtest_run_id = :backtest_id
+                """
+            ),
+            {"backtest_id": backtest_id},
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return ComputedMetrics(
+            backtest_run_id=row["backtest_run_id"],
+            win_rate=row["win_rate"],
+            sharpe_ratio=row["sharpe_ratio"],
+            sortino_ratio=row["sortino_ratio"],
+            max_drawdown_pct=row["max_drawdown_pct"],
+            calmar_ratio=row["calmar_ratio"],
+            profit_factor=row["profit_factor"],
+            expectancy_per_trade=row["expectancy_per_trade"],
+        )
+
+    async def get_latest_completed_by_strategy(self, strategy_id: UUID) -> object | None:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, strategy_id, name, status, total_return, trade_count,
+                       final_capital, reproducibility_hash, results,
+                       started_at, completed_at, created_at
+                FROM analytics.backtests
+                WHERE strategy_id = :strategy_id AND status = 'COMPLETED'
+                ORDER BY completed_at DESC
+                LIMIT 1
+                """
+            ),
+            {"strategy_id": strategy_id},
         )
         row = result.mappings().one_or_none()
         return None if row is None else dict(row)
