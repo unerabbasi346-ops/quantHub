@@ -66,12 +66,17 @@ export interface HourBucket {
   count: number
 }
 
-// UTC hour-of-day breakdown of order creation — real timestamps, no binning
-// assumption beyond the 24 UTC hours themselves.
-export function computeOrdersByHour(orders: Order[]): HourBucket[] {
+// UTC hour-of-day breakdown of FILL activity — deliberately keyed off
+// Execution.executed_at (the real market/bar timestamp), not Order.created_at.
+// created_at is the wall-clock instant the backtest engine inserted the row
+// (every order from one backtest run lands within the same script
+// invocation), so bucketing by it would show "what hour the script ran", not
+// "what hour trades happened" — a batch-backtest artifact, not a trading
+// pattern. executed_at is bar-aligned and reflects real historical time.
+export function computeOrdersByHour(executions: Execution[]): HourBucket[] {
   const buckets = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }))
-  for (const o of orders) {
-    const hour = new Date(o.created_at).getUTCHours()
+  for (const e of executions) {
+    const hour = new Date(e.executed_at).getUTCHours()
     buckets[hour].count++
   }
   return buckets

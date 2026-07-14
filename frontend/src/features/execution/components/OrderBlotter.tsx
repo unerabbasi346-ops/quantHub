@@ -19,7 +19,7 @@ import {
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { num } from '../analytics'
-import type { Order, OrderStatus } from '../types'
+import type { Execution, Order, OrderStatus } from '../types'
 
 const fmtQty = (v: string) => Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 8 })
 const fmtPrice = (v: string | null) =>
@@ -57,18 +57,39 @@ function statusBadgeVariant(status: OrderStatus) {
 
 type BlotterFilter = 'ALL' | 'TODAY' | 'FILLED' | 'PENDING' | 'REJECTED'
 
-export function OrderBlotter({ orders }: { orders: Order[] }) {
+export function OrderBlotter({ orders, executions }: { orders: Order[]; executions: Execution[] }) {
   const [filter, setFilter] = useState<BlotterFilter>('ALL')
+
+  // Order.created_at is the wall-clock instant the backtest engine inserted
+  // the row (every order from one backtest run lands in the same script
+  // invocation, seconds apart) — not when the trade actually happened.
+  // Execution.executed_at is the real bar-aligned fill time, so it's used
+  // here wherever "when did this order trade" is shown/filtered, falling
+  // back to created_at only for the rare not-yet-filled order with no fill.
+  const executedAtByOrderId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const e of executions) map.set(e.order_id, e.executed_at)
+    return map
+  }, [executions])
+  const fillTime = (o: Order) => executedAtByOrderId.get(o.id) ?? o.created_at
+
+  const mostRecentFillTime = useMemo(
+    () => orders.reduce<string | null>((latest, o) => {
+      const t = fillTime(o)
+      return latest === null || new Date(t).getTime() > new Date(latest).getTime() ? t : latest
+    }, null),
+    [orders, executedAtByOrderId],
+  )
 
   const visible = useMemo(() => {
     switch (filter) {
-      case 'TODAY': return orders.filter((o) => isUtcToday(o.created_at))
+      case 'TODAY': return orders.filter((o) => isUtcToday(fillTime(o)))
       case 'FILLED': return orders.filter((o) => o.status === 'FILLED')
       case 'PENDING': return orders.filter((o) => PENDING_STATUSES.includes(o.status))
       case 'REJECTED': return orders.filter((o) => o.status === 'REJECTED')
       default: return orders
     }
-  }, [orders, filter])
+  }, [orders, filter, executedAtByOrderId])
 
   const columns = useMemo<InstitutionalColumnDef<Order>[]>(
     () => [
@@ -135,13 +156,16 @@ export function OrderBlotter({ orders }: { orders: Order[] }) {
       },
       {
         id: 'created_at',
-        header: 'Timestamp',
-        accessorFn: (o) => new Date(o.created_at).getTime(),
-        cell: ({ row }) => (
-          <span className="whitespace-nowrap text-fg-muted" title={fmtAbsolute(row.original.created_at)}>
-            {fmtRelative(row.original.created_at)}
-          </span>
-        ),
+        header: 'Fill time',
+        accessorFn: (o) => new Date(fillTime(o)).getTime(),
+        cell: ({ row }) => {
+          const t = fillTime(row.original)
+          return (
+            <span className="whitespace-nowrap text-fg-muted" title={fmtAbsolute(t)}>
+              {fmtRelative(t)}
+            </span>
+          )
+        },
       },
       {
         accessorKey: 'strategy_name',
@@ -153,14 +177,14 @@ export function OrderBlotter({ orders }: { orders: Order[] }) {
         meta: { hideBelow: 'laptop' },
       },
     ],
-    [],
+    [executedAtByOrderId],
   )
 
   return (
     <Section
       icon={<ListOrdered size={16} />}
       title="Order blotter"
-      description="Real orders for the selected strategy."
+      description="Real orders for the selected strategy. Fill time is the real market timestamp, not when the row was inserted."
       actions={
         <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-raised p-0.5">
           {(['ALL', 'TODAY', 'FILLED', 'PENDING', 'REJECTED'] as BlotterFilter[]).map((f) => (
@@ -180,6 +204,15 @@ export function OrderBlotter({ orders }: { orders: Order[] }) {
     >
       {orders.length === 0 ? (
         <EmptyState icon={<ListOrdered size={20} />} title="No orders" description="This strategy has generated no orders yet." />
+      ) : visible.length === 0 && filter === 'TODAY' ? (
+        <EmptyState
+          title="No fills today"
+          description={
+            mostRecentFillTime
+              ? `This strategy's orders are historical backtest replay, not live trading — its most recent fill was ${fmtAbsolute(mostRecentFillTime)} UTC.`
+              : 'Nothing matches the selected filter.'
+          }
+        />
       ) : visible.length === 0 ? (
         <EmptyState title="No orders in this state" description="Nothing matches the selected filter." />
       ) : (

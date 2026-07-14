@@ -17,6 +17,10 @@ export const marketsService = {
     apiClient.get<OHLCVBar[]>(
       `/v1/assets/${assetId}/bars?interval=${encodeURIComponent(interval)}&limit=${limit}`,
     ),
+  // Single most-recent bar, fetched live from the exchange (SPOT/PERPETUAL
+  // only) — powers the chart's 30s live-update poll, no WebSocket involved.
+  getLatestBar: (assetId: string, interval: string) =>
+    apiClient.get<OHLCVBar>(`/v1/assets/${assetId}/latest-bar?interval=${encodeURIComponent(interval)}`),
   // Price-return correlation matrix across ingested instruments (NOT risk).
   getCorrelation: (interval = '1h') =>
     apiClient.get<CorrelationMatrix>(`/v1/markets/correlation?interval=${encodeURIComponent(interval)}`),

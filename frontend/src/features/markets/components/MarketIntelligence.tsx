@@ -6,11 +6,28 @@
 'use client'
 
 import { Info, Sigma } from 'lucide-react'
-import { Badge, EmptyState, ErrorState, Panel, Section } from '@/components/ui'
+import { Badge, EmptyState, ErrorState, Panel, Section, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { fmtCompactVolume, type PriceStats } from '../analytics'
+import { fmtCompactVolume, momentumZone, type PriceStats } from '../analytics'
 import type { Asset, FundingRate } from '../types'
 import { FundingRateHistoryChart } from './charts'
+
+const MOMENTUM_LABEL: Record<ReturnType<typeof momentumZone>, string> = {
+  oversold: 'Oversold',
+  neutral: 'Neutral',
+  overbought: 'Overbought',
+}
+const MOMENTUM_VARIANT: Record<ReturnType<typeof momentumZone>, BadgeVariant> = {
+  oversold: 'profit',
+  neutral: 'neutral',
+  overbought: 'risk',
+}
+
+function volatilityTone(pct: number): 'profit' | 'warning' | 'risk' {
+  if (pct < 30) return 'profit'
+  if (pct <= 60) return 'warning'
+  return 'risk'
+}
 
 const fmtPrice = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -90,12 +107,11 @@ function PriceStatistics({ asset, stats, barCount }: { asset: Asset; stats: Pric
         <StatTile label="7-day avg volume" value={stats.avgVolume7d != null ? fmtCompactVolume(stats.avgVolume7d) : '—'} />
 
         <StatTile
-          label="Price vs 20-SMA"
+          label="Momentum"
           value={
-            stats.priceVsSma20Pct != null ? (
-              <Badge variant={stats.priceVsSma20Pct >= 0 ? 'profit' : 'risk'}>
-                {stats.priceVsSma20Pct >= 0 ? 'Above' : 'Below'} · {stats.priceVsSma20Pct >= 0 ? '+' : ''}
-                {stats.priceVsSma20Pct.toFixed(2)}%
+            stats.momentumZScore != null ? (
+              <Badge variant={MOMENTUM_VARIANT[momentumZone(stats.momentumZScore)]}>
+                {MOMENTUM_LABEL[momentumZone(stats.momentumZScore)]} · z={stats.momentumZScore.toFixed(2)}
               </Badge>
             ) : (
               '—'
@@ -105,7 +121,15 @@ function PriceStatistics({ asset, stats, barCount }: { asset: Asset; stats: Pric
         />
         <StatTile
           label="Volatility (ann.)"
-          value={stats.volatilityAnnualizedPct != null ? `${stats.volatilityAnnualizedPct.toFixed(1)}%` : '—'}
+          value={
+            stats.volatilityAnnualizedPct != null ? (
+              <Badge variant={volatilityTone(stats.volatilityAnnualizedPct)}>
+                {stats.volatilityAnnualizedPct.toFixed(1)}%
+              </Badge>
+            ) : (
+              '—'
+            )
+          }
           hint="stdev of last 20 hourly returns"
         />
       </Panel>

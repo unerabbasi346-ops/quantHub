@@ -88,7 +88,7 @@ export function ExecutionShell() {
         <>
           <ExecutionOverview orders={orders} executions={executions} />
           <AnalyticsGrid orders={orders} executions={executions} signals={signals} />
-          <OrderBlotter orders={orders} />
+          <OrderBlotter orders={orders} executions={executions} />
           <ExecutionQuality orders={allOrders} executions={executions} />
         </>
       )}

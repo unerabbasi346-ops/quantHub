@@ -40,9 +40,12 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
-from quant_hub.api.dependencies import AssetRepo, FundingRateRepo, OHLCVRepo, OpenInterestRepo
+from quant_hub.api.dependencies import AssetRepo, DbSession, FundingRateRepo, OHLCVRepo, OpenInterestRepo
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
+from quant_hub.application.market_data.service import MarketDataIngestionService
 from quant_hub.domain.market_data.correlation import compute_return_correlations
+from quant_hub.infrastructure.market_data.ccxt_connector import CCXTConnector
+from quant_hub.persistence.repositories.market_data import SQLAlchemyTickRepository
 
 router = APIRouter(tags=["markets"])
 
@@ -145,6 +148,66 @@ async def get_asset_bars(
         )
     bars = await bar_repo.get_bars(asset_id, interval, limit)
     return ok([OHLCVBarOut.model_validate(b, from_attributes=True) for b in bars])
+
+
+# ── Live latest bar (owner-requested — Markets page live-updating chart) ───
+# GET-only, no WebSocket: the frontend polls this every 30s and appends the
+# returned bar to its Lightweight Charts series, per Doc 11's real-CCXT-only
+# data-honesty rule (no synthetic ticks). Only meaningful for SPOT/PERPETUAL —
+# both are exchange-tradable instrument types CCXT can quote live; anything
+# else 400s rather than returning a fabricated bar. Reuses OHLCVBarOut (rather
+# than a bespoke shape) since the bar is persisted then re-read straight from
+# market_data.ohlcv_bars — same row shape as GET .../bars, so the frontend's
+# OHLCVBar type needs no separate live-bar variant.
+@router.get(
+    "/assets/{asset_id}/latest-bar",
+    response_model=ResponseEnvelope[OHLCVBarOut],
+    summary="Fetch the single most recent bar live from the exchange (SPOT/PERPETUAL only)",
+)
+async def get_asset_latest_bar(
+    asset_id: UUID,
+    asset_repo: AssetRepo,
+    ohlcv_repo: OHLCVRepo,
+    session: DbSession,
+    interval: str = Query("1h", description="Bar interval, e.g. '1h'"),
+) -> ResponseEnvelope[OHLCVBarOut]:
+    asset = await asset_repo.get_by_id(asset_id)
+    if asset is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Asset {asset_id} not found",
+        )
+    if asset.instrument_type not in ("SPOT", "PERPETUAL"):
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCode.VALIDATION_ERROR,
+            f"Asset {asset_id} ({asset.symbol}) is {asset.instrument_type} — "
+            "live latest-bar is only available for SPOT/PERPETUAL instruments",
+        )
+
+    connector = CCXTConnector(asset.exchange)
+    try:
+        ingestion = MarketDataIngestionService(
+            connector=connector,
+            assets=asset_repo,
+            ohlcv=ohlcv_repo,
+            ticks=SQLAlchemyTickRepository(session),
+        )
+        result = await ingestion.ingest_ohlcv(asset.symbol, interval, since=None, limit=1)
+    finally:
+        await connector.close()
+
+    if result.acquire_failed or result.persisted == 0:
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            ErrorCode.SERVICE_UNAVAILABLE,
+            f"Could not fetch a live bar for {asset.symbol} ({interval}) from {asset.exchange}",
+        )
+
+    await session.commit()
+    bar = (await ohlcv_repo.get_bars(asset_id, interval, limit=1))[-1]
+    return ok(OHLCVBarOut.model_validate(bar, from_attributes=True))
 
 
 # ── Price-return correlation (owner-requested standalone view) ──────────────

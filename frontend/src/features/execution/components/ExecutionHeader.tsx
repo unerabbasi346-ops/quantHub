@@ -111,8 +111,13 @@ export function ExecutionHeader({
   const avgFillSize = executions.length
     ? executions.reduce((s, e) => s + num(e.quantity) * num(e.price), 0) / executions.length
     : null
-  const ordersToday = orders.filter((o) => isUtcToday(o.created_at)).length
+  // "Today" is judged off Execution.executed_at (the real bar/fill time),
+  // not Order.created_at (the wall-clock backtest-insert time) — the latter
+  // would compare "when the script ran" to today's UTC date, which is
+  // consistently wrong for historical backtest data.
   const todaysFills = executions.filter((e) => isUtcToday(e.executed_at))
+  const fillsTodayOrderIds = new Set(todaysFills.map((e) => e.order_id))
+  const ordersToday = orders.filter((o) => fillsTodayOrderIds.has(o.id)).length
   const realizedToday = todaysFills.length
     ? todaysFills.reduce((s, e) => s + num(e.realized_pnl), 0)
     : null

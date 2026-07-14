@@ -21,8 +21,11 @@ export function AnalyticsGrid({
   signals: Signal[]
 }) {
   const notionals = computeFillNotionals(executions)
-  const hourBuckets = computeOrdersByHour(orders)
+  const hourBuckets = computeOrdersByHour(executions)
   const funnel = computeSignalFunnel(signals, orders)
+  const hourTotal = hourBuckets.reduce((s, b) => s + b.count, 0)
+  const maxBucket = hourBuckets.reduce((m, b) => Math.max(m, b.count), 0)
+  const batchConcentrated = hourTotal > 0 && maxBucket / hourTotal > 0.6
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -32,9 +35,15 @@ export function AnalyticsGrid({
         </Panel>
       </Section>
 
-      <Section icon={<Clock size={16} />} title="Order activity by hour" description="24h breakdown, UTC. Current hour highlighted.">
+      <Section icon={<Clock size={16} />} title="Fill activity by hour" description="24h breakdown of fill time (executed_at), UTC. Current hour highlighted.">
         <Panel className="p-4">
           <OrdersByHourChart buckets={hourBuckets} />
+          {batchConcentrated && (
+            <p className="mt-3 border-t border-border pt-3 text-[11px] leading-relaxed text-fg-subtle">
+              Concentrated in one hour — this strategy backtests on daily bars, so every fill lands at that bar&apos;s
+              00:00 UTC timestamp. Real intraday hour-of-day patterns require hourly-interval fills.
+            </p>
+          )}
         </Panel>
       </Section>
 

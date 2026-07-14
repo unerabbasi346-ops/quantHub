@@ -27,8 +27,8 @@ import { useOrders } from '@/features/execution/hooks/useExecution'
 import { useStrategies } from '@/features/strategies/hooks/useStrategies'
 import { strategiesService } from '@/features/strategies/services/strategies.service'
 import type { Signal } from '@/features/strategies/types'
-import { computePriceStats, num, rankByPerformance, rankByVolume } from '../analytics'
-import { useAllBars, useAssets, useBars, useFundingRates } from '../hooks/useMarkets'
+import { computePriceStats, mergeLatestBar, num, rankByPerformance, rankByVolume } from '../analytics'
+import { useAllBars, useAssets, useBars, useFundingRates, useLatestBar } from '../hooks/useMarkets'
 import type { Asset, OHLCVBar } from '../types'
 import type { FillMarker } from './PriceChart'
 import { AssetStatsStrip } from './AssetStatsStrip'
@@ -144,8 +144,30 @@ export function MarketsShell() {
   const activeId = selectedId ?? syncedId ?? firstAssetWithBars ?? assets[0]?.id ?? ''
   const activeAsset = assets.find((a) => a.id === activeId) ?? null
 
+  // The pill strip only makes sense for instruments that actually have
+  // ingested history — a dead ticker with zero bars can't show a price or
+  // change, so it's excluded from the strip rather than shown as a
+  // permanent "…" placeholder.
+  const assetsWithBars = useMemo(
+    () => assets.filter((a) => (barsByAssetId.get(a.id)?.length ?? 0) > 0),
+    [assets, barsByAssetId],
+  )
+
   const activeBars = barsByAssetId.get(activeId) ?? []
-  const view = resample(activeBars, tf)
+
+  // Live-updating chart (owner request) — polls the single most-recent 1h
+  // bar every 30s and folds it into the raw series before resampling, so
+  // 4h/1D views pick it up too. Restricted to instruments CCXT can actually
+  // quote live: binance-sourced SPOT/PERPETUAL (excludes the "sim" REGTEST
+  // asset, which has no real exchange behind it).
+  const canGoLive = activeAsset?.exchange === 'binance'
+    && (activeAsset.instrument_type === 'SPOT' || activeAsset.instrument_type === 'PERPETUAL')
+  const latestBarQuery = useLatestBar(activeId, '1h', Boolean(canGoLive))
+  const liveBars = useMemo(
+    () => mergeLatestBar(activeBars, latestBarQuery.data ?? null),
+    [activeBars, latestBarQuery.data],
+  )
+  const view = resample(liveBars, tf)
   const activeBarsQueryIndex = assets.findIndex((a) => a.id === activeId)
   const activeBarsQuery = activeBarsQueryIndex >= 0 ? allBarsQueries[activeBarsQueryIndex] : undefined
 
@@ -204,7 +226,7 @@ export function MarketsShell() {
 
       {activeAsset && (
         <>
-          <AssetStatsStrip assets={assets} barsByAssetId={barsByAssetId} selectedId={activeId} onSelect={selectAsset} />
+          <AssetStatsStrip assets={assetsWithBars} barsByAssetId={barsByAssetId} selectedId={activeId} onSelect={selectAsset} />
 
           <MarketChartSection
             asset={activeAsset}

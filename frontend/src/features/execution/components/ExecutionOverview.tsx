@@ -23,19 +23,28 @@ export function ExecutionOverview({ orders, executions }: { orders: Order[]; exe
   const statusDist = computeStatusDistribution(orders)
   const ratio = computeTradeRatio(executions)
   const decided = ratio.wins + ratio.losses
+  const allFilled = statusDist.length === 1 && statusDist[0].status === 'FILLED'
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <Section icon={<ListChecks size={16} />} title="Order status breakdown" description="Real lifecycle-state distribution (Doc 14 §10.7.4).">
         <Panel className="p-4">
           {statusDist.length > 0 ? (
-            <DonutChart
-              data={statusDist.map((s) => ({ name: s.status, value: s.count, tone: STATUS_TONE[s.status] }))}
-              height={260}
-              centerValue={String(orders.length)}
-              centerLabel="orders"
-              valueFormat={(v) => String(v)}
-            />
+            <>
+              <DonutChart
+                data={statusDist.map((s) => ({ name: s.status, value: s.count, tone: STATUS_TONE[s.status] }))}
+                height={260}
+                centerValue={String(orders.length)}
+                centerLabel="orders"
+                valueFormat={(v) => String(v)}
+              />
+              {allFilled && (
+                <p className="mt-3 border-t border-border pt-3 text-center text-[11px] text-fg-subtle">
+                  All orders filled (simulation) — this strategy&apos;s risk gate never rejected an order and every fill
+                  is a deterministic backtest replay, not a live venue response.
+                </p>
+              )}
+            </>
           ) : (
             <div style={{ height: 260 }} className="flex items-center justify-center text-sm text-fg-muted">
               No orders yet for this strategy.

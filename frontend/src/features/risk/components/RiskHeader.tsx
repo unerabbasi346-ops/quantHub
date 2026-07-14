@@ -7,17 +7,25 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, ShieldAlert } from 'lucide-react'
 import { StatCard } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import type { Portfolio, Position } from '@/features/portfolio/types'
+import type { Strategy } from '@/features/strategies/types'
+import type { Position } from '@/features/portfolio/types'
 import type { RiskLimit, RiskSnapshot } from '../types'
 import { computeMarginUtilization } from '../analytics'
 
-function PortfolioSelector({
-  portfolios,
+// Strategy-scoped selector (Execution page pattern) — every registered
+// strategy has portfolio_id=null (Doc 14 §10.7 gap), so picking by raw
+// portfolio surfaced dozens of ephemeral one-off backtest portfolios instead
+// of something a user could reason about. The strategy's own real orders
+// resolve which portfolio to show underneath (RiskShell), so this selector
+// is the primary control and the resolved portfolio is an implementation
+// detail, not something the user picks directly.
+function StrategySelector({
+  strategies,
   current,
   onSelect,
 }: {
-  portfolios: Portfolio[]
-  current: Portfolio | null
+  strategies: Strategy[]
+  current: Strategy | null
   onSelect: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -42,7 +50,7 @@ function PortfolioSelector({
         )}
       >
         <ShieldAlert size={16} className="shrink-0 text-fg-subtle" />
-        <span className="min-w-0 flex-1 truncate font-medium text-fg">{current?.name ?? 'Select portfolio…'}</span>
+        <span className="min-w-0 flex-1 truncate font-medium text-fg">{current?.name ?? 'Select strategy…'}</span>
         <ChevronDown size={16} className={cn('shrink-0 text-fg-subtle transition-transform duration-150', open && 'rotate-180')} />
       </button>
       {open && (
@@ -50,25 +58,25 @@ function PortfolioSelector({
           role="listbox"
           className="absolute left-0 right-0 top-full z-40 mt-1.5 animate-slide-down overflow-hidden rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
         >
-          <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-fg-subtle">Portfolios</p>
-          {portfolios.map((p) => {
-            const selected = p.id === current?.id
+          <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-fg-subtle">Registered strategies</p>
+          {strategies.map((s) => {
+            const selected = s.id === current?.id
             return (
               <button
-                key={p.id}
+                key={s.id}
                 type="button"
                 role="option"
                 aria-selected={selected}
                 onClick={() => {
                   setOpen(false)
-                  onSelect(p.id)
+                  onSelect(s.id)
                 }}
                 className={cn(
                   'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors',
                   selected ? 'bg-accent-soft text-accent' : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
                 )}
               >
-                <span className="truncate">{p.name}</span>
+                <span className="truncate">{s.name}</span>
                 {selected && <Check size={15} className="shrink-0" />}
               </button>
             )
@@ -80,25 +88,36 @@ function PortfolioSelector({
 }
 
 export function RiskHeader({
-  portfolios,
-  activePortfolio,
+  strategies,
+  activeStrategy,
   onSelect,
+  resolvedPortfolioName,
   snapshot,
   positions,
   limits,
+  configuredCapital,
 }: {
-  portfolios: Portfolio[]
-  activePortfolio: Portfolio | null
+  strategies: Strategy[]
+  activeStrategy: Strategy | null
   onSelect: (id: string) => void
+  resolvedPortfolioName: string | null
   snapshot: RiskSnapshot | null | undefined
   positions: Position[]
   limits: RiskLimit[]
+  configuredCapital: string | null
 }) {
-  const margin = activePortfolio ? computeMarginUtilization(positions, activePortfolio.configured_capital) : null
+  const margin = computeMarginUtilization(positions, configuredCapital)
 
   return (
     <div className="space-y-4">
-      <PortfolioSelector portfolios={portfolios} current={activePortfolio} onSelect={onSelect} />
+      <div className="flex flex-wrap items-center gap-2.5">
+        <StrategySelector strategies={strategies} current={activeStrategy} onSelect={onSelect} />
+        {resolvedPortfolioName && (
+          <span className="text-[11px] text-fg-subtle">
+            trading in <span className="font-mono text-fg-muted">{resolvedPortfolioName}</span>
+          </span>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
         <StatCard

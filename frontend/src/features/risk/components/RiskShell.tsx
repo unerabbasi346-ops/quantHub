@@ -38,6 +38,9 @@ import {
 import { cn } from '@/lib/utils/cn'
 import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio } from '@/features/portfolio/types'
+import { useOrdersByStrategy } from '@/features/execution/hooks/useExecution'
+import { useStrategies } from '@/features/strategies/hooks/useStrategies'
+import type { Strategy } from '@/features/strategies/types'
 import { PendingMetricTile } from '@/features/strategies/components/metric-tiles'
 import { useRiskAssessments, useRiskLimits, useRiskSnapshot } from '../hooks/useRisk'
 import type { PreTradeAssessment, RiskLimit, RiskSnapshot } from '../types'
@@ -46,7 +49,12 @@ import { ExposureOverview } from './ExposureOverview'
 import { PositionRiskGrid } from './PositionRiskGrid'
 import { OpenInterestMonitor } from './OpenInterestMonitor'
 
-const fmtTime = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+// Includes seconds: a batch backtest re-runs its risk gate for many orders
+// within the same second (real assessed_at values differing only at
+// millisecond precision — see analytics.risk_assessments), so a
+// minute-granularity timestamp made every row in a batch look identical even
+// though the underlying data isn't.
+const fmtTime = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 const fmtUtilPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(1)}%`)
 
 function limitStatusVariant(status: string | null): BadgeVariant {
@@ -59,11 +67,27 @@ function limitStatusVariant(status: string | null): BadgeVariant {
 }
 
 export function RiskShell() {
-  const portfoliosQuery = usePortfolios()
+  const strategiesQuery = useStrategies()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const strategies = strategiesQuery.data ?? []
+  const activeId = selectedId ?? strategies[0]?.id ?? ''
+  const activeStrategy = strategies.find((s) => s.id === activeId) ?? null
+
+  // Strategy-scoped, mirroring the Execution page: every registered strategy
+  // has portfolio_id=null (Doc 14 §10.7 gap), so a raw portfolio selector
+  // surfaced dozens of dead one-off backtest portfolios instead of the 2
+  // strategies that actually trade. The strategy's own most-recent real
+  // order resolves which portfolio to show underneath.
+  const ordersQuery = useOrdersByStrategy(activeId)
+  const orders = ordersQuery.data ?? []
+  const resolvedPortfolioId = useMemo(() => {
+    if (orders.length === 0) return null
+    return orders.reduce((latest, o) => (new Date(o.created_at) > new Date(latest.created_at) ? o : latest)).portfolio_id
+  }, [orders])
+
+  const portfoliosQuery = usePortfolios()
   const portfolios = portfoliosQuery.data ?? []
-  const activeId = selectedId ?? portfolios[0]?.id ?? ''
-  const activePortfolio = portfolios.find((p) => p.id === activeId) ?? null
+  const resolvedPortfolio = portfolios.find((p) => p.id === resolvedPortfolioId) ?? null
 
   return (
     <div className="space-y-8">
@@ -73,24 +97,41 @@ export function RiskShell() {
         subtitle="Exposure, concentration, open interest & pre-trade assessments — Phase 3/S-10 recorded state."
       />
 
-      {portfoliosQuery.isLoading && <div className="skeleton h-24 w-full" />}
-      {portfoliosQuery.isError && <ErrorState description="Could not load portfolios." onRetry={() => portfoliosQuery.refetch()} />}
-      {portfoliosQuery.isSuccess && portfolios.length === 0 && (
-        <EmptyState icon={<ShieldAlert size={20} />} title="No portfolios" description="No active portfolios exist yet." />
+      {strategiesQuery.isLoading && <div className="skeleton h-24 w-full" />}
+      {strategiesQuery.isError && <ErrorState description="Could not load strategies." onRetry={() => strategiesQuery.refetch()} />}
+      {strategiesQuery.isSuccess && strategies.length === 0 && (
+        <EmptyState icon={<ShieldAlert size={20} />} title="No strategies" description="No strategies are registered yet." />
       )}
 
-      {activePortfolio && <RiskBody portfolio={activePortfolio} portfolios={portfolios} onSelect={setSelectedId} />}
+      {activeStrategy && ordersQuery.isLoading && <div className="skeleton h-24 w-full" />}
+      {activeStrategy && !ordersQuery.isLoading && !resolvedPortfolioId && (
+        <EmptyState
+          icon={<ShieldAlert size={20} />}
+          title="No trading activity"
+          description={`${activeStrategy.name} hasn't generated any orders yet — risk metrics need at least one trade.`}
+        />
+      )}
+      {activeStrategy && resolvedPortfolio && (
+        <RiskBody
+          portfolio={resolvedPortfolio}
+          strategies={strategies}
+          activeStrategy={activeStrategy}
+          onSelect={setSelectedId}
+        />
+      )}
     </div>
   )
 }
 
 function RiskBody({
   portfolio,
-  portfolios,
+  strategies,
+  activeStrategy,
   onSelect,
 }: {
   portfolio: Portfolio
-  portfolios: Portfolio[]
+  strategies: Strategy[]
+  activeStrategy: Strategy
   onSelect: (id: string) => void
 }) {
   const snapshotQuery = useRiskSnapshot(portfolio.id)
@@ -102,19 +143,21 @@ function RiskBody({
   return (
     <div className="space-y-8">
       <RiskHeader
-        portfolios={portfolios}
-        activePortfolio={portfolio}
+        strategies={strategies}
+        activeStrategy={activeStrategy}
         onSelect={onSelect}
+        resolvedPortfolioName={portfolio.name}
         snapshot={snapshotQuery.data}
         positions={positions}
         limits={limits}
+        configuredCapital={portfolio.configured_capital}
       />
 
       <ExposureOverview positions={positions} configuredCapital={portfolio.configured_capital} />
 
       <PositionRiskGrid positions={positions} limits={limits} />
 
-      <OpenInterestMonitor />
+      <OpenInterestMonitor positions={positions} />
 
       <DeferredMetricsPanel snapshot={snapshotQuery.data} />
 
@@ -200,7 +243,10 @@ function Limits({ limits, query }: { limits: RiskLimit[]; query: ReturnType<type
       {query.isLoading && <SkeletonTable rows={3} cols={6} />}
       {query.isError && <ErrorState description="Could not load limits." onRetry={() => query.refetch()} />}
       {query.isSuccess && limits.length === 0 && (
-        <EmptyState title="No risk limits configured" description="No governed risk limits are configured for this portfolio — shown honestly rather than a fabricated default set." />
+        <EmptyState
+          title="No risk limits configured"
+          description="No governed risk limits are configured for this portfolio — shown honestly rather than a fabricated default set. Configurable metrics: gross/net exposure, leverage, position concentration, per-order notional (Doc 15 §11.5.7)."
+        />
       )}
       {query.isSuccess && limits.length > 0 && (
         <Panel className="overflow-hidden">

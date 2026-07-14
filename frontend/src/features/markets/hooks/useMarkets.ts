@@ -63,3 +63,17 @@ export function useOpenInterest(assetId: string, enabled: boolean) {
     enabled: Boolean(assetId) && enabled,
   })
 }
+
+// Live-updating chart, no WebSocket: polls the single most-recent bar every
+// 30s so the caller can append it to the chart series. `enabled` gates on the
+// caller already knowing this asset is SPOT/PERPETUAL (the endpoint 400s
+// otherwise) — same pattern as useFundingRates/useOpenInterest.
+export function useLatestBar(assetId: string, interval: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['latest-bar', assetId, interval],
+    queryFn: () => marketsService.getLatestBar(assetId, interval),
+    enabled: Boolean(assetId) && enabled,
+    refetchInterval: 30_000,
+    retry: 1,
+  })
+}

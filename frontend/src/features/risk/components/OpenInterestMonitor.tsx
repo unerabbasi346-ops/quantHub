@@ -12,6 +12,7 @@ import { Badge, EmptyState, ErrorState, Panel, Section } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { useAssets, useBars, useOpenInterest } from '@/features/markets/hooks/useMarkets'
 import type { Asset } from '@/features/markets/types'
+import type { Position } from '@/features/portfolio/types'
 import { computeOiDivergence } from '../analytics'
 import { OpenInterestPriceChart } from './charts'
 
@@ -41,7 +42,7 @@ function AssetDropdown({ assets, active, onSelect }: { assets: Asset[]; active: 
         <ChevronDown size={14} className={cn('text-fg-subtle transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1.5 max-h-72 w-56 overflow-y-auto rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg qh-scroll">
+        <div className="absolute right-0 top-full z-50 mt-1.5 max-h-72 w-56 overflow-y-auto rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg qh-scroll">
           {assets.map((a) => (
             <button
               key={a.id}
@@ -65,12 +66,24 @@ function AssetDropdown({ assets, active, onSelect }: { assets: Asset[]; active: 
   )
 }
 
-export function OpenInterestMonitor() {
+export function OpenInterestMonitor({ positions }: { positions: Position[] }) {
   const assetsQuery = useAssets()
   const assets = assetsQuery.data ?? []
   const perpetuals = assets.filter((a) => a.instrument_type === 'PERPETUAL')
+
+  // Default to the selected strategy's own perpetual exposure, if it holds
+  // one — this is what makes the section actually react to the strategy
+  // selector instead of always opening on BTC regardless of what's active.
+  // Falls back to BTC/USDT:USDT (then any perpetual) when the portfolio
+  // holds no perpetual position, so the section is never empty by default.
+  // The dropdown still lets the user browse any other perpetual manually.
+  const heldPerpAssetId = positions.find((p) => !p.is_closed && perpetuals.some((a) => a.id === p.asset_id))?.asset_id
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const active = perpetuals.find((a) => a.id === selectedId) ?? perpetuals.find((a) => a.symbol === 'BTC/USDT:USDT') ?? perpetuals[0] ?? null
+  const active = perpetuals.find((a) => a.id === selectedId)
+    ?? perpetuals.find((a) => a.id === heldPerpAssetId)
+    ?? perpetuals.find((a) => a.symbol === 'BTC/USDT:USDT')
+    ?? perpetuals[0]
+    ?? null
 
   const oiQuery = useOpenInterest(active?.id ?? '', Boolean(active))
   const oiRows = oiQuery.data ?? []

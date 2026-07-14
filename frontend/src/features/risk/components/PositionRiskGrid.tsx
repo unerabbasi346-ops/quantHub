@@ -18,20 +18,26 @@ import { ConcentrationChart, LeverageUtilizationChart } from './charts'
 // exactly the task-specified window. Real data, not a fabricated resample.
 const FUNDING_WINDOW_COUNT = 6
 
-function FundingRateMonitor() {
+function FundingRateMonitor({ positions }: { positions: Position[] }) {
   const assetsQuery = useAssets()
-  const btcPerp = (assetsQuery.data ?? []).find((a) => a.symbol === 'BTC/USDT:USDT')
-  const fundingQuery = useFundingRates(btcPerp?.id ?? '', Boolean(btcPerp))
+  const assets = assetsQuery.data ?? []
+  const perpetuals = assets.filter((a) => a.instrument_type === 'PERPETUAL')
+  // Defaults to the selected strategy's own held perpetual (so this section
+  // reacts to the selector), falling back to BTC/USDT:USDT when the
+  // portfolio holds no perpetual position.
+  const heldPerp = perpetuals.find((a) => positions.some((p) => !p.is_closed && p.asset_id === a.id))
+  const activePerp = heldPerp ?? perpetuals.find((a) => a.symbol === 'BTC/USDT:USDT')
+  const fundingQuery = useFundingRates(activePerp?.id ?? '', Boolean(activePerp))
   const allRates = fundingQuery.data ?? []
   const recent = allRates.slice(-FUNDING_WINDOW_COUNT)
   const latest = recent.at(-1)
   const latestPct = latest ? num(latest.funding_rate) * 100 : null
 
   return (
-    <Section icon={<Sigma size={16} />} title="Funding rate monitor" description="BTC/USDT:USDT, last 48h of 8h funding periods.">
+    <Section icon={<Sigma size={16} />} title="Funding rate monitor" description={activePerp ? `${activePerp.symbol}, last 48h of 8h funding periods.` : 'No perpetual instrument available.'}>
       <Panel className="p-4">
-        {!btcPerp ? (
-          <div className="flex h-[220px] items-center justify-center text-sm text-fg-muted">BTC/USDT:USDT is not registered.</div>
+        {!activePerp ? (
+          <div className="flex h-[220px] items-center justify-center text-sm text-fg-muted">No PERPETUAL instrument is registered.</div>
         ) : fundingQuery.isLoading ? (
           <div className="skeleton h-[220px] w-full" />
         ) : (
@@ -82,7 +88,7 @@ export function PositionRiskGrid({ positions, limits }: { positions: Position[];
         </Panel>
       </Section>
 
-      <FundingRateMonitor />
+      <FundingRateMonitor positions={positions} />
     </div>
   )
 }

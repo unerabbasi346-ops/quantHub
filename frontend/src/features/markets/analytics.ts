@@ -65,8 +65,16 @@ export interface PriceStats {
   return30d: number | null
   avgVolume7d: number | null
   sma20: number | null
-  priceVsSma20Pct: number | null
+  momentumZScore: number | null
   volatilityAnnualizedPct: number | null
+}
+
+export type MomentumZone = 'oversold' | 'neutral' | 'overbought'
+
+export function momentumZone(z: number): MomentumZone {
+  if (z < -1.5) return 'oversold'
+  if (z > 1.5) return 'overbought'
+  return 'neutral'
 }
 
 // All computed client-side from already-fetched bars — no new endpoints.
@@ -74,7 +82,7 @@ export interface PriceStats {
 // mean what their label says (N*24 bars).
 export function computePriceStats(bars: OHLCVBar[]): PriceStats {
   if (bars.length === 0) {
-    return { range7d: null, return30d: null, avgVolume7d: null, sma20: null, priceVsSma20Pct: null, volatilityAnnualizedPct: null }
+    return { range7d: null, return30d: null, avgVolume7d: null, sma20: null, momentumZScore: null, volatilityAnnualizedPct: null }
   }
 
   const last7d = bars.slice(-7 * 24)
@@ -90,7 +98,18 @@ export function computePriceStats(bars: OHLCVBar[]): PriceStats {
   const last20 = bars.slice(-20)
   const sma20 = last20.length === 20 ? last20.reduce((s, b) => s + num(b.close), 0) / 20 : null
   const currentPrice = num(bars.at(-1)!.close)
-  const priceVsSma20Pct = sma20 != null && sma20 !== 0 ? ((currentPrice - sma20) / sma20) * 100 : null
+
+  // Momentum z-score: (price - SMA20) / stdev(last 20 closes) — a
+  // volatility-normalized distance from the mean, not a raw % deviation.
+  // Oversold (<-1.5) / Neutral / Overbought (>1.5) thresholds per Doc 14
+  // §10.9's momentum-indicator convention.
+  let momentumZScore: number | null = null
+  if (sma20 != null && last20.length === 20) {
+    const closes = last20.map((b) => num(b.close))
+    const variance = closes.reduce((s, c) => s + (c - sma20) ** 2, 0) / closes.length
+    const stdDev = Math.sqrt(variance)
+    momentumZScore = stdDev !== 0 ? (currentPrice - sma20) / stdDev : null
+  }
 
   // Volatility: stdev of the last 20 simple bar-over-bar returns, annualized
   // by sqrt(8760) (hours/year) — honest for 1h-interval input; labeled
@@ -109,7 +128,22 @@ export function computePriceStats(bars: OHLCVBar[]): PriceStats {
     }
   }
 
-  return { range7d, return30d, avgVolume7d, sma20, priceVsSma20Pct, volatilityAnnualizedPct }
+  return { range7d, return30d, avgVolume7d, sma20, momentumZScore, volatilityAnnualizedPct }
+}
+
+// Merge a live-polled bar into an oldest->newest bar series: replaces the
+// last bar in place if it shares the same ts (the current, still-forming bar
+// got a fresher close/volume), appends if it's a genuinely new period, and is
+// a no-op if the live poll returned something stale (race with the next
+// regular bars refetch). Never fabricates a gap-filling bar in between.
+export function mergeLatestBar(bars: OHLCVBar[], latest: OHLCVBar | null): OHLCVBar[] {
+  if (!latest) return bars
+  if (bars.length === 0) return [latest]
+  const lastTs = Date.parse(bars[bars.length - 1].ts)
+  const latestTs = Date.parse(latest.ts)
+  if (latestTs === lastTs) return [...bars.slice(0, -1), latest]
+  if (latestTs > lastTs) return [...bars, latest]
+  return bars
 }
 
 // Compact volume formatter: 1.2B / 450M / 12.3K / 980.
