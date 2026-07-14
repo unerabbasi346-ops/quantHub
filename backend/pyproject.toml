@@ -60,6 +60,14 @@ quant = [
     "lightgbm>=4.5",
     "ccxt>=4.4",          # Doc 03: CCXT (exchange connectivity)
     "yfinance>=0.2",      # Doc 03: yfinance
+    # hmmlearn: backend/ml/ml_engine.py's HMMRegimeDetector imports
+    # `hmmlearn.hmm.GaussianHMM` at module scope — this was previously
+    # undeclared here, meaning `import ml_engine` raised ModuleNotFoundError
+    # unconditionally (found during the Task 0 ML folder audit). Added so
+    # the whole module (including the 2 other classes with no HMM
+    # dependency) actually imports.
+    "hmmlearn>=0.3",
+    "joblib>=1.4",        # ml_engine.py's BaseQuantModel.save_model/load_model
     # aiohttp: imported directly by ccxt_connector.py (Step 1.4) to supply a
     # ThreadedResolver session — see that file's "REAL-EXECUTION FINDING"
     # docstring. Was previously only a transitive dependency of ccxt.

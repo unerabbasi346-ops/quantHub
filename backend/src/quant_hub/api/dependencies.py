@@ -29,6 +29,7 @@ from quant_hub.domain.risk.interfaces import (
     RiskLimitRepository,
     RiskSnapshotRepository,
 )
+from quant_hub.domain.ml.interfaces import MLModelRepository
 from quant_hub.domain.strategy_engine.interfaces import SignalRepository, StrategyRepository
 from quant_hub.infrastructure.cache import get_redis
 from quant_hub.infrastructure.database import get_session
@@ -45,6 +46,7 @@ from quant_hub.persistence.repositories.market_data import (
     SQLAlchemyOHLCVRepository,
     SQLAlchemyOpenInterestRepository,
 )
+from quant_hub.persistence.repositories.ml_models import SQLAlchemyMLModelRepository
 from quant_hub.persistence.repositories.strategy_engine import (
     SQLAlchemySignalRepository,
     SQLAlchemyStrategyRepository,
@@ -139,6 +141,14 @@ def get_backtest_repository(session: DbSession) -> BacktestRepository:
 StrategyRepo = Annotated[StrategyRepository, Depends(get_strategy_repository)]
 SignalRepo = Annotated[SignalRepository, Depends(get_signal_repository)]
 BacktestRepo = Annotated[BacktestRepository, Depends(get_backtest_repository)]
+
+
+# ML model registry — the /api/ml router's train/predict endpoints.
+def get_ml_model_repository(session: DbSession) -> MLModelRepository:
+    return SQLAlchemyMLModelRepository(session)
+
+
+MLModelRepo = Annotated[MLModelRepository, Depends(get_ml_model_repository)]
 
 
 # Risk read repositories — Step 4.6 (Risk Vertical Slice). Reuse of Phase 3.4's

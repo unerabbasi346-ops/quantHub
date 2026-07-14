@@ -55,10 +55,14 @@ src/quant_hub/application/strategy_engine/engine.py
 src/quant_hub/application/strategy_engine/service.py
 src/quant_hub/application/strategy_engine/signal_recording_service.py
 src/quant_hub/application/strategy_engine/reference_strategies/__init__.py
+src/quant_hub/application/strategy_engine/reference_strategies/funding_rate_basis.py
 src/quant_hub/application/strategy_engine/reference_strategies/moving_average_crossover.py
 src/quant_hub/application/trading/__init__.py
 src/quant_hub/application/trading/cycle.py
 src/quant_hub/domain/__init__.py
+src/quant_hub/domain/analytics/__init__.py
+src/quant_hub/domain/analytics/entities.py
+src/quant_hub/domain/analytics/metrics_engine.py
 src/quant_hub/domain/auth/__init__.py
 src/quant_hub/domain/auth/interfaces.py
 src/quant_hub/domain/backtesting/__init__.py
@@ -74,6 +78,7 @@ src/quant_hub/domain/feature_engineering/interfaces.py
 src/quant_hub/domain/market_data/__init__.py
 src/quant_hub/domain/market_data/calendar.py
 src/quant_hub/domain/market_data/connectors.py
+src/quant_hub/domain/market_data/correlation.py
 src/quant_hub/domain/market_data/entities.py
 src/quant_hub/domain/market_data/interfaces.py
 src/quant_hub/domain/market_data/quality.py
@@ -101,6 +106,7 @@ src/quant_hub/domain/risk/interfaces.py
 src/quant_hub/domain/risk/pretrade.py
 src/quant_hub/domain/strategy_engine/__init__.py
 src/quant_hub/domain/strategy_engine/entities.py
+src/quant_hub/domain/strategy_engine/implied_sizing.py
 src/quant_hub/domain/strategy_engine/interfaces.py
 src/quant_hub/domain/strategy_engine/strategy.py
 src/quant_hub/domain/strategy_engine/validation.py

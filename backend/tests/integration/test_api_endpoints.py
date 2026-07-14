@@ -455,3 +455,140 @@ async def test_metrics_completed_backtest_without_metrics_row_returns_nulls(api)
     assert data["backtest_id"] == str(backtest_id)
     assert data["sharpe_ratio"] is None
     assert data["win_rate"] is None
+
+
+# ── GET /v1/strategies/{id}/signals ml_* fields (Task 2C) ──────────────────
+async def _seed_signal(session: AsyncSession, *, strategy_id: str, asset_id: str, value: str) -> str:
+    row = await session.execute(
+        text(
+            "INSERT INTO core.signals (strategy_id, asset_id, value, ts, validation_status) "
+            "VALUES (:sid, :aid, :v, now(), 'VALID') RETURNING id"
+        ),
+        {"sid": strategy_id, "aid": asset_id, "v": value},
+    )
+    return str(row.scalar_one())
+
+
+async def _seed_bars(session: AsyncSession, asset_id: str, n: int, interval: str = "1h") -> None:
+    from datetime import datetime, timedelta, timezone
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for i in range(n):
+        close = 100 + i * 0.5
+        await session.execute(
+            text(
+                "INSERT INTO market_data.ohlcv_bars "
+                "(asset_id, interval, ts, open, high, low, close, volume, adjustment_factor, data_quality) "
+                "VALUES (:aid, :interval, :ts, :c, :c, :c, :c, 1, 1, 'CLEAN')"
+            ),
+            {"aid": asset_id, "interval": interval, "ts": base + timedelta(hours=i), "c": close},
+        )
+
+
+@pytest.mark.asyncio
+async def test_signal_ml_fields_null_without_enough_bars(api) -> None:
+    # Even if a model happens to be deployed (real ambient state in this
+    # shared dev DB from other verification runs), fewer than 20 bars for
+    # the signal's asset must still yield honest nulls — never a
+    # fabricated TP/SL/confidence from insufficient history.
+    client, session = api
+    sid = await _seed_strategy(session, "ml-signals-no-bars-test")
+    aid = await _seed_asset(session, "MLNOBARS/USDT", "SPOT")
+    await _seed_signal(session, strategy_id=sid, asset_id=aid, value="0.5")
+    # Fewer than the 20-bar volatility window.
+    await _seed_bars(session, aid, n=5)
+
+    resp = await client.get(f"/v1/strategies/{sid}/signals")
+    assert resp.status_code == 200
+    signal = resp.json()["data"][0]
+    assert signal["ml_tp_suggestion"] is None
+    assert signal["ml_sl_suggestion"] is None
+    assert signal["ml_breakeven"] is None
+
+
+@pytest.mark.asyncio
+async def test_signal_ml_fields_populated_with_deployed_model_and_enough_bars(api) -> None:
+    client, session = api
+    sid = await _seed_strategy(session, "ml-signals-real-test")
+    aid = await _seed_asset(session, "MLREAL/USDT", "SPOT")
+    await _seed_signal(session, strategy_id=sid, asset_id=aid, value="0.7")
+    await _seed_bars(session, aid, n=25)
+
+    # Register a real, tiny, actually-trained model artifact (mirrors the
+    # /api/ml/train live path, done in-process here for test speed).
+    import random
+    import tempfile
+    from pathlib import Path
+
+    import pandas as pd
+
+    from quant_hub.ml.ml_engine import XGBoostMetaLabeler
+    from quant_hub.persistence.repositories.ml_models import SQLAlchemyMLModelRepository
+
+    rng = random.Random(7)
+    X = pd.DataFrame([[rng.gauss(0, 1)] for _ in range(30)], columns=["f0"])
+    y = pd.Series([1 if v > 0 else 0 for v in X["f0"]])
+    model = XGBoostMetaLabeler(params={"n_estimators": 10})
+    model.train(X, y)
+    artifact_path = str(Path(tempfile.gettempdir()) / f"test_ml_signal_{sid}.joblib")
+    model.save_model(artifact_path)
+
+    ml_repo = SQLAlchemyMLModelRepository(session)
+    await ml_repo.register_trained(
+        model_type="XGBoost_MetaLabeler", version=f"test-{sid}", framework="xgboost",
+        artifact_path=artifact_path, config={"n_estimators": 10}, metrics=None,
+    )
+
+    resp = await client.get(f"/v1/strategies/{sid}/signals")
+    assert resp.status_code == 200
+    signal = resp.json()["data"][0]
+    assert signal["ml_probability"] is not None
+    assert 0.0 <= float(signal["ml_probability"]) <= 1.0
+    assert signal["ml_confidence"] is not None
+    assert 0.5 <= float(signal["ml_confidence"]) <= 1.0
+    assert signal["ml_direction_agreement"] in (True, False)
+    entry = float(signal["ml_breakeven"])
+    assert float(signal["ml_tp_suggestion"]) > entry
+    assert float(signal["ml_sl_suggestion"]) < entry
+
+
+@pytest.mark.asyncio
+async def test_signal_ml_fields_null_when_deployed_model_feature_shape_mismatches(api) -> None:
+    # Real-world-verified case: a model trained via /api/ml/train with a
+    # richer feature set (e.g. 4 columns) rejects this endpoint's minimal
+    # 1-feature placeholder vector with sklearn's ValueError — must degrade
+    # to honest nulls, never a 500.
+    client, session = api
+    sid = await _seed_strategy(session, "ml-signals-mismatch-test")
+    aid = await _seed_asset(session, "MLMISMATCH/USDT", "SPOT")
+    await _seed_signal(session, strategy_id=sid, asset_id=aid, value="0.3")
+    await _seed_bars(session, aid, n=25)
+
+    import random
+    import tempfile
+    from pathlib import Path
+
+    import pandas as pd
+
+    from quant_hub.ml.ml_engine import XGBoostMetaLabeler
+    from quant_hub.persistence.repositories.ml_models import SQLAlchemyMLModelRepository
+
+    rng = random.Random(11)
+    X = pd.DataFrame([[rng.gauss(0, 1) for _ in range(4)] for _ in range(30)], columns=["f0", "f1", "f2", "f3"])
+    y = pd.Series([1 if row.sum() > 0 else 0 for _, row in X.iterrows()])
+    model = XGBoostMetaLabeler(params={"n_estimators": 10})
+    model.train(X, y)
+    artifact_path = str(Path(tempfile.gettempdir()) / f"test_ml_mismatch_{sid}.joblib")
+    model.save_model(artifact_path)
+
+    ml_repo = SQLAlchemyMLModelRepository(session)
+    await ml_repo.register_trained(
+        model_type="XGBoost_MetaLabeler", version=f"test-mismatch-{sid}", framework="xgboost",
+        artifact_path=artifact_path, config={"n_estimators": 10}, metrics=None,
+    )
+
+    resp = await client.get(f"/v1/strategies/{sid}/signals")
+    assert resp.status_code == 200
+    signal = resp.json()["data"][0]
+    assert signal["ml_probability"] is None
+    assert signal["ml_tp_suggestion"] is None

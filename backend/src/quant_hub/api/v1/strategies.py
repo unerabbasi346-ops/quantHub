@@ -40,11 +40,13 @@
 #     unbounded feed is neither useful nor safe to serialize wholesale.
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import pandas as pd
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
@@ -52,6 +54,8 @@ from quant_hub.api.dependencies import (
     AssetRepo,
     BacktestRepo,
     DbSession,
+    MLModelRepo,
+    OHLCVRepo,
     PortfolioRepo,
     PositionRepo,
     SignalRepo,
@@ -65,6 +69,8 @@ from quant_hub.domain.strategy_engine.implied_sizing import (
     compute_implied_leverage,
     compute_implied_size_usdt,
 )
+from quant_hub.ml.ml_engine import XGBoostMetaLabeler
+from quant_hub.ml.model_factory import create_model
 
 # The lifecycle states the Activate/Deactivate control may set (Doc 14
 # §10.2.6). Kept a small explicit allow-list — status is a free-form VARCHAR in
@@ -109,6 +115,65 @@ class StrategyOut(BaseModel):
         )
 
 
+@dataclass(frozen=True)
+class MLSignalInsights:
+    """Read-time-only ML enrichment for one signal — see SignalOut's ML
+    SUGGESTION FIELDS docstring for the full set of judgment calls this
+    represents. Never persisted anywhere.
+    """
+
+    confidence: Decimal | None
+    probability: Decimal | None
+    direction_agreement: bool | None
+    tp_suggestion: Decimal | None
+    sl_suggestion: Decimal | None
+    breakeven: Decimal | None
+
+
+_TP_STDEV_MULTIPLE = Decimal("2")    # flagged convention, see SignalOut docstring point 4
+_SL_STDEV_MULTIPLE = Decimal("1.5")  # flagged convention, see SignalOut docstring point 4
+_VOLATILITY_WINDOW = 20              # task spec: "20-period price std dev"
+
+
+def _compute_ml_insights(value: Decimal, model: XGBoostMetaLabeler, bars: list[Any]) -> MLSignalInsights | None:
+    """Real bars + a real (if minimally-featured) model prediction — never
+    fabricated. Returns None when fewer than _VOLATILITY_WINDOW bars exist
+    (an honest "not enough history" case, not a fabricated volatility), and
+    also None when the deployed model rejects the single-feature vector
+    (ValueError: real-world-verified case — a model trained via a richer
+    /api/ml/train call has more feature columns than this endpoint's
+    placeholder provides; see SignalOut docstring point 2). Degrading to
+    "no insights" is the honest outcome for a genuine feature-shape
+    mismatch, not a 500.
+    """
+    if len(bars) < _VOLATILITY_WINDOW:
+        return None
+    window = bars[-_VOLATILITY_WINDOW:]  # bars are oldest -> newest
+    closes = [b.close for b in window]
+    entry_price = closes[-1]
+    mean = sum(closes, Decimal(0)) / Decimal(len(closes))
+    variance = sum(((c - mean) ** 2 for c in closes), Decimal(0)) / Decimal(len(closes))
+    stdev = variance.sqrt()
+
+    # Minimal placeholder feature vector (signal.value only) — see SignalOut
+    # docstring point 2: no real feature-engineering pipeline exists yet.
+    X = pd.DataFrame([[float(value)]], columns=["f0"])
+    try:
+        probability = float(model.predict(X)[0])
+    except ValueError:
+        return None
+    confidence = max(probability, 1 - probability)
+
+    return MLSignalInsights(
+        confidence=Decimal(str(confidence)),
+        probability=Decimal(str(probability)),
+        direction_agreement=probability > 0.5,
+        tp_suggestion=entry_price + _TP_STDEV_MULTIPLE * stdev,
+        sl_suggestion=entry_price - _SL_STDEV_MULTIPLE * stdev,
+        breakeven=entry_price,
+    )
+
+
 class SignalOut(BaseModel):
     """API shape of a core.signals row — Doc 14 §10.6.4 (immutable signal
     event). `value` (NUMERIC signed conviction, Doc 15 §11.1.5) renders as a
@@ -137,6 +202,46 @@ class SignalOut(BaseModel):
     constraints). `implied_size_usdt` is null when the strategy has no
     linked portfolio or that portfolio has no configured_capital set (F-19:
     never fabricated from an assumed capital figure).
+
+    ── ML SUGGESTION FIELDS (task-scoped addition, heavily flagged) ────────
+    `ml_confidence`/`ml_probability`/`ml_direction_agreement` are populated
+    ONLY when a DEPLOYED analytics.ml_models row of type
+    "XGBoost_MetaLabeler" exists (api/ml.py's /train endpoint) — otherwise
+    every ml_* field is null (never a fabricated figure). Even when present:
+
+      1. NEVER WRITTEN TO Signal.metadata. Doc 14 §10.6.4 / P-1 docstring on
+         domain/strategy_engine/entities.py::Signal.metadata is explicit:
+         that field is the STRATEGY PLUGIN's own opaque space, recorded
+         verbatim and "NEVER interpreted" by the platform. Having THIS
+         platform-level ML feature write into it would violate that
+         contract on every signal, strategy-specific or not. These fields
+         are computed at READ TIME onto the API response instead — the
+         exact same pattern already established for direction/
+         implied_size_usdt/implied_leverage above, never persisted, never
+         touching core.signals.
+      2. NO REAL FEATURE-ENGINEERING PIPELINE EXISTS (Task 0 ML-folder
+         audit finding) to build the feature vector XGBoostMetaLabeler was
+         actually trained on. The single feature used here is the signal's
+         own `value` (conviction) — a deliberately minimal placeholder,
+         NOT a real feature set. A production deployment needs a real
+         feature pipeline before this number means anything; flagged
+         rather than silently fabricating additional "features".
+      3. ml_direction_agreement approximates "does ML agree with this
+         signal" as predicted_probability > 0.5 — XGBoostMetaLabeler is a
+         META-LABELER (predicts P(this already-decided trade is
+         profitable)), not a directional classifier, so it has no
+         independent "direction" opinion to compare against the signal's
+         sign. This is the closest honest proxy, not a literal agreement
+         check.
+      4. ml_tp_suggestion/ml_sl_suggestion are REAL: entry_price is the
+         latest real bar's close, volatility is the real sample stdev of
+         the last 20 real closes (get_bars_range/get_bars), TP = entry +
+         2×stdev, SL = entry − 1.5×stdev (a 2:1 reward:risk convention,
+         flagged constants — Doc 14 specifies no particular multiplier).
+         Both are null when fewer than 20 bars exist for the asset.
+      5. ml_breakeven = entry_price exactly. This platform's simulated
+         fills always carry zero commission (F-16) — an honest breakeven
+         estimate given real zero fees, not a fabricated fee assumption.
     """
 
     id: UUID
@@ -150,8 +255,18 @@ class SignalOut(BaseModel):
     direction: str
     implied_size_usdt: Decimal | None
     implied_leverage: Decimal
+    ml_confidence: Decimal | None = None
+    ml_probability: Decimal | None = None
+    ml_direction_agreement: bool | None = None
+    ml_tp_suggestion: Decimal | None = None
+    ml_sl_suggestion: Decimal | None = None
+    ml_breakeven: Decimal | None = None
 
-    @field_serializer("value", "implied_size_usdt", "implied_leverage", when_used="json")
+    @field_serializer(
+        "value", "implied_size_usdt", "implied_leverage", "ml_confidence",
+        "ml_probability", "ml_tp_suggestion", "ml_sl_suggestion", "ml_breakeven",
+        when_used="json",
+    )
     def _serialize_decimal(self, value: Decimal | None) -> str | None:
         return None if value is None else format(value, "f")
 
@@ -162,6 +277,7 @@ class SignalOut(BaseModel):
         *,
         configured_capital: Decimal | None,
         implied_leverage: Decimal,
+        ml_insights: "MLSignalInsights | None" = None,
     ) -> "SignalOut":
         direction = compute_direction(signal.value)
         assert_direction_matches_value(signal.value, direction)  # Task 4 consistency check
@@ -177,6 +293,12 @@ class SignalOut(BaseModel):
             direction=direction,
             implied_size_usdt=compute_implied_size_usdt(signal.value, configured_capital),
             implied_leverage=implied_leverage,
+            ml_confidence=ml_insights.confidence if ml_insights else None,
+            ml_probability=ml_insights.probability if ml_insights else None,
+            ml_direction_agreement=ml_insights.direction_agreement if ml_insights else None,
+            ml_tp_suggestion=ml_insights.tp_suggestion if ml_insights else None,
+            ml_sl_suggestion=ml_insights.sl_suggestion if ml_insights else None,
+            ml_breakeven=ml_insights.breakeven if ml_insights else None,
         )
 
 
@@ -251,6 +373,8 @@ async def get_strategy_signals(
     portfolio_repo: PortfolioRepo,
     asset_repo: AssetRepo,
     position_repo: PositionRepo,
+    bars_repo: OHLCVRepo,
+    ml_repo: MLModelRepo,
     limit: int = Query(100, ge=1, le=1000, description="Max most-recent signals"),
 ) -> ResponseEnvelope[list[SignalOut]]:
     # 404 on an unknown strategy so a client distinguishes "no such strategy"
@@ -300,11 +424,43 @@ async def get_strategy_signals(
             strategy.config, instrument_type=instrument_type, position_leverage=position_leverage
         )
 
+    # ── ML suggestion inputs (Task 2C) — see SignalOut's ML SUGGESTION
+    # FIELDS docstring for the full set of flagged judgment calls. Loaded
+    # ONCE per request (not per signal): the deployed model artifact and,
+    # per DISTINCT asset_id, its most recent _VOLATILITY_WINDOW bars.
+    ml_model: XGBoostMetaLabeler | None = None
+    ml_record = await ml_repo.get_latest_deployed("XGBoost_MetaLabeler")
+    if ml_record is not None:
+        try:
+            candidate = create_model("XGBoost_MetaLabeler", dict(ml_record.config))
+            candidate.load_model(ml_record.artifact_path)
+            ml_model = candidate
+        except (FileNotFoundError, OSError, ValueError):
+            # The registry row exists but its artifact file is missing/
+            # unreadable — degrade to "no model available" rather than a
+            # 500, matching the "never fabricated" mandate (no insights is
+            # honest; a crash is not).
+            ml_model = None
+
+    interval = str(strategy.config.get("interval", "1h"))
+    bars_by_asset: dict[UUID, list[Any]] = {}
+
+    async def _bars_for(asset_id: UUID) -> list[Any]:
+        if asset_id not in bars_by_asset:
+            bars_by_asset[asset_id] = await bars_repo.get_bars(asset_id, interval, limit=_VOLATILITY_WINDOW)
+        return bars_by_asset[asset_id]
+
     out: list[SignalOut] = []
     for s in signals:
         leverage = await _implied_leverage_for(s.asset_id)
+        ml_insights = None
+        if ml_model is not None:
+            asset_bars = await _bars_for(s.asset_id)
+            ml_insights = _compute_ml_insights(s.value, ml_model, asset_bars)
         out.append(
-            SignalOut.from_recorded(s, configured_capital=configured_capital, implied_leverage=leverage)
+            SignalOut.from_recorded(
+                s, configured_capital=configured_capital, implied_leverage=leverage, ml_insights=ml_insights
+            )
         )
     return ok(out)
 

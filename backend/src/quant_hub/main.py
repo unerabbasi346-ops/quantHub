@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from quant_hub.api.envelope import register_exception_handlers
 from quant_hub.api.middleware import RequestIDMiddleware
+from quant_hub.api.ml import router as ml_router
 from quant_hub.api.v1.router import api_router
 from quant_hub.config import settings
 from quant_hub.infrastructure.cache import redis_pool
@@ -60,3 +61,8 @@ register_exception_handlers(app)
 # Doc 07 §API Standards: version all endpoints — the aggregate /v1 router
 # (health + markets today; feature slices register in api/v1/router.py).
 app.include_router(api_router, prefix="/v1")
+
+# ML training/prediction surface — deliberately NOT under /v1 (see
+# api/ml.py's module docstring): a separate, explicitly-named path per task
+# instruction, not part of the versioned governed REST API.
+app.include_router(ml_router, prefix="/api/ml")
