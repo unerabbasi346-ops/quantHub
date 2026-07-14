@@ -66,6 +66,8 @@ export interface Backtest {
   strategy_id: UUID | null
   name: string
   status: string
+  start_date: ISOTimestamp | null
+  end_date: ISOTimestamp | null
   total_return: string | null
   trade_count: number | null
   final_capital: string | null

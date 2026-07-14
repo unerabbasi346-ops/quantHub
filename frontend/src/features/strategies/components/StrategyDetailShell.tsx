@@ -413,11 +413,18 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
             ) : (
               <>
                 <ConvictionEquityChart points={points} height={320} />
-                {latest?.total_return != null && (
-                  <div className="mt-3 flex justify-end">
-                    <Badge variant={retNum != null && retNum >= 0 ? 'profit' : 'risk'}>
-                      Latest backtest return · {fmtReturnPct(latest.total_return)}
-                    </Badge>
+                {(latest?.total_return != null || (latest?.start_date && latest?.end_date)) && (
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    {latest?.start_date && latest?.end_date && (
+                      <Badge variant="neutral">
+                        Backtest period · {fmtDate(latest.start_date)} → {fmtDate(latest.end_date)}
+                      </Badge>
+                    )}
+                    {latest?.total_return != null && (
+                      <Badge variant={retNum != null && retNum >= 0 ? 'profit' : 'risk'}>
+                        Latest backtest return · {fmtReturnPct(latest.total_return)}
+                      </Badge>
+                    )}
                   </div>
                 )}
               </>

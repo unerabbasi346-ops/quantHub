@@ -315,6 +315,8 @@ class BacktestOut(BaseModel):
     strategy_id: UUID | None
     name: str
     status: str
+    start_date: datetime | None
+    end_date: datetime | None
     total_return: Decimal | None
     trade_count: int | None
     final_capital: Decimal | None
@@ -330,8 +332,8 @@ class BacktestOut(BaseModel):
 
 
 def _serialize_backtest_row(row: dict[str, Any]) -> BacktestOut:
-    # The repo returns a plain dict (start_date/end_date etc. are not needed by
-    # the list view). model_validate maps the matching keys; extras ignored.
+    # The repo returns a plain dict including start_date/end_date (the
+    # backtest's requested window) — model_validate maps matching keys.
     return BacktestOut.model_validate(row)
 
 

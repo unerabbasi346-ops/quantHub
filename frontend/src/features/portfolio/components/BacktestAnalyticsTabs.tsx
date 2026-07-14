@@ -18,6 +18,7 @@ import { LongShortDonut } from './charts'
 const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
 const fmtMoney = (v: string | null) =>
   v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtDate = (ts: string | null) => (ts ? new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—')
 
 function OverviewTab({ backtest }: { backtest: Backtest | null }) {
   const results = backtest?.results ?? null
@@ -32,6 +33,10 @@ function OverviewTab({ backtest }: { backtest: Backtest | null }) {
 
   return (
     <Panel className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4">
+      <RealMetricTile
+        label="Backtest period"
+        value={backtest.start_date && backtest.end_date ? `${fmtDate(backtest.start_date)} → ${fmtDate(backtest.end_date)}` : '—'}
+      />
       <RealMetricTile label="Total return" value={fmtReturnPct(backtest.total_return)} tone={retNum == null ? 'default' : retNum >= 0 ? 'profit' : 'risk'} />
       <RealMetricTile label="Trade count" value={tradeCount ?? '—'} />
       <RealMetricTile label="Realized P&L" value={results ? fmtMoney(results.realized_pnl) : '—'} tone={realizedNum == null ? 'default' : realizedNum >= 0 ? 'profit' : 'risk'} />
