@@ -25,20 +25,18 @@ import {
   Bot,
   Brain,
   CandlestickChart,
+  Cpu,
+  Database,
   ShieldAlert,
-  Wallet,
 } from 'lucide-react'
-import { Badge, CryptoIcon, EmptyState, ErrorState, glassSurface, type BadgeVariant } from '@/components/ui'
+import { Badge, CryptoIcon, EmptyState, ErrorState, glassSurface, Ring, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatRatio, formatReturn } from '@/lib/utils/format'
+import { formatRatio, formatReturn, formatTimestamp } from '@/lib/utils/format'
 import { useReveal } from '@/lib/motion'
 import { useSyncStore } from '@/lib/store/sync'
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
 import { PriceChart } from '@/features/markets/components/PriceChart'
-import { usePortfolios } from '@/features/portfolio/hooks/usePortfolio'
-import { useOrders } from '@/features/execution/hooks/useExecution'
-import { useRiskSnapshot } from '@/features/risk/hooks/useRisk'
-import { useStrategies } from '@/features/strategies/hooks/useStrategies'
+import { useHermesHealth } from '@/features/hermes/hooks/useHermes'
 
 const num = (v: string) => Number.parseFloat(v)
 const fmtPrice = (v: string | number) =>
@@ -167,83 +165,85 @@ function EngineStatusRow({ icon, label, status, variant, detail, muted }: Engine
   )
 }
 
-function IntelligenceWorkspace() {
-  const strategiesQuery = useStrategies()
-  const portfoliosQuery = usePortfolios()
-  const portfolioId = portfoliosQuery.data?.[0]?.id ?? ''
-  const riskQuery = useRiskSnapshot(portfolioId)
-  const ordersQuery = useOrders(portfolioId)
+// Health-score ring tone — mirrors the System Health Strip gauge on the
+// Monitoring page (same 0-100 composite Hermes computes server-side).
+function healthTone(score: number): 'profit' | 'warning' | 'risk' {
+  if (score >= 80) return 'profit'
+  if (score >= 50) return 'warning'
+  return 'risk'
+}
 
-  const strategies = strategiesQuery.data ?? []
-  const activeStrategies = strategies.filter((s) => s.status === 'ACTIVE').length
-  const portfolios = portfoliosQuery.data ?? []
-  const snap = riskQuery.data ?? null
-  const orders = ordersQuery.data ?? []
-  const startOfDay = new Date()
-  startOfDay.setHours(0, 0, 0, 0)
-  const ordersToday = orders.filter((o) => new Date(o.created_at).getTime() >= startOfDay.getTime())
+function IntelligenceWorkspace() {
+  const healthQuery = useHermesHealth()
+  const health = healthQuery.data ?? null
 
   const reveal = useReveal('card')
   return (
     <motion.div {...reveal} className={cn(glassSurface('glow'), 'flex min-h-[26rem] flex-col p-5')}>
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-          <Brain size={16} />
-        </span>
-        <div>
-          <h2 className="text-sm font-semibold tracking-tight text-fg">Intelligence Workspace</h2>
-          <p className="mt-0.5 text-[11px] text-fg-subtle">Real status per operational engine</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+            <Brain size={16} />
+          </span>
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight text-fg">Intelligence Workspace</h2>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">Hermes system status — real, polled every 30s</p>
+          </div>
         </div>
+        {health && (
+          <Ring
+            value={health.health_score / 100}
+            size={44}
+            thickness={5}
+            tone={healthTone(health.health_score)}
+            centerLabel={String(Math.round(health.health_score))}
+          />
+        )}
       </div>
 
       <div className="mt-4 flex flex-1 flex-col gap-2.5">
         <EngineStatusRow
           icon={<Brain size={15} />}
           label="Strategy Engine"
-          status={strategiesQuery.isLoading ? '…' : strategiesQuery.isError ? 'error' : `${activeStrategies} active`}
-          variant={strategiesQuery.isError ? 'risk' : activeStrategies > 0 ? 'profit' : 'neutral'}
-          detail={strategiesQuery.isSuccess ? `${strategies.length} registered strategies` : 'core.strategies'}
+          status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.strategy_engine.active_count} active`}
+          variant={healthQuery.isError ? 'risk' : health && health.strategy_engine.active_count > 0 ? 'profit' : 'neutral'}
+          detail={health ? `${health.strategy_engine.signals_24h} signals · 24h` : 'hermes/health'}
         />
         <EngineStatusRow
-          icon={<Wallet size={15} />}
-          label="Portfolio Engine"
-          status={portfoliosQuery.isLoading ? '…' : portfoliosQuery.isError ? 'error' : `${portfolios.length} tracked`}
-          variant={portfoliosQuery.isError ? 'risk' : portfolios.length > 0 ? 'profit' : 'neutral'}
-          detail={portfolios[0] ? portfolios[0].name : 'core.portfolios'}
+          icon={<Database size={15} />}
+          label="Data Pipeline"
+          status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.data_pipeline.fresh_count} fresh`}
+          variant={healthQuery.isError ? 'risk' : health && health.data_pipeline.dead_count > 0 ? 'warning' : 'profit'}
+          detail={health ? `${health.data_pipeline.stale_count} stale · ${health.data_pipeline.dead_count} dead` : 'hermes/health'}
+        />
+        <EngineStatusRow
+          icon={<Cpu size={15} />}
+          label="ML Engine"
+          status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.ml_engine.trained_count} trained`}
+          variant={healthQuery.isError ? 'risk' : health && health.ml_engine.trained_count > 0 ? 'profit' : 'neutral'}
+          detail={
+            health?.ml_engine.last_accuracy != null
+              ? `last accuracy ${formatRatio(health.ml_engine.last_accuracy)}`
+              : 'analytics.ml_models'
+          }
         />
         <EngineStatusRow
           icon={<ShieldAlert size={15} />}
           label="Risk Engine"
-          status={
-            !portfolioId
-              ? '—'
-              : riskQuery.isLoading
-                ? '…'
-                : riskQuery.isError
-                  ? 'error'
-                  : snap
-                    ? snap.breaches.length > 0
-                      ? `${snap.breaches.length} breach`
-                      : 'OK'
-                    : 'no snapshot'
-          }
-          variant={riskQuery.isError ? 'risk' : snap && snap.breaches.length > 0 ? 'risk' : snap ? 'profit' : 'neutral'}
-          detail={snap ? `Gross lev. ${num(snap.gross_leverage).toFixed(2)}×` : 'risk.snapshots'}
+          status="Operational"
+          variant="neutral"
+          detail="No real-time risk status is wired to Hermes yet — pre-trade assessments run per order (see Risk page)."
         />
         <EngineStatusRow
           icon={<ArrowLeftRight size={15} />}
           label="Execution Engine"
-          status={
-            !portfolioId
-              ? '—'
-              : ordersQuery.isLoading
-                ? '…'
-                : ordersQuery.isError
-                  ? 'error'
-                  : `${ordersToday.length} today`
+          status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.execution_engine.orders_today} today`}
+          variant={healthQuery.isError ? 'risk' : health && health.execution_engine.orders_today > 0 ? 'info' : 'neutral'}
+          detail={
+            health?.execution_engine.fill_rate_today != null
+              ? `${formatRatio(health.execution_engine.fill_rate_today)} filled`
+              : 'core.orders'
           }
-          variant={ordersQuery.isError ? 'risk' : ordersToday.length > 0 ? 'info' : 'neutral'}
-          detail="execution.orders"
         />
 
         <div className="my-1 h-px bg-border" />
@@ -260,6 +260,13 @@ function IntelligenceWorkspace() {
           detail="No AI backend is integrated yet — this is a permanent honest state, not a loading placeholder."
           muted
         />
+      </div>
+
+      <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-[11px] text-fg-subtle">
+        {healthQuery.isError && <ErrorState description="Could not load Hermes status." onRetry={() => healthQuery.refetch()} />}
+        {!healthQuery.isError && (
+          <span>{health ? `Last updated ${formatTimestamp(health.generated_at)}` : 'Loading Hermes status…'}</span>
+        )}
       </div>
     </motion.div>
   )
