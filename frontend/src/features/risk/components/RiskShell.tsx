@@ -2,17 +2,26 @@
 //   §Layout / §Data Visualization; §Interaction Standards.
 // Doc 08 — Frontend Architecture (QH-008 v1.0) §Architecture / §State Management.
 // Doc 14 §10.7.5 — Pre-Trade Risk Check; Doc 15 §11.5.3/§11.5.7/§11.5.8.
-// Per Doc 00 §14.11
+// handbook/ui/10_RISK_ENGINEERING.md — aspirational institutional risk
+//   terminal vision (Risk Hero/Exposure/Drawdown/Correlation/Leverage/
+//   Scenario/Timeline/Intelligence) — scoped down to what's genuinely
+//   computable from real data today, same discipline as every other page
+//   rebuild this session. Per Doc 00 §14.11
 //
-// REDESIGN + FEATURES (owner push): a ring gauge for directional exposure and
-// stat tiles for the REAL computed §11.5.3 exposure/leverage; the honest F-18
-// deferred-metrics panel is retained (never faked as 0); and the standalone
-// price-correlation matrix is composed at the bottom — explicitly labeled as
-// market correlation, NOT portfolio risk (unrelated to F-18).
+// DENSE RISK REBUILD (owner request) — six sections: (1) portfolio selector
+// + real-data pill strip; (2) exposure gauge + cross-asset correlation
+// (moved here from Markets as its primary home, Markets keeps a compact
+// copy); (3) 3-column position risk grid (concentration/leverage/funding);
+// (4) NEW open-interest-vs-price monitor with divergence signals; (5) the
+// existing pre-trade assessment master-detail inspector (verified, kept);
+// (6) risk limits + needs-attention, with the F-18 deferred metrics shown as
+// honest "Pending F-18" shells (same established pattern as Strategy/
+// Portfolio — NOT "Computing…", which would imply progress that isn't
+// happening; see metric-tiles.tsx's own docstring for why).
 'use client'
 
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Check, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { AlertTriangle, Check, Gauge as GaugeIcon, ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import {
   Badge,
   EmptyState,
@@ -24,20 +33,21 @@ import {
   Ring,
   Section,
   SkeletonTable,
-  StatCard,
   type BadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { usePortfolios } from '@/features/portfolio/hooks/usePortfolio'
+import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio } from '@/features/portfolio/types'
-import { CorrelationMatrix } from '@/features/markets/components/CorrelationMatrix'
+import { PendingMetricTile } from '@/features/strategies/components/metric-tiles'
 import { useRiskAssessments, useRiskLimits, useRiskSnapshot } from '../hooks/useRisk'
 import type { PreTradeAssessment, RiskLimit, RiskSnapshot } from '../types'
+import { RiskHeader } from './RiskHeader'
+import { ExposureOverview } from './ExposureOverview'
+import { PositionRiskGrid } from './PositionRiskGrid'
+import { OpenInterestMonitor } from './OpenInterestMonitor'
 
-const fmtMoney = (v: string) => Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtLeverage = (v: string) => `${Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 6 })}×`
-const fmtUtilPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(1)}%`)
 const fmtTime = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+const fmtUtilPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(1)}%`)
 
 function limitStatusVariant(status: string | null): BadgeVariant {
   switch (status) {
@@ -56,126 +66,95 @@ export function RiskShell() {
   const activePortfolio = portfolios.find((p) => p.id === activeId) ?? null
 
   return (
-    <div className="space-y-14">
+    <div className="space-y-8">
       <PageHeader
         icon={<ShieldAlert size={18} />}
         title="Risk"
-        subtitle="Exposure, limits, pre-trade assessments & market correlation — Phase 3 data."
+        subtitle="Exposure, concentration, open interest & pre-trade assessments — Phase 3/S-10 recorded state."
       />
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[16rem_1fr]">
-        <Section title="Portfolios" actions={portfoliosQuery.isSuccess ? <Badge variant="neutral">{portfolios.length}</Badge> : null}>
-          {portfoliosQuery.isLoading && <div className="skeleton h-24 w-full" />}
-          {portfoliosQuery.isError && <ErrorState description="Could not load portfolios." onRetry={() => portfoliosQuery.refetch()} />}
-          <div className="space-y-1">
-            {portfolios.map((p) => {
-              const selected = p.id === activeId
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedId(p.id)}
-                  className={cn(
-                    'flex w-full flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors duration-150',
-                    selected ? 'border-accent/40 bg-accent-soft text-accent' : 'border-transparent text-fg-muted hover:bg-surface-hover hover:text-fg',
-                  )}
-                >
-                  <span className="truncate text-sm font-medium">{p.name}</span>
-                  <span className="text-[11px] uppercase tracking-wide text-fg-subtle">{p.portfolio_type} · {p.base_currency}</span>
-                </button>
-              )
-            })}
-          </div>
-        </Section>
+      {portfoliosQuery.isLoading && <div className="skeleton h-24 w-full" />}
+      {portfoliosQuery.isError && <ErrorState description="Could not load portfolios." onRetry={() => portfoliosQuery.refetch()} />}
+      {portfoliosQuery.isSuccess && portfolios.length === 0 && (
+        <EmptyState icon={<ShieldAlert size={20} />} title="No portfolios" description="No active portfolios exist yet." />
+      )}
 
-        <div className="min-w-0 space-y-14">
-          {activePortfolio ? (
-            <>
-              <Snapshot portfolio={activePortfolio} />
-              <NeedsAttention portfolio={activePortfolio} />
-              <Limits portfolio={activePortfolio} />
-              <Assessments portfolio={activePortfolio} />
-              <CorrelationMatrix />
-            </>
-          ) : (
-            !portfoliosQuery.isLoading && !portfoliosQuery.isError && (
-              <EmptyState icon={<ShieldAlert size={20} />} title="No portfolio selected" description="Select a portfolio to view its risk." />
-            )
-          )}
-        </div>
-      </div>
+      {activePortfolio && <RiskBody portfolio={activePortfolio} portfolios={portfolios} onSelect={setSelectedId} />}
     </div>
   )
 }
 
-function Snapshot({ portfolio }: { portfolio: Portfolio }) {
-  const query = useRiskSnapshot(portfolio.id)
-  const snapshot: RiskSnapshot | null | undefined = query.data
-
-  const gross = snapshot ? Number.parseFloat(snapshot.gross_exposure) : 0
-  const net = snapshot ? Number.parseFloat(snapshot.net_exposure) : 0
-  const directional = gross > 0 ? Math.abs(net) / gross : 0
+function RiskBody({
+  portfolio,
+  portfolios,
+  onSelect,
+}: {
+  portfolio: Portfolio
+  portfolios: Portfolio[]
+  onSelect: (id: string) => void
+}) {
+  const snapshotQuery = useRiskSnapshot(portfolio.id)
+  const limitsQuery = useRiskLimits(portfolio.id)
+  const positionsQuery = usePositions(portfolio.id)
+  const positions = positionsQuery.data ?? []
+  const limits = limitsQuery.data ?? []
 
   return (
-    <Section
-      title="Risk snapshot"
-      description={snapshot ? `As of ${fmtTime(snapshot.snapshot_at)}` : undefined}
-      actions={snapshot ? (snapshot.breaches.length > 0 ? <Badge variant="risk">{snapshot.breaches.length} breach</Badge> : <Badge variant="profit">OK</Badge>) : null}
-    >
-      {query.isLoading && <div className="skeleton h-40 w-full" />}
-      {query.isError && <ErrorState description="Could not load snapshot." onRetry={() => query.refetch()} />}
-      {query.isSuccess && !snapshot && (
-        <EmptyState icon={<ShieldAlert size={20} />} title="No risk snapshot" description="No snapshot has been computed for this portfolio yet." />
-      )}
-      {snapshot && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[auto_1fr]">
-          <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-border-strong bg-surface-raised px-8 py-6 shadow-lg">
-            <Ring value={directional} tone="info" centerLabel={`${Math.round(directional * 100)}%`} centerSub="directional" />
-            <p className="text-xs text-fg-muted">|net| / gross exposure</p>
-            <p className="text-[11px] text-fg-subtle">Gross leverage {fmtLeverage(snapshot.gross_leverage)}</p>
-          </div>
+    <div className="space-y-8">
+      <RiskHeader
+        portfolios={portfolios}
+        activePortfolio={portfolio}
+        onSelect={onSelect}
+        snapshot={snapshotQuery.data}
+        positions={positions}
+        limits={limits}
+      />
 
-          <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <StatCard label="Gross exposure" value={fmtMoney(snapshot.gross_exposure)} />
-              <StatCard label="Net exposure" value={fmtMoney(snapshot.net_exposure)} />
-              <StatCard label="Gross leverage" value={fmtLeverage(snapshot.gross_leverage)} />
-              <StatCard label="Net leverage" value={fmtLeverage(snapshot.net_leverage)} />
-            </div>
+      <ExposureOverview positions={positions} configuredCapital={portfolio.configured_capital} />
 
-            {snapshot.deferred_metrics.length > 0 && (
-              <div className="rounded-xl border border-warning/25 bg-warning-soft/30 p-4">
-                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-fg">
-                  Deferred metrics <Badge variant="warning">Not computed</Badge>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {snapshot.deferred_metrics.map((m) => (
-                    <span key={m.name} title={m.reason} className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-xs text-fg-muted">
-                      {m.name}<span className="opacity-60">— deferred</span>
-                    </span>
-                  ))}
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-fg-muted">
-                  VaR, CVaR, volatility, drawdown and beta require a return-series / equity-curve the platform does not accumulate yet — shown as deferred, never a fabricated 0.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <PositionRiskGrid positions={positions} limits={limits} />
+
+      <OpenInterestMonitor />
+
+      <DeferredMetricsPanel snapshot={snapshotQuery.data} />
+
+      <Assessments portfolio={portfolio} />
+
+      <NeedsAttention limits={limits} limitsLoading={limitsQuery.isLoading} />
+      <Limits limits={limits} query={limitsQuery} />
+    </div>
+  )
+}
+
+// F-18 deferred metrics — honest visual shells (Pending F-18), never a
+// fabricated 0. Same established pattern as Strategy/Portfolio's
+// PendingMetricTile, not the "Computing…" framing (see metric-tiles.tsx).
+function DeferredMetricsPanel({ snapshot }: { snapshot: RiskSnapshot | null | undefined }) {
+  if (!snapshot || snapshot.deferred_metrics.length === 0) return null
+
+  const shellFor = (name: string): 'ring' | 'bar' | 'number' => {
+    if (name.includes('var') || name.includes('cvar')) return 'ring'
+    if (name === 'max_drawdown') return 'bar'
+    return 'number'
+  }
+
+  return (
+    <Section icon={<GaugeIcon size={16} />} title="Advanced risk metrics" description="VaR, CVaR, volatility, drawdown and beta need a real return-series / equity-curve history the platform doesn't accumulate yet (F-18).">
+      <Panel className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5">
+        {snapshot.deferred_metrics.map((m) => (
+          <PendingMetricTile key={m.name} label={m.name.replace(/_/g, ' ')} ticket="F-18" shell={shellFor(m.name)} />
+        ))}
+      </Panel>
     </Section>
   )
 }
 
-// "What requires attention" — real limits currently in breach or warning,
-// surfaced immediately instead of requiring a scan of the full limits table.
-function NeedsAttention({ portfolio }: { portfolio: Portfolio }) {
-  const query = useRiskLimits(portfolio.id)
-  const limits = query.data ?? []
+function NeedsAttention({ limits, limitsLoading }: { limits: RiskLimit[]; limitsLoading: boolean }) {
   const flagged = limits
     .filter((l) => l.status === 'breach' || l.status === 'warning')
     .sort((a, b) => (a.status === b.status ? 0 : a.status === 'breach' ? -1 : 1))
 
-  if (query.isLoading || query.isError || limits.length === 0) return null
+  if (limitsLoading || limits.length === 0) return null
 
   return (
     <Section title="Needs attention" description="Governed limits currently at or beyond their warning threshold.">
@@ -215,15 +194,13 @@ function NeedsAttention({ portfolio }: { portfolio: Portfolio }) {
   )
 }
 
-function Limits({ portfolio }: { portfolio: Portfolio }) {
-  const query = useRiskLimits(portfolio.id)
-  const limits = query.data ?? []
+function Limits({ limits, query }: { limits: RiskLimit[]; query: ReturnType<typeof useRiskLimits> }) {
   return (
     <Section title="Risk limits" description="Governed limits for this portfolio." actions={query.isSuccess ? <Badge variant="neutral">{limits.length}</Badge> : null}>
       {query.isLoading && <SkeletonTable rows={3} cols={6} />}
       {query.isError && <ErrorState description="Could not load limits." onRetry={() => query.refetch()} />}
       {query.isSuccess && limits.length === 0 && (
-        <EmptyState title="No risk limits" description="No governed risk limits are configured for this portfolio." />
+        <EmptyState title="No risk limits configured" description="No governed risk limits are configured for this portfolio — shown honestly rather than a fabricated default set." />
       )}
       {query.isSuccess && limits.length > 0 && (
         <Panel className="overflow-hidden">
@@ -305,17 +282,9 @@ function LimitTable({ limits }: { limits: RiskLimit[] }) {
   )
 }
 
-// REDESIGNED (Doc 10 §Pre-Trade Risk Assessment: "SHALL be completely
-// redesigned. The current implementation SHALL NOT be reused.") — a flat
-// table was the forbidden pattern; this is a master-detail inspector.
-// Selecting an assessment reveals its full Risk Checklist (every individual
-// gate the order was evaluated against, previously fetched but only ever
-// summarized as a tooltip) and a real Checks-Passed ratio. What the doc also
-// asks for — a multi-factor Trade Approval Score, Exposure Simulation,
-// Capital Impact waterfall, and an AI Risk Report — would require inputs
-// (projected post-trade exposure, a capital ledger, a real AI backend) this
-// platform doesn't compute; per Data Honesty those are left out rather than
-// faked, not silently renamed into something they aren't.
+// REDESIGNED (Doc 10 §Pre-Trade Risk Assessment) — master-detail inspector,
+// verified still working after the Portfolio page's positions/leverage
+// changes (kept as-is, per task instruction — no changes needed).
 function Assessments({ portfolio }: { portfolio: Portfolio }) {
   const query = useRiskAssessments(portfolio.id)
   const assessments = query.data ?? []
@@ -415,8 +384,6 @@ function AssessmentTable({
   )
 }
 
-// The real Risk Checklist — one row per gate the order was actually
-// evaluated against, not a summary count.
 function AssessmentDetail({ assessment }: { assessment: PreTradeAssessment | null }) {
   if (!assessment) {
     return (

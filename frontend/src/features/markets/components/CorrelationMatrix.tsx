@@ -20,14 +20,20 @@ import { useCorrelation } from '../hooks/useMarkets'
 export function CorrelationMatrix({
   title = 'Price correlation',
   icon,
+  compact = false,
 }: {
-  /** Caller-supplied title (Markets' analytics grid labels this "Cross-asset
-   *  correlation"; Risk's usage keeps the original "Price correlation"). */
+  /** Caller-supplied title (Risk's usage labels this "Cross-asset
+   *  correlation"; Markets keeps the original "Price correlation"). */
   title?: string
   icon?: ReactNode
+  /** Smaller rendering for a shared/secondary placement (Markets' 3-column
+   *  analytics grid) — Risk (the primary home for this analysis per Doc 00
+   *  §14.5/§14.7 owner instruction) gets the full-size heatmap. */
+  compact?: boolean
 }) {
   const query = useCorrelation('1h')
   const data = query.data
+  const height = compact ? 240 : Math.max(280, (data?.assets.length ?? 0) * 46 + 90)
 
   return (
     <Section
@@ -42,7 +48,7 @@ export function CorrelationMatrix({
         <p className="text-xs leading-relaxed text-fg-muted">
           <strong className="font-semibold text-fg">Market price-return correlation only.</strong>{' '}
           This is <strong className="font-semibold text-fg">not</strong> a portfolio risk metric — it is unrelated to VaR, CVaR,
-          beta or volatility, which aren&apos;t computed yet. It describes how these instruments&apos; prices have moved together, nothing about capital at risk.
+          beta or volatility, which aren&apos;t computed yet (F-18). It describes how these instruments&apos; prices have moved together, nothing about capital at risk.
         </p>
       </div>
 
@@ -62,7 +68,7 @@ export function CorrelationMatrix({
             yLabels={data.assets.map((a) => a.symbol.split('/')[0])}
             values={data.matrix}
             mode="diverging"
-            height={Math.max(280, data.assets.length * 46 + 90)}
+            height={height}
           />
         </Panel>
       )}

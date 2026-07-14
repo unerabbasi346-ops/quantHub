@@ -35,6 +35,16 @@ export interface FundingRate {
   interval_hours: number | null
 }
 
+// A market_data.open_interest row (migration b4f8e21ac9d3) — PERPETUAL-only.
+// The API 404s for a SPOT asset_id rather than returning empty (deliberately
+// different from the funding-rates endpoint's own choice).
+export interface OpenInterest {
+  asset_id: UUID
+  ts: ISOTimestamp
+  open_interest_usdt: string
+  open_interest_contracts: string | null
+}
+
 export interface OHLCVBar {
   asset_id: UUID
   interval: string

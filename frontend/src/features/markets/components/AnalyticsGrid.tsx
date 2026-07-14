@@ -22,7 +22,7 @@ export function AnalyticsGrid({
 }) {
   return (
     <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
-      <CorrelationMatrix title="Cross-asset correlation" icon={<Grid3x3 size={16} />} />
+      <CorrelationMatrix title="Cross-asset correlation" icon={<Grid3x3 size={16} />} compact />
 
       <Section icon={<BarChart3 size={16} />} title="Volume ranking" description="Latest bar volume across every ingested instrument.">
         <Panel className="p-4">

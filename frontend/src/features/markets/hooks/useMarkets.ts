@@ -52,3 +52,14 @@ export function useFundingRates(assetId: string, enabled: boolean) {
     enabled: Boolean(assetId) && enabled,
   })
 }
+
+// Perpetual open-interest history — same `enabled` gating as useFundingRates
+// (the endpoint itself 404s for SPOT, so the caller must already know this
+// asset is PERPETUAL before firing the query).
+export function useOpenInterest(assetId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['open-interest', assetId],
+    queryFn: () => marketsService.getOpenInterest(assetId),
+    enabled: Boolean(assetId) && enabled,
+  })
+}

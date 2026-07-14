@@ -67,12 +67,14 @@ class PositionOut(BaseModel):
     asset's symbol/exchange/instrument_type for display. Decimal fields
     render as strings.
 
-    `leverage` (migration e7a3c1f5b9d2, S-10) is None for a spot/unleveraged
-    position (honest absence, never a fabricated 1x) — only ever populated
-    for a PERPETUAL position that has gone through the fill→position path.
-    `instrument_type` (SPOT | PERPETUAL) is the same asset-resolved field
-    added to markets' AssetOut, exposed here too so a client can decide
-    whether to even show a leverage column for this row.
+    `leverage`/`margin_used` (migration e7a3c1f5b9d2, S-10) are None for a
+    spot/unleveraged position (honest absence, never a fabricated 1x/0) —
+    only ever populated for a PERPETUAL position that has gone through the
+    fill→position path. `instrument_type` (SPOT | PERPETUAL) is the same
+    asset-resolved field added to markets' AssetOut, exposed here too so a
+    client can decide whether to even show a leverage/margin column for this
+    row. F-19 INTERACTION: margin_used is storage only, same as leverage —
+    it is not backed by an authoritative equity/collateral ledger.
     """
 
     id: UUID
@@ -88,12 +90,13 @@ class PositionOut(BaseModel):
     realized_pnl_today: Decimal
     last_price: Decimal | None
     leverage: Decimal | None
+    margin_used: Decimal | None
     is_closed: bool
     sequence_number: int
 
     @field_serializer(
         "quantity", "average_entry_price", "market_value", "unrealized_pnl",
-        "realized_pnl_today", "last_price", "leverage",
+        "realized_pnl_today", "last_price", "leverage", "margin_used",
         when_used="json",
     )
     def _serialize_decimal(self, value: Decimal | None) -> str | None:
@@ -115,6 +118,7 @@ class PositionOut(BaseModel):
             realized_pnl_today=position.realized_pnl_today,
             last_price=position.last_price,
             leverage=position.leverage,
+            margin_used=position.margin_used,
             is_closed=position.is_closed,
             sequence_number=position.sequence_number,
         )

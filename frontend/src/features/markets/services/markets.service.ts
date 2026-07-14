@@ -3,7 +3,7 @@
 // Doc 10 envelope's `.data`, Step 4.2) — Doc 08 §API Layer.
 // Per Doc 00 §14.11
 import { apiClient } from '@/lib/api/client'
-import type { Asset, CorrelationMatrix, FundingRate, OHLCVBar } from '../types'
+import type { Asset, CorrelationMatrix, FundingRate, OHLCVBar, OpenInterest } from '../types'
 
 // Default bar window for the chart. The backend caps `limit` at 1000
 // (api/v1/markets.py); 500 covers the full currently-ingested BTC/USDT 1h
@@ -24,4 +24,9 @@ export const marketsService = {
   // asset_id, never an error (nothing is ever ingested for SPOT).
   getFundingRates: (assetId: string, limit = 500) =>
     apiClient.get<FundingRate[]>(`/v1/assets/${assetId}/funding-rates?limit=${limit}`),
+  // Perpetual open-interest history (migration b4f8e21ac9d3) — 404s for a
+  // SPOT asset_id (deliberately different from getFundingRates' empty-array
+  // choice; caller should only call this for a known PERPETUAL asset).
+  getOpenInterest: (assetId: string, limit = 500) =>
+    apiClient.get<OpenInterest[]>(`/v1/assets/${assetId}/open-interest?limit=${limit}`),
 }

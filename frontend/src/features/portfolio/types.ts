@@ -37,8 +37,10 @@ export interface Position {
   realized_pnl_today: string
   last_price: string | null
   // Migration e7a3c1f5b9d2 (S-10). Null for SPOT (honest absence, never a
-  // fabricated 1x) — only populated for a PERPETUAL position.
+  // fabricated 1x/0) — only populated for a PERPETUAL position. F-19:
+  // margin_used is storage only, not backed by an authoritative equity ledger.
   leverage: string | null
+  margin_used: string | null
   is_closed: boolean
   sequence_number: number
 }
