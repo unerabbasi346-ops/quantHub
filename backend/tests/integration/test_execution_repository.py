@@ -181,7 +181,8 @@ async def test_get_by_order_returns_recorded_fills(db_session: AsyncSession) -> 
             commission=Decimal("0"),
             venue="SIM",
             executed_at=_NOW,
-        )
+        ),
+        Decimal("0"),
     )
 
     fills = await executions.get_by_order(created.id)
@@ -193,3 +194,65 @@ async def test_get_by_order_returns_recorded_fills(db_session: AsyncSession) -> 
     assert fills[0].side is OrderSide.BUY
     # net_amount for a BUY is signed cash-out (negative), commission included.
     assert fills[0].net_amount < 0
+    assert fills[0].realized_pnl == Decimal("0.0000")
+
+
+async def test_realized_pnl_persists_on_closing_fill(db_session: AsyncSession) -> None:
+    orders = SQLAlchemyOrderRepository(db_session)
+    executions = SQLAlchemyExecutionRepository(db_session)
+    portfolio_id = await _mk_portfolio(db_session)
+    asset_id, asset = await _mk_asset(db_session)
+
+    opening = await orders.create(
+        _intent(portfolio_id, asset, side=OrderSide.BUY, qty="0.1"), asset_id
+    )
+    closing = await orders.create(
+        _intent(portfolio_id, asset, side=OrderSide.SELL, qty="0.1"), asset_id
+    )
+    await executions.record(
+        Fill(
+            order_id=opening.id, portfolio_id=portfolio_id, asset_id=asset_id,
+            side=OrderSide.BUY, quantity=Decimal("0.1"), price=Decimal("100"),
+            commission=Decimal("0"), venue="SIM", executed_at=_NOW,
+        ),
+        Decimal("0"),
+    )
+    closing_fill = await executions.record(
+        Fill(
+            order_id=closing.id, portfolio_id=portfolio_id, asset_id=asset_id,
+            side=OrderSide.SELL, quantity=Decimal("0.1"), price=Decimal("120"),
+            commission=Decimal("0"), venue="SIM", executed_at=_NOW,
+        ),
+        Decimal("2.0000"),  # (120 - 100) * 0.1
+    )
+
+    assert closing_fill.realized_pnl == Decimal("2.0000")
+    fetched = await executions.get_by_order(closing.id)
+    assert fetched[0].realized_pnl == Decimal("2.0000")
+
+
+async def test_list_by_portfolio_returns_all_executions_across_orders(
+    db_session: AsyncSession,
+) -> None:
+    orders = SQLAlchemyOrderRepository(db_session)
+    executions = SQLAlchemyExecutionRepository(db_session)
+    portfolio_id = await _mk_portfolio(db_session)
+    other_portfolio = await _mk_portfolio(db_session)
+    asset_id, asset = await _mk_asset(db_session)
+
+    order_a = await orders.create(_intent(portfolio_id, asset, side=OrderSide.BUY, qty="0.01"), asset_id)
+    order_b = await orders.create(_intent(other_portfolio, asset, side=OrderSide.BUY, qty="0.02"), asset_id)
+    await executions.record(
+        Fill(order_id=order_a.id, portfolio_id=portfolio_id, asset_id=asset_id, side=OrderSide.BUY,
+             quantity=Decimal("0.01"), price=Decimal("100"), commission=Decimal("0"), venue="SIM", executed_at=_NOW),
+        Decimal("0"),
+    )
+    await executions.record(
+        Fill(order_id=order_b.id, portfolio_id=other_portfolio, asset_id=asset_id, side=OrderSide.BUY,
+             quantity=Decimal("0.02"), price=Decimal("100"), commission=Decimal("0"), venue="SIM", executed_at=_NOW),
+        Decimal("0"),
+    )
+
+    fills = await executions.list_by_portfolio(portfolio_id)
+    assert len(fills) == 1
+    assert fills[0].order_id == order_a.id

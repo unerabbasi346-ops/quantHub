@@ -242,6 +242,7 @@ class Fill:
     commission: Decimal          # 0 in Step 3.5 (S-5, F-16)
     venue: str                   # "SIM" — no real broker/venue (S-5)
     executed_at: object          # datetime; typed loosely per this module's convention
+    realized_pnl: Decimal = Decimal("0")  # this fill's realized P&L (0 for pure opens/adds)
 
     @property
     def signed_quantity(self) -> Decimal:
@@ -277,3 +278,4 @@ class RecordedExecution:
     venue: str
     executed_at: object
     created_at: object
+    realized_pnl: Decimal | None = None  # this fill's realized P&L; NULL only for pre-migration rows never backfilled

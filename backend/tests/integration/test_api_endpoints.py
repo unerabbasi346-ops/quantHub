@@ -260,3 +260,123 @@ async def test_open_interest_unknown_asset_404(api) -> None:
     client, _ = api
     resp = await client.get("/v1/assets/00000000-0000-0000-0000-000000000000/open-interest")
     assert resp.status_code == 404
+
+
+# ── GET /v1/portfolios/{id}/orders + /v1/portfolios/{id}/executions
+#    (migration a2e4c7b1d6f9, Execution page rebuild) ──────────────────────
+async def _seed_order(
+    session: AsyncSession, *, portfolio_id: str, asset_id: str, strategy_id: str | None, side: str, qty: str
+) -> str:
+    row = await session.execute(
+        text(
+            "INSERT INTO core.orders "
+            "(idempotency_key, portfolio_id, strategy_id, asset_id, order_type, side, quantity, time_in_force) "
+            "VALUES (gen_random_uuid(), :pid, :sid, :aid, 'MARKET', :side, :qty, 'DAY') RETURNING id"
+        ),
+        {"pid": portfolio_id, "sid": strategy_id, "aid": asset_id, "side": side, "qty": qty},
+    )
+    return str(row.scalar_one())
+
+
+@pytest.mark.asyncio
+async def test_portfolio_orders_carry_direction_strategy_name_and_realized_pnl(api) -> None:
+    client, session = api
+    pid = await _seed_portfolio(session, "exec-orders-test")
+    sid = await _seed_strategy(session, "exec-orders-strategy")
+    aid = await _seed_asset(session, "EXECORD/USDT", "SPOT")
+
+    order_id = await _seed_order(session, portfolio_id=pid, asset_id=aid, strategy_id=sid, side="SELL", qty="1")
+    await session.execute(
+        text(
+            "INSERT INTO core.executions "
+            "(order_id, portfolio_id, asset_id, side, quantity, price, commission, net_amount, venue, executed_at, realized_pnl) "
+            "VALUES (:oid, :pid, :aid, 'SELL', 1, 120, 0, 120, 'SIM', now(), 5.5000)"
+        ),
+        {"oid": order_id, "pid": pid, "aid": aid},
+    )
+
+    resp = await client.get(f"/v1/portfolios/{pid}/orders")
+    assert resp.status_code == 200
+    orders = resp.json()["data"]
+    assert len(orders) == 1
+    order = orders[0]
+    assert order["direction"] == "SHORT"  # SELL -> SHORT (S-5 side-derived)
+    assert order["strategy_name"] == "exec-orders-strategy"
+    assert order["realized_pnl"] == "5.5000"
+
+
+@pytest.mark.asyncio
+async def test_portfolio_orders_realized_pnl_null_when_unfilled(api) -> None:
+    client, session = api
+    pid = await _seed_portfolio(session, "exec-orders-unfilled-test")
+    aid = await _seed_asset(session, "EXECUNFILLED/USDT", "SPOT")
+    await _seed_order(session, portfolio_id=pid, asset_id=aid, strategy_id=None, side="BUY", qty="1")
+
+    resp = await client.get(f"/v1/portfolios/{pid}/orders")
+    order = resp.json()["data"][0]
+    assert order["direction"] == "LONG"
+    assert order["strategy_name"] is None
+    assert order["realized_pnl"] is None
+
+
+@pytest.mark.asyncio
+async def test_portfolio_executions_batch_endpoint_returns_all_fills(api) -> None:
+    client, session = api
+    pid = await _seed_portfolio(session, "exec-batch-test")
+    aid = await _seed_asset(session, "EXECBATCH/USDT", "SPOT")
+    order_id = await _seed_order(session, portfolio_id=pid, asset_id=aid, strategy_id=None, side="BUY", qty="1")
+    await session.execute(
+        text(
+            "INSERT INTO core.executions "
+            "(order_id, portfolio_id, asset_id, side, quantity, price, commission, net_amount, venue, executed_at, realized_pnl) "
+            "VALUES (:oid, :pid, :aid, 'BUY', 1, 100, 0, -100, 'SIM', now(), 0)"
+        ),
+        {"oid": order_id, "pid": pid, "aid": aid},
+    )
+
+    resp = await client.get(f"/v1/portfolios/{pid}/executions")
+    assert resp.status_code == 200
+    fills = resp.json()["data"]
+    assert len(fills) == 1
+    assert fills[0]["order_id"] == order_id
+    assert fills[0]["realized_pnl"] == "0.0000"
+
+
+@pytest.mark.asyncio
+async def test_strategy_orders_and_executions_filter_by_strategy_id(api) -> None:
+    client, session = api
+    sid = await _seed_strategy(session, "exec-strategy-scoped-test")
+    other_sid = await _seed_strategy(session, "exec-strategy-scoped-other")
+    pid = await _seed_portfolio(session, "exec-strategy-scoped-portfolio")
+    aid = await _seed_asset(session, "EXECSTRAT/USDT", "SPOT")
+
+    order_id = await _seed_order(session, portfolio_id=pid, asset_id=aid, strategy_id=sid, side="BUY", qty="1")
+    await _seed_order(session, portfolio_id=pid, asset_id=aid, strategy_id=other_sid, side="BUY", qty="1")
+    await session.execute(
+        text(
+            "INSERT INTO core.executions "
+            "(order_id, portfolio_id, asset_id, side, quantity, price, commission, net_amount, venue, executed_at, realized_pnl) "
+            "VALUES (:oid, :pid, :aid, 'BUY', 1, 100, 0, -100, 'SIM', now(), 0)"
+        ),
+        {"oid": order_id, "pid": pid, "aid": aid},
+    )
+
+    orders_resp = await client.get(f"/v1/strategies/{sid}/orders")
+    assert orders_resp.status_code == 200
+    orders = orders_resp.json()["data"]
+    assert len(orders) == 1
+    assert orders[0]["strategy_id"] == sid
+    assert orders[0]["strategy_name"] == "exec-strategy-scoped-test"
+
+    executions_resp = await client.get(f"/v1/strategies/{sid}/executions")
+    assert executions_resp.status_code == 200
+    fills = executions_resp.json()["data"]
+    assert len(fills) == 1
+    assert fills[0]["order_id"] == order_id
+
+
+@pytest.mark.asyncio
+async def test_strategy_orders_unknown_strategy_404(api) -> None:
+    client, _ = api
+    resp = await client.get("/v1/strategies/00000000-0000-0000-0000-000000000000/orders")
+    assert resp.status_code == 404

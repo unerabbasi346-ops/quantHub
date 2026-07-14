@@ -151,12 +151,12 @@ class _FakeExecutionRepo:
     def __init__(self) -> None:
         self.recorded: list = []
 
-    async def record(self, fill) -> RecordedExecution:
+    async def record(self, fill, realized_pnl) -> RecordedExecution:
         rec = RecordedExecution(
             id=uuid7(), order_id=fill.order_id, portfolio_id=fill.portfolio_id,
             asset_id=fill.asset_id, side=fill.side, quantity=fill.quantity, price=fill.price,
             commission=fill.commission, net_amount=fill.gross_notional, venue=fill.venue,
-            executed_at=fill.executed_at, created_at=_NOW,
+            executed_at=fill.executed_at, created_at=_NOW, realized_pnl=realized_pnl,
         )
         self.recorded.append(rec)
         return rec

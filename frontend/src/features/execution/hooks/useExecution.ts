@@ -20,3 +20,19 @@ export function useExecutions(orderId: string) {
     enabled: Boolean(orderId),
   })
 }
+
+export function useOrdersByStrategy(strategyId: string) {
+  return useQuery({
+    queryKey: ['orders-by-strategy', strategyId],
+    queryFn: () => executionService.getOrdersByStrategy(strategyId),
+    enabled: Boolean(strategyId),
+  })
+}
+
+export function useExecutionsByStrategy(strategyId: string) {
+  return useQuery({
+    queryKey: ['executions-by-strategy', strategyId],
+    queryFn: () => executionService.getExecutionsByStrategy(strategyId),
+    enabled: Boolean(strategyId),
+  })
+}

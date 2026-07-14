@@ -150,6 +150,20 @@ class SQLAlchemyOrderRepository(BaseRepository[object], OrderRepository):
         )
         return [_row_to_order(row) for row in result.mappings().all()]
 
+    async def list_by_strategy(self, strategy_id: UUID) -> list[RecordedOrder]:
+        result = await self._session.execute(
+            text(
+                f"""
+                SELECT {_ORDER_COLS}
+                FROM core.orders
+                WHERE strategy_id = :strategy_id
+                ORDER BY created_at, id
+                """
+            ),
+            {"strategy_id": strategy_id},
+        )
+        return [_row_to_order(row) for row in result.mappings().all()]
+
     async def _transition(
         self,
         order_id: UUID,
@@ -221,6 +235,7 @@ def _row_to_execution(row: object) -> RecordedExecution:
         venue=row["venue"],
         executed_at=row["executed_at"],
         created_at=row["created_at"],
+        realized_pnl=row["realized_pnl"],
     )
 
 
@@ -231,12 +246,14 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
     (caller owns the transaction boundary).
     """
 
-    async def record(self, fill: Fill) -> RecordedExecution:
+    async def record(self, fill: Fill, realized_pnl: Decimal) -> RecordedExecution:
         """Persist a simulated Fill as a core.executions row.
 
         `net_amount` is the signed cash effect (§10.9.4): BUY is cash out
         (negative), SELL is cash in (positive), commission included. Quantized
-        to the column scale NUMERIC(20,4).
+        to the column scale NUMERIC(20,4). `realized_pnl` (migration
+        a2e4c7b1d6f9) is the caller-computed PositionUpdate.realized_pnl for
+        this fill — already quantized to NUMERIC(20,4) by apply_fill_to_position.
         """
         gross = fill.quantity * fill.price
         if fill.side is OrderSide.BUY:
@@ -249,12 +266,12 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
             """
             INSERT INTO core.executions
                 (order_id, portfolio_id, asset_id, side, quantity, price,
-                 commission, net_amount, venue, executed_at)
+                 commission, net_amount, venue, executed_at, realized_pnl)
             VALUES
                 (:order_id, :portfolio_id, :asset_id, :side, :quantity, :price,
-                 :commission, :net_amount, :venue, :executed_at)
+                 :commission, :net_amount, :venue, :executed_at, :realized_pnl)
             RETURNING id, order_id, portfolio_id, asset_id, side, quantity, price,
-                      commission, net_amount, venue, executed_at, created_at
+                      commission, net_amount, venue, executed_at, created_at, realized_pnl
             """
         )
         result = await self._session.execute(
@@ -270,6 +287,7 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
                 "net_amount": net_amount,
                 "venue": fill.venue,
                 "executed_at": fill.executed_at,
+                "realized_pnl": realized_pnl,
             },
         )
         return _row_to_execution(result.mappings().one())
@@ -279,12 +297,47 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
             text(
                 """
                 SELECT id, order_id, portfolio_id, asset_id, side, quantity, price,
-                       commission, net_amount, venue, executed_at, created_at
+                       commission, net_amount, venue, executed_at, created_at, realized_pnl
                 FROM core.executions
                 WHERE order_id = :order_id
                 ORDER BY executed_at, id
                 """
             ),
             {"order_id": order_id},
+        )
+        return [_row_to_execution(row) for row in result.mappings().all()]
+
+    async def list_by_portfolio(self, portfolio_id: UUID) -> list[RecordedExecution]:
+        """All executions for `portfolio_id`, oldest-first — the Execution
+        page's batch feed (avoids an N+1 get_by_order call per order).
+        """
+        result = await self._session.execute(
+            text(
+                """
+                SELECT id, order_id, portfolio_id, asset_id, side, quantity, price,
+                       commission, net_amount, venue, executed_at, created_at, realized_pnl
+                FROM core.executions
+                WHERE portfolio_id = :portfolio_id
+                ORDER BY executed_at, id
+                """
+            ),
+            {"portfolio_id": portfolio_id},
+        )
+        return [_row_to_execution(row) for row in result.mappings().all()]
+
+    async def list_by_strategy(self, strategy_id: UUID) -> list[RecordedExecution]:
+        result = await self._session.execute(
+            text(
+                """
+                SELECT e.id, e.order_id, e.portfolio_id, e.asset_id, e.side, e.quantity,
+                       e.price, e.commission, e.net_amount, e.venue, e.executed_at,
+                       e.created_at, e.realized_pnl
+                FROM core.executions e
+                JOIN core.orders o ON o.id = e.order_id
+                WHERE o.strategy_id = :strategy_id
+                ORDER BY e.executed_at, e.id
+                """
+            ),
+            {"strategy_id": strategy_id},
         )
         return [_row_to_execution(row) for row in result.mappings().all()]

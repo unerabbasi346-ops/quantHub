@@ -135,11 +135,12 @@ class ExecutionService:
         if fill.quantity > validated.quantity:  # defensive; simulate_fill never overshoots
             raise ValueError("simulated fill exceeds order quantity")
 
-        execution = await self._executions.record(fill)
-        await self._orders.mark_filled(order.id, fill.quantity, fill.price)
-
         # Position update (§10.6.6 / §10.9.3): recompute quantity + average
-        # price from the fill; mark-to-market value at the fill price.
+        # price from the fill; mark-to-market value at the fill price. Read
+        # BEFORE recording the execution (pure read, no side effect) so this
+        # fill's realized_pnl is known in time to persist onto the trade
+        # record itself (migration a2e4c7b1d6f9) rather than only folding it
+        # into the position's daily aggregate.
         current = await self._positions.get_by_portfolio_and_asset(
             order.portfolio_id, order.asset_id
         )
@@ -147,6 +148,9 @@ class ExecutionService:
         cur_avg = current.average_entry_price if current is not None else _ZERO
         update = apply_fill_to_position(cur_qty, cur_avg, fill.signed_quantity, fill.price)
         market_value = (update.quantity * fill.price).quantize(_MV_SCALE, rounding=ROUND_HALF_EVEN)
+
+        execution = await self._executions.record(fill, update.realized_pnl)
+        await self._orders.mark_filled(order.id, fill.quantity, fill.price)
 
         # Margin state (§10.6.6, migration e7a3c1f5b9d2) for a perpetual
         # position. Computed off the NEW position (post-fill quantity + average
