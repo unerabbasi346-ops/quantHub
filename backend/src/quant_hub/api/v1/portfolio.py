@@ -64,25 +64,36 @@ class PortfolioOut(BaseModel):
 
 class PositionOut(BaseModel):
     """API shape of a core.positions row (Doc 14 §10.6.6), enriched with the
-    asset's symbol/exchange for display. Decimal fields render as strings."""
+    asset's symbol/exchange/instrument_type for display. Decimal fields
+    render as strings.
+
+    `leverage` (migration e7a3c1f5b9d2, S-10) is None for a spot/unleveraged
+    position (honest absence, never a fabricated 1x) — only ever populated
+    for a PERPETUAL position that has gone through the fill→position path.
+    `instrument_type` (SPOT | PERPETUAL) is the same asset-resolved field
+    added to markets' AssetOut, exposed here too so a client can decide
+    whether to even show a leverage column for this row.
+    """
 
     id: UUID
     portfolio_id: UUID
     asset_id: UUID
     symbol: str | None
     exchange: str | None
+    instrument_type: str | None
     quantity: Decimal
     average_entry_price: Decimal
     market_value: Decimal
     unrealized_pnl: Decimal
     realized_pnl_today: Decimal
     last_price: Decimal | None
+    leverage: Decimal | None
     is_closed: bool
     sequence_number: int
 
     @field_serializer(
         "quantity", "average_entry_price", "market_value", "unrealized_pnl",
-        "realized_pnl_today", "last_price",
+        "realized_pnl_today", "last_price", "leverage",
         when_used="json",
     )
     def _serialize_decimal(self, value: Decimal | None) -> str | None:
@@ -96,12 +107,14 @@ class PositionOut(BaseModel):
             asset_id=position.asset_id,
             symbol=asset.symbol if asset else None,
             exchange=asset.exchange if asset else None,
+            instrument_type=asset.instrument_type if asset else None,
             quantity=position.quantity,
             average_entry_price=position.average_entry_price,
             market_value=position.market_value,
             unrealized_pnl=position.unrealized_pnl,
             realized_pnl_today=position.realized_pnl_today,
             last_price=position.last_price,
+            leverage=position.leverage,
             is_closed=position.is_closed,
             sequence_number=position.sequence_number,
         )

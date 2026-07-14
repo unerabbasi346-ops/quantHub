@@ -28,12 +28,17 @@ export interface Position {
   asset_id: UUID
   symbol: string | null
   exchange: string | null
+  // SPOT | PERPETUAL | null (asset-resolved; null if the asset lookup failed).
+  instrument_type: string | null
   quantity: string
   average_entry_price: string
   market_value: string
   unrealized_pnl: string
   realized_pnl_today: string
   last_price: string | null
+  // Migration e7a3c1f5b9d2 (S-10). Null for SPOT (honest absence, never a
+  // fabricated 1x) — only populated for a PERPETUAL position.
+  leverage: string | null
   is_closed: boolean
   sequence_number: number
 }
