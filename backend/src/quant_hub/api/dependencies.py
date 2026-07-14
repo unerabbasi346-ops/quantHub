@@ -21,6 +21,7 @@ from quant_hub.domain.market_data.interfaces import (
     AssetRepository,
     FundingRateRepository,
     OHLCVRepository,
+    OpenInterestRepository,
 )
 from quant_hub.domain.portfolio.interfaces import PortfolioRepository, PositionRepository
 from quant_hub.domain.risk.interfaces import (
@@ -42,6 +43,7 @@ from quant_hub.persistence.repositories.market_data import (
     SQLAlchemyAssetRepository,
     SQLAlchemyFundingRateRepository,
     SQLAlchemyOHLCVRepository,
+    SQLAlchemyOpenInterestRepository,
 )
 from quant_hub.persistence.repositories.strategy_engine import (
     SQLAlchemySignalRepository,
@@ -80,9 +82,14 @@ def get_funding_rate_repository(session: DbSession) -> FundingRateRepository:
     return SQLAlchemyFundingRateRepository(session)
 
 
+def get_open_interest_repository(session: DbSession) -> OpenInterestRepository:
+    return SQLAlchemyOpenInterestRepository(session)
+
+
 AssetRepo = Annotated[AssetRepository, Depends(get_asset_repository)]
 OHLCVRepo = Annotated[OHLCVRepository, Depends(get_ohlcv_repository)]
 FundingRateRepo = Annotated[FundingRateRepository, Depends(get_funding_rate_repository)]
+OpenInterestRepo = Annotated[OpenInterestRepository, Depends(get_open_interest_repository)]
 
 
 # Portfolio read repositories — Step 4.3 (Portfolio Vertical Slice).

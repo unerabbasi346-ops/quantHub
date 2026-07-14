@@ -12,6 +12,7 @@ from quant_hub.domain.market_data.entities import (
     RawCorporateAction,
     RawFundingRate,
     RawOHLCVBar,
+    RawOpenInterest,
     RawTick,
 )
 
@@ -128,4 +129,29 @@ class FundingRateConnector(ABC):
         limit: int = 500,
     ) -> list[RawFundingRate]:
         """Historical periodic funding observations for a perpetual, oldest -> newest."""
+        ...
+
+
+class OpenInterestConnector(ABC):
+    """Perpetual open-interest data source contract — follows the exact same
+    pattern as FundingRateConnector (kept as a separate ABC for the same
+    reason: OI is a perpetual-derivative construct with no spot analog).
+
+    JUDGMENT CALL (Doc 00 §14.5/§14.7): the symbol passed must be a ccxt
+    PERPETUAL symbol (e.g. "BTC/USDT:USDT"); calling this with a spot symbol
+    is a caller error (spot has no open interest in the derivatives sense).
+    Not enforced here — the contract documents it; ccxt raises BadSymbol or
+    returns an error for a non-swap symbol on most venues.
+    """
+
+    source_id: str
+
+    @abstractmethod
+    async def fetch_open_interest_history(
+        self,
+        symbol: str,
+        since: datetime | None = None,
+        limit: int = 500,
+    ) -> list[RawOpenInterest]:
+        """Historical periodic open-interest observations for a perpetual, oldest -> newest."""
         ...

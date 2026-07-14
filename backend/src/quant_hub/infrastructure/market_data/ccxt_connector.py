@@ -14,18 +14,20 @@ import ccxt.async_support as ccxt
 from quant_hub.domain.market_data.connectors import (
     FundingRateConnector,
     MarketDataConnector,
+    OpenInterestConnector,
     infer_instrument_type,
 )
 from quant_hub.domain.market_data.entities import (
     AssetRef,
     RawFundingRate,
     RawOHLCVBar,
+    RawOpenInterest,
     RawTick,
 )
 from quant_hub.infrastructure.market_data.retry import with_retry
 
 
-class CCXTConnector(MarketDataConnector, FundingRateConnector):
+class CCXTConnector(MarketDataConnector, FundingRateConnector, OpenInterestConnector):
     """Crypto market-data adapter over CCXT — Doc 11 §1, Doc 03 §Quantitative Libraries.
 
     JUDGMENT CALL (flagged per Doc 00 §14.5/§14.7 — not silently decided):
@@ -228,6 +230,73 @@ class CCXTConnector(MarketDataConnector, FundingRateConnector):
                 )
             )
         return rates
+
+    async def fetch_open_interest_history(
+        self,
+        symbol: str,
+        since: datetime | None = None,
+        limit: int = 500,
+    ) -> list[RawOpenInterest]:
+        """Historical perpetual open interest via ccxt.fetch_open_interest_history.
+
+        ccxt's unified row is shaped {symbol, timestamp, datetime,
+        openInterestAmount, openInterestValue, baseVolume, quoteVolume, info,
+        ...}: `openInterestValue` is the USDT-denominated notional (maps to
+        open_interest_usdt), `openInterestAmount` is the contract/base-asset
+        count (maps to open_interest_contracts). Live-verified on Binance
+        (2026-07-14, BTC/USDT:USDT): both fields populated on every row.
+
+        EXCHANGE LIMITATION (flagged, live-verified 2026-07-14): Binance's
+        underlying `/futures/data/openInterestHist` endpoint only retains the
+        past 30 days of history — a `since` older than that raises ccxt
+        BadRequest ("parameter 'startTime' is invalid", code -1130). Not
+        worked around here (no synthetic backfill); callers should expect a
+        30-day ceiling on real history from this venue, same as any other
+        exchange-imposed retention window Doc 11 doesn't override.
+
+        A row with no timestamp or no notional value is skipped, never
+        fabricated (Doc 11 §2 normalize). Same retry policy (ccxt.NetworkError)
+        and Decimal(str(...)) conversion as fetch_funding_rate_history.
+
+        The symbol must be a PERPETUAL ccxt symbol (e.g. "BTC/USDT:USDT");
+        instrument_type is stamped from the symbol convention, same as
+        fetch_funding_rate_history.
+        """
+        since_ms = int(since.timestamp() * 1000) if since is not None else None
+
+        async def _do_fetch() -> list:
+            return await self._exchange.fetch_open_interest_history(
+                symbol, since=since_ms, limit=limit
+            )
+
+        raw_rows = await with_retry(
+            _do_fetch,
+            retryable=(ccxt.NetworkError,),
+            context=f"CCXTConnector.fetch_open_interest_history(symbol={symbol})",
+        )
+        asset = AssetRef(
+            symbol=symbol,
+            exchange=self.source_id,
+            asset_class="crypto",
+            instrument_type=infer_instrument_type(symbol),
+        )
+        rows: list[RawOpenInterest] = []
+        for row in raw_rows:
+            ts_ms = row.get("timestamp")
+            notional = row.get("openInterestValue")
+            if ts_ms is None or notional is None:
+                continue
+            contracts = row.get("openInterestAmount")
+            rows.append(
+                RawOpenInterest(
+                    asset=asset,
+                    ts=datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc),
+                    open_interest_usdt=Decimal(str(notional)),
+                    open_interest_contracts=_to_decimal(contracts),
+                    source=self.source_id,
+                )
+            )
+        return rows
 
     async def close(self) -> None:
         """Release the underlying ccxt client's network resources.

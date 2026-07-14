@@ -35,6 +35,7 @@ from quant_hub.domain.market_data.entities import (
     CorporateAction,
     FundingRate,
     OHLCVBar,
+    OpenInterest,
     Tick,
 )
 from quant_hub.domain.market_data.interfaces import (
@@ -42,6 +43,7 @@ from quant_hub.domain.market_data.interfaces import (
     CorporateActionsRepository,
     FundingRateRepository,
     OHLCVRepository,
+    OpenInterestRepository,
     TickRepository,
 )
 from quant_hub.persistence.repositories.base import BaseRepository
@@ -690,6 +692,108 @@ class SQLAlchemyFundingRateRepository(BaseRepository[object], FundingRateReposit
         result = await self._session.execute(
             text(
                 "SELECT MAX(funding_time) FROM market_data.funding_rates "
+                "WHERE asset_id = :asset_id"
+            ),
+            {"asset_id": asset_id},
+        )
+        return result.scalar_one_or_none()
+
+
+class SQLAlchemyOpenInterestRepository(BaseRepository[object], OpenInterestRepository):
+    """Concrete repository for market_data.open_interest — perpetual open-
+    interest observations (migration b4f8e21ac9d3). Follows
+    SQLAlchemyFundingRateRepository's exact shape."""
+
+    async def upsert_open_interest(self, rows: list[OpenInterest]) -> int:
+        """Idempotently persist OI observations on the (asset_id, ts) PRIMARY
+        KEY — same ON CONFLICT DO UPDATE / SAVEPOINT / xmax=0 insert-vs-revised
+        pattern as upsert_funding_rates (see that method's docstring)."""
+        stmt = text(
+            """
+            INSERT INTO market_data.open_interest
+                (asset_id, ts, open_interest_usdt, open_interest_contracts,
+                 source, data_quality)
+            VALUES
+                (:asset_id, :ts, :open_interest_usdt, :open_interest_contracts,
+                 :source, :data_quality)
+            ON CONFLICT (asset_id, ts)
+            DO UPDATE SET
+                open_interest_usdt      = EXCLUDED.open_interest_usdt,
+                open_interest_contracts = EXCLUDED.open_interest_contracts,
+                source                  = EXCLUDED.source,
+                data_quality            = EXCLUDED.data_quality,
+                updated_at              = clock_timestamp()
+            RETURNING (xmax = 0) AS was_insert
+            """
+        )
+        inserted = 0
+        revised = 0
+        failed = 0
+        for row in rows:
+            try:
+                async with self._session.begin_nested():
+                    result = await self._session.execute(
+                        stmt,
+                        {
+                            "asset_id": row.asset_id,
+                            "ts": row.ts,
+                            "open_interest_usdt": row.open_interest_usdt,
+                            "open_interest_contracts": row.open_interest_contracts,
+                            "source": row.source,
+                            "data_quality": row.data_quality,
+                        },
+                    )
+                if result.scalar_one():
+                    inserted += 1
+                else:
+                    revised += 1
+            except DBAPIError as exc:
+                failed += 1
+                logger.error(
+                    "upsert_open_interest: failed to persist OI row, asset_id=%s "
+                    "ts=%s error=%r",
+                    row.asset_id, row.ts, exc,
+                )
+        if rows:
+            logger.info(
+                "upsert_open_interest: batch summary asset_id=%s inserted=%d revised=%d failed=%d",
+                rows[0].asset_id, inserted, revised, failed,
+            )
+        return inserted + revised
+
+    async def get_open_interest_history(self, asset_id: UUID, limit: int = 100) -> list[OpenInterest]:
+        """Most recent `limit` OI rows for asset_id, oldest -> newest —
+        ORDER BY ts DESC LIMIT :limit then reverse, same shape as
+        get_funding_rates/get_bars."""
+        result = await self._session.execute(
+            text(
+                "SELECT asset_id, ts, open_interest_usdt, open_interest_contracts, "
+                "source, data_quality "
+                "FROM market_data.open_interest "
+                "WHERE asset_id = :asset_id "
+                "ORDER BY ts DESC LIMIT :limit"
+            ),
+            {"asset_id": asset_id, "limit": limit},
+        )
+        rows = [
+            OpenInterest(
+                asset_id=row["asset_id"],
+                ts=row["ts"],
+                open_interest_usdt=row["open_interest_usdt"],
+                open_interest_contracts=row["open_interest_contracts"],
+                source=row["source"],
+                data_quality=row["data_quality"],
+            )
+            for row in result.mappings().all()
+        ]
+        rows.reverse()  # DESC-fetched -> oldest-to-newest, matching get_bars' contract
+        return rows
+
+    async def get_latest_ts(self, asset_id: UUID) -> datetime | None:
+        """Most recent persisted ts watermark — see interface docstring."""
+        result = await self._session.execute(
+            text(
+                "SELECT MAX(ts) FROM market_data.open_interest "
                 "WHERE asset_id = :asset_id"
             ),
             {"asset_id": asset_id},

@@ -40,7 +40,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
-from quant_hub.api.dependencies import AssetRepo, FundingRateRepo, OHLCVRepo
+from quant_hub.api.dependencies import AssetRepo, FundingRateRepo, OHLCVRepo, OpenInterestRepo
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
 from quant_hub.domain.market_data.correlation import compute_return_correlations
 
@@ -257,3 +257,52 @@ async def get_asset_funding_rates(
         )
     rates = await funding_repo.get_funding_rates(asset_id, limit)
     return ok([FundingRateOut.model_validate(r, from_attributes=True) for r in rates])
+
+
+# ── Open interest (perpetuals only) — same §10.9.5 anchor as funding rates ──
+# JUDGMENT CALL (Doc 00 §14.5/§14.7 — flagged, deliberately DIFFERENT from the
+# funding-rates endpoint's own choice above): this endpoint 404s for a SPOT
+# instrument rather than returning an honest empty list. Both are defensible
+# ("empty" is equally true for a series that structurally can't exist on this
+# asset); this one 404s per explicit owner instruction so a client asking for
+# OI on a spot asset gets an unambiguous rejection rather than a silent empty
+# array it might mistake for "not ingested yet".
+class OpenInterestOut(BaseModel):
+    """API shape of a market_data.open_interest row — Doc 14 §10.9.5."""
+
+    asset_id: UUID
+    ts: datetime
+    open_interest_usdt: Decimal
+    open_interest_contracts: Decimal | None = None
+
+    @field_serializer("open_interest_usdt", "open_interest_contracts", when_used="json")
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
+
+
+@router.get(
+    "/assets/{asset_id}/open-interest",
+    response_model=ResponseEnvelope[list[OpenInterestOut]],
+    summary="Get perpetual open-interest history for an asset (404 for SPOT)",
+)
+async def get_asset_open_interest(
+    asset_id: UUID,
+    asset_repo: AssetRepo,
+    oi_repo: OpenInterestRepo,
+    limit: int = Query(100, ge=1, le=1000, description="Max most-recent OI observations"),
+) -> ResponseEnvelope[list[OpenInterestOut]]:
+    asset = await asset_repo.get_by_id(asset_id)
+    if asset is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Asset {asset_id} not found",
+        )
+    if asset.instrument_type != "PERPETUAL":
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Asset {asset_id} ({asset.symbol}) is SPOT — open interest only exists for PERPETUAL instruments",
+        )
+    rows = await oi_repo.get_open_interest_history(asset_id, limit)
+    return ok([OpenInterestOut.model_validate(r, from_attributes=True) for r in rows])

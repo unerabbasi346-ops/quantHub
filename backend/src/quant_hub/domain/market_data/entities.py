@@ -262,3 +262,48 @@ class FundingRate:
     interval_hours: int | None = None
     source: str | None = None
     data_quality: str = "CLEAN"
+
+
+@dataclass(frozen=True)
+class RawOpenInterest:
+    """Connector output prior to asset_id resolution — a periodic perpetual
+    open-interest observation (migration b4f8e21ac9d3).
+
+    Open interest (total outstanding notional/contracts on a perpetual) has
+    no Doc 14 section of its own — same genuine spec gap already flagged for
+    RawFundingRate, hooked to the same §10.9.5 Financing Costs anchor since
+    both are perpetual-only market-structure series. Sourced from ccxt's
+    fetch_open_interest_history for a PERPETUAL instrument
+    (`asset.instrument_type == "PERPETUAL"`); a SPOT instrument has no OI.
+
+    `open_interest_usdt` is the notional value (ccxt's `openInterestValue`,
+    USDT-denominated on a linear perp). `open_interest_contracts` (ccxt's
+    `openInterestAmount`) is nullable — a future connector might not expose
+    both, and never fabricated when absent.
+    """
+
+    asset: AssetRef
+    ts: datetime
+    open_interest_usdt: Decimal
+    open_interest_contracts: Decimal | None = None
+    source: str | None = None
+    data_quality: str = "CLEAN"
+
+
+@dataclass(frozen=True)
+class OpenInterest:
+    """Persistence-ready open-interest observation — market_data.open_interest
+    (migration b4f8e21ac9d3). The asset_id-resolved counterpart to
+    RawOpenInterest, mirroring the RawFundingRate/FundingRate split.
+
+    Idempotent on the (asset_id, ts) PRIMARY KEY — the same idempotent-
+    ingestion pattern as ohlcv_bars/funding_rates, so re-fetching an OI
+    window revises rather than duplicates.
+    """
+
+    asset_id: UUID
+    ts: datetime
+    open_interest_usdt: Decimal
+    open_interest_contracts: Decimal | None = None
+    source: str | None = None
+    data_quality: str = "CLEAN"

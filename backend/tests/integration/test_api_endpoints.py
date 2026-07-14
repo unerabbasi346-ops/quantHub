@@ -201,3 +201,62 @@ async def test_capital_unknown_portfolio_404(api) -> None:
         json={"configured_capital": "1000"},
     )
     assert resp.status_code == 404
+
+
+# ── GET /v1/assets/{id}/open-interest (migration b4f8e21ac9d3) ─────────────
+async def _seed_asset(session: AsyncSession, symbol: str, instrument_type: str) -> str:
+    row = await session.execute(
+        text(
+            "INSERT INTO market_data.assets (symbol, exchange, asset_class, currency, instrument_type) "
+            "VALUES (:s, 'test', 'crypto', 'USD', :it) RETURNING id"
+        ),
+        {"s": symbol, "it": instrument_type},
+    )
+    return str(row.scalar_one())
+
+
+@pytest.mark.asyncio
+async def test_open_interest_returns_real_data_for_perpetual(api) -> None:
+    client, session = api
+    asset_id = await _seed_asset(session, "OITEST/USDT:USDT", "PERPETUAL")
+    await session.execute(
+        text(
+            "INSERT INTO market_data.open_interest "
+            "(asset_id, ts, open_interest_usdt, open_interest_contracts) "
+            "VALUES (:a, :t, :usdt, :contracts)"
+        ),
+        {
+            "a": asset_id,
+            "t": datetime(2026, 7, 14, tzinfo=timezone.utc),
+            "usdt": "6666884964.56092",
+            "contracts": "106325.509",
+        },
+    )
+
+    resp = await client.get(f"/v1/assets/{asset_id}/open-interest")
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert len(data) == 1
+    assert data[0]["asset_id"] == asset_id
+    assert data[0]["open_interest_usdt"] == "6666884964.56092000"
+    assert data[0]["open_interest_contracts"] == "106325.50900000"
+
+
+@pytest.mark.asyncio
+async def test_open_interest_404s_for_spot_instrument(api) -> None:
+    client, session = api
+    asset_id = await _seed_asset(session, "OISPOT/USDT", "SPOT")
+
+    resp = await client.get(f"/v1/assets/{asset_id}/open-interest")
+
+    assert resp.status_code == 404
+    body = resp.json()
+    assert "SPOT" in body["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_open_interest_unknown_asset_404(api) -> None:
+    client, _ = api
+    resp = await client.get("/v1/assets/00000000-0000-0000-0000-000000000000/open-interest")
+    assert resp.status_code == 404

@@ -25,6 +25,7 @@ from quant_hub.domain.market_data.entities import (
     CorporateAction,
     FundingRate,
     OHLCVBar,
+    OpenInterest,
     Tick,
 )
 
@@ -236,5 +237,42 @@ class FundingRateRepository(ABC):
     async def get_latest_ts(self, asset_id: UUID) -> datetime | None:
         """Most recent persisted funding_time for asset_id, or None — the
         late-arrival/ingestion watermark, mirroring OHLCVRepository.get_latest_ts.
+        """
+        ...
+
+
+class OpenInterestRepository(ABC):
+    """Persistence contract for market_data.open_interest — perpetual open-
+    interest observations (migration b4f8e21ac9d3).
+
+    Follows FundingRateRepository's shape exactly: idempotent batch write +
+    a bounded chronological read. Kept separate from OHLCV/tick/funding repos
+    for the same reason FundingRateRepository is separate — OI is a distinct
+    perpetual-only data series.
+    """
+
+    @abstractmethod
+    async def upsert_open_interest(self, rows: list[OpenInterest]) -> int:
+        """Idempotently persist OI observations, returning the count written.
+
+        Idempotent on the (asset_id, ts) PRIMARY KEY per Doc 11 §2
+        ("Idempotent ingestion") — re-fetching an OI window revises rather
+        than duplicates, the same pattern as upsert_funding_rates/upsert_bars.
+        """
+        ...
+
+    @abstractmethod
+    async def get_open_interest_history(
+        self, asset_id: UUID, limit: int = 100
+    ) -> list[OpenInterest]:
+        """Most recent `limit` OI rows for asset_id, oldest -> newest — same
+        most-recent-N-then-chronological contract as get_funding_rates/get_bars.
+        """
+        ...
+
+    @abstractmethod
+    async def get_latest_ts(self, asset_id: UUID) -> datetime | None:
+        """Most recent persisted ts for asset_id, or None — the late-arrival/
+        ingestion watermark, mirroring FundingRateRepository.get_latest_ts.
         """
         ...
