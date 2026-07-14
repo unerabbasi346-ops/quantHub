@@ -11,14 +11,13 @@ import { Badge, EmptyState, Heatmap, Panel, Section, Tabs } from '@/components/u
 import { consecutiveRuns, monthlyConvictionGrid } from '@/features/strategies/analytics'
 import { ConsecutiveRunsChart } from '@/features/strategies/components/charts'
 import { PendingMetricTile, RealMetricTile } from '@/features/strategies/components/metric-tiles'
+import { fmtMoney, fmtReturnPct } from '@/features/strategies/components/tables'
 import type { Backtest, Signal } from '@/features/strategies/types'
+import { formatCount, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import { longShortSplit } from '../analytics'
 import { LongShortDonut } from './charts'
 
-const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
-const fmtMoney = (v: string | null) =>
-  v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtDate = (ts: string | null) => (ts ? new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—')
+const fmtDate = (ts: string | null) => (ts ? formatTimestamp(ts) : '—')
 
 function OverviewTab({ backtest }: { backtest: Backtest | null }) {
   const results = backtest?.results ?? null
@@ -38,7 +37,7 @@ function OverviewTab({ backtest }: { backtest: Backtest | null }) {
         value={backtest.start_date && backtest.end_date ? `${fmtDate(backtest.start_date)} → ${fmtDate(backtest.end_date)}` : '—'}
       />
       <RealMetricTile label="Total return" value={fmtReturnPct(backtest.total_return)} tone={retNum == null ? 'default' : retNum >= 0 ? 'profit' : 'risk'} />
-      <RealMetricTile label="Trade count" value={tradeCount ?? '—'} />
+      <RealMetricTile label="Trade count" value={tradeCount != null ? formatCount(tradeCount) : '—'} />
       <RealMetricTile label="Realized P&L" value={results ? fmtMoney(results.realized_pnl) : '—'} tone={realizedNum == null ? 'default' : realizedNum >= 0 ? 'profit' : 'risk'} />
       <RealMetricTile label="Final capital" value={fmtMoney(backtest.final_capital)} />
       <RealMetricTile
@@ -71,7 +70,7 @@ function MonthlyReturnsTab({ signals }: { signals: Signal[] }) {
         min={-monthly.maxAbs}
         max={monthly.maxAbs}
         height={Math.max(180, monthly.years.length * 70 + 90)}
-        valueFormat={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(3)}`}
+        valueFormat={(v) => formatSignalStrength(v)}
       />
     </Panel>
   )

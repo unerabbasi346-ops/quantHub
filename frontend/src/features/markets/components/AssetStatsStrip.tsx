@@ -7,6 +7,7 @@
 
 import { CryptoIcon } from '@/components/ui/CryptoIcon'
 import { cn } from '@/lib/utils/cn'
+import { formatReturn } from '@/lib/utils/format'
 import { computeDayChange } from '../analytics'
 import type { Asset, OHLCVBar } from '../types'
 
@@ -47,8 +48,7 @@ export function AssetStatsStrip({
               <>
                 <span className="font-mono text-xs tabular-nums text-fg-muted">{fmtPrice(dc.last)}</span>
                 <span className={cn('font-mono text-[11px] tabular-nums', dc.change >= 0 ? 'text-profit' : 'text-risk')}>
-                  {dc.change >= 0 ? '+' : ''}
-                  {dc.changePct.toFixed(2)}%
+                  {formatReturn(dc.changePct / 100)}
                 </span>
               </>
             ) : (

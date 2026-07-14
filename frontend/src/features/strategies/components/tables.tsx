@@ -9,11 +9,11 @@
 
 import { useMemo } from 'react'
 import { Badge, InstitutionalTable, type InstitutionalColumnDef, type BadgeVariant, pnlBadgeVariant } from '@/components/ui'
+import { formatCapital, formatReturn } from '@/lib/utils/format'
 import type { Backtest } from '../types'
 
-export const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
-export const fmtMoney = (v: string | null) =>
-  v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+export const fmtReturnPct = (v: string | null) => (v === null ? '—' : formatReturn(Number.parseFloat(v)))
+export const fmtMoney = (v: string | null) => (v === null ? '—' : formatCapital(Number.parseFloat(v)))
 
 export function backtestStatusVariant(status: string): BadgeVariant {
   switch (status.toUpperCase()) {

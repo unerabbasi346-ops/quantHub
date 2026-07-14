@@ -18,6 +18,7 @@ import {
   pnlBadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatTimestamp } from '@/lib/utils/format'
 import { num } from '../analytics'
 import type { Execution, Order, OrderStatus } from '../types'
 
@@ -27,15 +28,7 @@ const fmtPrice = (v: string | null) =>
 const fmtAbsolute = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
 function fmtRelative(ts: string): string {
-  const diffMs = Date.now() - new Date(ts).getTime()
-  const s = Math.floor(diffMs / 1000)
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
+  return formatTimestamp(ts)
 }
 
 function isUtcToday(iso: string): boolean {

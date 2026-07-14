@@ -13,14 +13,12 @@
 import { useState } from 'react'
 import { CircleDollarSign, Info } from 'lucide-react'
 import { Badge, Button, Panel, Ring, Section } from '@/components/ui'
+import { formatCapital } from '@/lib/utils/format'
 import { useSetCapital } from '../hooks/usePortfolio'
 import type { Portfolio } from '../types'
 
 function fmtMoney(value: string | number): string {
-  return Number(value).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
+  return formatCapital(Number(value))
 }
 
 // Capital Utilization — integrates the operator-set capital figure with REAL

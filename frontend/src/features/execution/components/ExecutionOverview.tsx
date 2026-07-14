@@ -9,6 +9,7 @@
 import { ListChecks, Percent } from 'lucide-react'
 import { DonutChart, Panel, Section, Stat } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatCapital, formatCount } from '@/lib/utils/format'
 import { computeStatusDistribution, computeTradeRatio } from '../analytics'
 import type { Execution, Order } from '../types'
 
@@ -62,8 +63,8 @@ export function ExecutionOverview({ orders, executions }: { orders: Order[]; exe
                 <div className="bg-risk transition-all" style={{ width: `${ratio.lossPct}%` }} />
               </div>
               <div className="mt-3 flex items-baseline justify-between">
-                <span className="font-mono text-2xl font-semibold text-profit tabular-nums">{ratio.winPct.toFixed(2)}%</span>
-                <span className="font-mono text-2xl font-semibold text-risk tabular-nums">{ratio.lossPct.toFixed(2)}%</span>
+                <span className="font-mono text-2xl font-semibold text-profit tabular-nums">{ratio.winPct.toFixed(1)}%</span>
+                <span className="font-mono text-2xl font-semibold text-risk tabular-nums">{ratio.lossPct.toFixed(1)}%</span>
               </div>
               <div className="mt-1 flex items-center justify-between text-xs">
                 <span className="font-medium text-profit">{ratio.wins} Positive</span>
@@ -72,16 +73,16 @@ export function ExecutionOverview({ orders, executions }: { orders: Order[]; exe
 
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <div className={cn('rounded-lg border border-border bg-surface-raised/50 p-3')}>
-                  <Stat label="Avg win" value={ratio.avgWin != null ? `+${ratio.avgWin.toFixed(2)}` : '—'} tone={ratio.avgWin != null ? 'profit' : 'default'} />
+                  <Stat label="Avg win" value={ratio.avgWin != null ? `+${formatCapital(ratio.avgWin)}` : '—'} tone={ratio.avgWin != null ? 'profit' : 'default'} />
                 </div>
                 <div className={cn('rounded-lg border border-border bg-surface-raised/50 p-3')}>
-                  <Stat label="Avg loss" value={ratio.avgLoss != null ? ratio.avgLoss.toFixed(2) : '—'} tone={ratio.avgLoss != null ? 'risk' : 'default'} />
+                  <Stat label="Avg loss" value={ratio.avgLoss != null ? formatCapital(ratio.avgLoss) : '—'} tone={ratio.avgLoss != null ? 'risk' : 'default'} />
                 </div>
                 <div className={cn('rounded-lg border border-border bg-surface-raised/50 p-3')}>
-                  <Stat label="Total wins" value={ratio.wins} tone="profit" />
+                  <Stat label="Total wins" value={formatCount(ratio.wins)} tone="profit" />
                 </div>
                 <div className={cn('rounded-lg border border-border bg-surface-raised/50 p-3')}>
-                  <Stat label="Total losses" value={ratio.losses} tone="risk" />
+                  <Stat label="Total losses" value={formatCount(ratio.losses)} tone="risk" />
                 </div>
               </div>
             </>

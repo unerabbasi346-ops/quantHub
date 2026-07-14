@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, Check, ChevronDown } from 'lucide-react'
 import { StatCard } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatCapital } from '@/lib/utils/format'
 import type { Strategy } from '@/features/strategies/types'
 import { num } from '../analytics'
 import type { Execution, Order } from '../types'
@@ -146,13 +147,13 @@ export function ExecutionHeader({
           <StatCard label="Total fills" value={executions.length} />
           <StatCard
             label="Avg fill size"
-            value={avgFillSize != null ? avgFillSize.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+            value={avgFillSize != null ? formatCapital(avgFillSize) : '—'}
             hint={avgFillSize != null ? 'USDT' : 'no fills'}
           />
           <StatCard label="Orders today" value={ordersToday} hint="UTC calendar day" />
           <StatCard
             label="Realized P&L today"
-            value={realizedToday != null ? `${realizedToday >= 0 ? '+' : ''}${realizedToday.toFixed(2)}` : '—'}
+            value={realizedToday != null ? `${realizedToday >= 0 ? '+' : ''}${formatCapital(realizedToday)}` : '—'}
             tone={realizedToday == null ? 'default' : realizedToday >= 0 ? 'profit' : 'risk'}
             hint={realizedToday == null ? 'no fills today' : 'fill-level, UTC day'}
           />

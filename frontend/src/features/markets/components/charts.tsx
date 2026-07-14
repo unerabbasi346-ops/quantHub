@@ -13,6 +13,7 @@
 import { Chart } from '@/components/ui/Chart'
 import { chartAxis, chartTooltip, type ChartTheme } from '@/components/ui/chart-theme'
 import { EmptyState } from '@/components/ui/States'
+import { formatRate, formatReturn } from '@/lib/utils/format'
 import { fmtCompactVolume, type RankedAsset } from '../analytics'
 import type { FundingRate } from '../types'
 
@@ -120,7 +121,7 @@ export function PerformanceRankingChart({
             formatter: (p: unknown) => {
               const d = p as { dataIndex: number }
               const r = ranked[d.dataIndex]
-              return `${r.symbol}<br/><b style="color:${r.value >= 0 ? theme.profit : theme.risk}">${r.value >= 0 ? '+' : ''}${r.value.toFixed(2)}%</b>`
+              return `${r.symbol}<br/><b style="color:${r.value >= 0 ? theme.profit : theme.risk}">${formatReturn(r.value / 100)}</b>`
             },
           }),
           grid: { left: 78, right: 40, top: 8, bottom: 8 },
@@ -152,7 +153,7 @@ export function PerformanceRankingChart({
                 color: theme.fgMuted,
                 fontFamily: theme.fontMono,
                 fontSize: 10,
-                formatter: (p: unknown) => `${(p as { value: number }).value >= 0 ? '+' : ''}${(p as { value: number }).value.toFixed(1)}%`,
+                formatter: (p: unknown) => formatReturn((p as { value: number }).value / 100),
               },
             },
           ],
@@ -173,7 +174,7 @@ export function FundingRateHistoryChart({ rates, height = 260 }: { rates: Fundin
     )
   }
 
-  const values = rates.map((r) => Number.parseFloat(r.funding_rate) * 100) // display as %
+  const values = rates.map((r) => Number.parseFloat(r.funding_rate)) // raw fraction; formatRate scales for display
   const posData = values.map((v) => (v >= 0 ? v : 0))
   const negData = values.map((v) => (v < 0 ? v : 0))
 
@@ -190,7 +191,7 @@ export function FundingRateHistoryChart({ rates, height = 260 }: { rates: Fundin
               const arr = params as { axisValue: string }[]
               const idx = rates.findIndex((r) => fmtDate(r.funding_time) === arr[0]?.axisValue)
               const v = idx >= 0 ? values[idx] : 0
-              return `${arr[0]?.axisValue}<br/><b style="color:${v >= 0 ? theme.risk : theme.profit}">${v >= 0 ? '+' : ''}${v.toFixed(4)}%</b>`
+              return `${arr[0]?.axisValue}<br/><b style="color:${v >= 0 ? theme.risk : theme.profit}">${formatRate(v)}</b>`
             },
           }),
           grid: { left: 56, right: 16, top: 20, bottom: 28 },
@@ -201,7 +202,7 @@ export function FundingRateHistoryChart({ rates, height = 260 }: { rates: Fundin
             ...axis,
             splitLine: { show: false },
           },
-          yAxis: { type: 'value', ...axis, axisLabel: { ...axis.axisLabel, formatter: (v: number) => `${v}%` } },
+          yAxis: { type: 'value', ...axis, axisLabel: { ...axis.axisLabel, formatter: (v: number) => formatRate(v) } },
           series: [
             {
               name: 'Funding rate',

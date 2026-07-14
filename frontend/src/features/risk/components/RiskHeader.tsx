@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, ShieldAlert } from 'lucide-react'
 import { StatCard } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatCapital } from '@/lib/utils/format'
 import type { Strategy } from '@/features/strategies/types'
 import type { Position } from '@/features/portfolio/types'
 import type { RiskLimit, RiskSnapshot } from '../types'
@@ -122,11 +123,11 @@ export function RiskHeader({
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
         <StatCard
           label="Gross exposure"
-          value={snapshot ? Number.parseFloat(snapshot.gross_exposure).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+          value={snapshot ? formatCapital(Number.parseFloat(snapshot.gross_exposure)) : '—'}
         />
         <StatCard
           label="Net exposure"
-          value={snapshot ? Number.parseFloat(snapshot.net_exposure).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+          value={snapshot ? formatCapital(Number.parseFloat(snapshot.net_exposure)) : '—'}
           tone={snapshot ? (Number.parseFloat(snapshot.net_exposure) >= 0 ? 'profit' : 'risk') : 'default'}
         />
         <StatCard label="Leverage ratio" value={snapshot ? `${Number.parseFloat(snapshot.gross_leverage).toFixed(2)}x` : '—'} />

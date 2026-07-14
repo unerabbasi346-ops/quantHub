@@ -29,6 +29,7 @@ import { motion } from 'framer-motion'
 import { useReveal } from '@/lib/motion'
 import { useUIStore } from '@/lib/store/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatCapital } from '@/lib/utils/format'
 import type { OHLCVBar } from '../types'
 
 // A real fill to overlay on the candles (owner request: BUY/SELL fill markers).
@@ -340,7 +341,7 @@ export function PriceChart({ bars, markers = [] }: { bars: OHLCVBar[]; markers?:
               </div>
               {m.impliedSizeUsdt != null ? (
                 <div className="mt-0.5 font-mono text-fg-muted">
-                  implied size <span className="text-fg">{Number.parseFloat(m.impliedSizeUsdt).toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT</span>
+                  implied size <span className="text-fg">{formatCapital(Number.parseFloat(m.impliedSizeUsdt))}</span>
                 </div>
               ) : (
                 <div className="mt-0.5 text-fg-subtle">implied size — n/a</div>

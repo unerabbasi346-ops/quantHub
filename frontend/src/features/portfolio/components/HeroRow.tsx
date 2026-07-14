@@ -19,12 +19,10 @@ import { LineChart as LineChartIcon, PieChart } from 'lucide-react'
 import { Badge, Panel, Section } from '@/components/ui'
 import { ConvictionEquityChart } from '@/features/strategies/components/charts'
 import { RealMetricTile } from '@/features/strategies/components/metric-tiles'
+import { fmtMoney, fmtReturnPct } from '@/features/strategies/components/tables'
 import type { Backtest } from '@/features/strategies/types'
+import { formatCount } from '@/lib/utils/format'
 import { ReturnGauge } from './charts'
-
-const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
-const fmtMoney = (v: string | null) =>
-  v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export function HeroRow({
   points,
@@ -59,7 +57,10 @@ export function HeroRow({
         <Panel className="space-y-4 p-4">
           <ReturnGauge returnPct={retNum} height={200} />
           <div className="grid grid-cols-2 gap-3">
-            <RealMetricTile label="Trade count" value={latestBacktest?.trade_count ?? results?.trade_count ?? '—'} />
+            <RealMetricTile
+              label="Trade count"
+              value={latestBacktest?.trade_count ?? results?.trade_count ? formatCount(latestBacktest?.trade_count ?? results?.trade_count ?? 0) : '—'}
+            />
             <RealMetricTile
               label="Realized P&L"
               value={results ? fmtMoney(results.realized_pnl) : '—'}

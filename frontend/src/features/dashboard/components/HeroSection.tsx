@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import { Badge, CryptoIcon, EmptyState, ErrorState, glassSurface, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatRatio, formatReturn } from '@/lib/utils/format'
 import { useReveal } from '@/lib/motion'
 import { useSyncStore } from '@/lib/store/sync'
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
@@ -104,8 +105,7 @@ function HeroMarketChart() {
             <div className="font-mono text-lg font-semibold tabular-nums text-fg">{fmtPrice(last.close)}</div>
             {changePct != null && (
               <div className={cn('font-mono text-[11px] tabular-nums', change! >= 0 ? 'text-profit' : 'text-risk')}>
-                {change! >= 0 ? '+' : ''}
-                {changePct.toFixed(2)}% · 24h
+                {formatReturn(changePct / 100)} · 24h
               </div>
             )}
           </div>

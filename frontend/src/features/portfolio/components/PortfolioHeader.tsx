@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Brain, Check, ChevronDown } from 'lucide-react'
 import { Badge, StatCard } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatCapital } from '@/lib/utils/format'
 import type { Strategy } from '@/features/strategies/types'
 import { computeCapitalUtilization, num, utilizationTone } from '../analytics'
 import type { Portfolio, Position } from '../types'
@@ -145,12 +146,12 @@ export function PortfolioHeader({
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <StatCard
             label="Portfolio NAV"
-            value={hasPortfolio && linkedPortfolio.configured_capital ? Number(linkedPortfolio.configured_capital).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+            value={hasPortfolio && linkedPortfolio.configured_capital ? formatCapital(Number(linkedPortfolio.configured_capital)) : '—'}
             hint={hasPortfolio ? 'configured capital' : 'no linked portfolio'}
           />
           <StatCard
             label="Total P&L"
-            value={totalPnl != null ? `${totalPnl >= 0 ? '+' : ''}${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+            value={totalPnl != null ? `${totalPnl >= 0 ? '+' : ''}${formatCapital(totalPnl)}` : '—'}
             tone={totalPnl == null ? 'default' : totalPnl >= 0 ? 'profit' : 'risk'}
             hint={pnlSourceLabel}
           />
@@ -160,7 +161,7 @@ export function PortfolioHeader({
             label="Capital utilization"
             value={utilization ? `${utilization.utilizationPct.toFixed(1)}%` : '—'}
             tone={utilization ? utilizationTone(utilization.utilizationPct) : 'default'}
-            hint={utilization ? `${utilization.deployed.toLocaleString(undefined, { maximumFractionDigits: 0 })} deployed` : 'F-19: no capital configured'}
+            hint={utilization ? `${formatCapital(utilization.deployed)} deployed` : 'F-19: no capital configured'}
           />
         </div>
       )}

@@ -61,6 +61,7 @@ import {
   type Series,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatReturn, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import { EASE_OUT } from '@/lib/motion'
 import { useSyncStore } from '@/lib/store/sync'
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
@@ -71,22 +72,16 @@ import { consecutiveRuns, monthlyConvictionGrid, signalPoints } from '../analyti
 import { ConsecutiveRunsChart, ConvictionEquityChart, SignalStrengthDistributionChart, SignalTimelineScatter } from './charts'
 import { BacktestReturnTile, PendingMetricTile, RealMetricTile, RealRingTile } from './metric-tiles'
 import { BacktestRunCards, RecentSignalRows } from './rich-lists'
+import { fmtMoney, fmtReturnPct } from './tables'
 
 // Signal history depth for the detail workspace's derived analytics (monthly
 // heatmap, timeline scatter, streaks) — the backend caps at 1000; the flat
 // /strategies list and dashboard cards keep their own lighter default.
 const SIGNAL_HISTORY_LIMIT = 1000
 
-const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
-const fmtMoney = (v: string | null) =>
-  v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtSignal = (v: string) => {
-  const n = Number.parseFloat(v)
-  const s = n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })
-  return n > 0 ? `+${s}` : s
-}
-const fmtTime = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-const fmtDate = (ts: string | null) => (ts ? new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—')
+const fmtSignal = (v: string) => formatSignalStrength(Number.parseFloat(v))
+const fmtTime = (ts: string) => formatTimestamp(ts)
+const fmtDate = (ts: string | null) => (ts ? formatTimestamp(ts) : '—')
 
 function statusVariant(status: string): BadgeVariant {
   return status.toUpperCase() === 'ACTIVE' ? 'profit' : 'neutral'
@@ -472,7 +467,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
               min={-monthly.maxAbs}
               max={monthly.maxAbs}
               height={Math.max(180, monthly.years.length * 70 + 90)}
-              valueFormat={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(3)}`}
+              valueFormat={(v) => formatSignalStrength(v)}
             />
           )}
         </Panel>
@@ -706,7 +701,7 @@ function MarketContext({ symbol }: { symbol: string | null }) {
                 </div>
                 {changePct != null && (
                   <div className={cn('font-mono text-xs tabular-nums', change! >= 0 ? 'text-profit' : 'text-risk')}>
-                    {change! >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+                    {formatReturn(changePct / 100)}
                   </div>
                 )}
               </div>

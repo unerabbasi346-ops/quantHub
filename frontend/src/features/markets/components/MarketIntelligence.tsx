@@ -8,6 +8,7 @@
 import { Info, Sigma } from 'lucide-react'
 import { Badge, EmptyState, ErrorState, Panel, Section, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatRatio, formatReturn, formatVolatility } from '@/lib/utils/format'
 import { fmtCompactVolume, momentumZone, type PriceStats } from '../analytics'
 import type { Asset, FundingRate } from '../types'
 import { FundingRateHistoryChart } from './charts'
@@ -102,7 +103,7 @@ function PriceStatistics({ asset, stats, barCount }: { asset: Asset; stats: Pric
 
         <StatTile
           label="30-day return"
-          value={stats.return30d != null ? `${stats.return30d >= 0 ? '+' : ''}${stats.return30d.toFixed(2)}%` : '—'}
+          value={stats.return30d != null ? formatReturn(stats.return30d / 100) : '—'}
         />
         <StatTile label="7-day avg volume" value={stats.avgVolume7d != null ? fmtCompactVolume(stats.avgVolume7d) : '—'} />
 
@@ -111,7 +112,7 @@ function PriceStatistics({ asset, stats, barCount }: { asset: Asset; stats: Pric
           value={
             stats.momentumZScore != null ? (
               <Badge variant={MOMENTUM_VARIANT[momentumZone(stats.momentumZScore)]}>
-                {MOMENTUM_LABEL[momentumZone(stats.momentumZScore)]} · z={stats.momentumZScore.toFixed(2)}
+                {MOMENTUM_LABEL[momentumZone(stats.momentumZScore)]} · z={formatRatio(stats.momentumZScore)}
               </Badge>
             ) : (
               '—'
@@ -124,7 +125,7 @@ function PriceStatistics({ asset, stats, barCount }: { asset: Asset; stats: Pric
           value={
             stats.volatilityAnnualizedPct != null ? (
               <Badge variant={volatilityTone(stats.volatilityAnnualizedPct)}>
-                {stats.volatilityAnnualizedPct.toFixed(1)}%
+                {formatVolatility(stats.volatilityAnnualizedPct / 100)}
               </Badge>
             ) : (
               '—'

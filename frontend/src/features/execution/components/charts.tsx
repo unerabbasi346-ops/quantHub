@@ -7,14 +7,10 @@ import { useMemo } from 'react'
 import { Chart } from '@/components/ui/Chart'
 import { chartAxis, chartTooltip, type ChartTheme } from '@/components/ui/chart-theme'
 import { EmptyState } from '@/components/ui/States'
+import { formatCapital } from '@/lib/utils/format'
 import type { CumulativePnlPoint, FunnelStage, HourBucket, StrategyPnlRow } from '../analytics'
 
-const fmtUsdt = (v: number): string => {
-  const abs = Math.abs(v)
-  if (abs >= 1e6) return `${(v / 1e6).toFixed(1)}M`
-  if (abs >= 1e3) return `${(v / 1e3).toFixed(1)}K`
-  return v.toFixed(2)
-}
+const fmtUsdt = (v: number): string => formatCapital(v)
 
 // ── Fill size distribution — histogram over real fill notionals (USDT). ──
 export function FillSizeHistogram({ notionals, height = 220 }: { notionals: number[]; height?: number }) {
@@ -52,7 +48,7 @@ export function FillSizeHistogram({ notionals, height = 220 }: { notionals: numb
             trigger: 'item',
             formatter: (p: unknown) => {
               const b = bins[(p as { dataIndex: number }).dataIndex]
-              return `<b>${b.count}</b> ${b.count === 1 ? 'fill' : 'fills'}<br/>${fmtUsdt(b.from)} … ${fmtUsdt(b.to)} USDT`
+              return `<b>${b.count}</b> ${b.count === 1 ? 'fill' : 'fills'}<br/>${fmtUsdt(b.from)} … ${fmtUsdt(b.to)}`
             },
           }),
           grid: { left: 40, right: 14, top: 12, bottom: 28 },

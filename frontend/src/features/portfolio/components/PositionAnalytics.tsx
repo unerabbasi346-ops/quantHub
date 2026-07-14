@@ -22,15 +22,15 @@ import {
   pnlBadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatCapital, formatReturn } from '@/lib/utils/format'
 import { computeCapitalUtilization, num } from '../analytics'
 import type { Portfolio, Position } from '../types'
 
-const fmtMoney = (v: string | number) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtMoney = (v: string | number) => formatCapital(Number(v))
 const fmtQty = (v: string) => Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 8 })
 const fmtPnl = (v: string | number) => {
   const n = Number(v)
-  const s = n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-  return n > 0 ? `+${s}` : s
+  return n > 0 ? `+${formatCapital(n)}` : formatCapital(n)
 }
 
 function NoLinkedPortfolio({ title }: { title: string }) {
@@ -120,7 +120,7 @@ function PositionsTable({ positions }: { positions: Position[] }) {
           const costBasis = Math.abs(num(p.quantity)) * num(p.average_entry_price)
           if (!(costBasis > 0)) return '—'
           const pct = (num(p.unrealized_pnl) / costBasis) * 100
-          return <span className={cn('font-mono tabular-nums', pct >= 0 ? 'text-profit' : 'text-risk')}>{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>
+          return <span className={cn('font-mono tabular-nums', pct >= 0 ? 'text-profit' : 'text-risk')}>{formatReturn(pct / 100)}</span>
         },
         meta: { numeric: true, hideBelow: 'laptop' },
       },

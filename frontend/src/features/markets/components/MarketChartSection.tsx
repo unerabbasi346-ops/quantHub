@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { Badge, CryptoIcon, EmptyState, ErrorState, Panel } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatRate, formatReturn } from '@/lib/utils/format'
 import { computeDayChange, num } from '../analytics'
 import type { Asset, FundingRate, OHLCVBar } from '../types'
 import { PriceChart, type FillMarker } from './PriceChart'
@@ -117,10 +118,10 @@ export function MarketChartSection({
 }) {
   const dc = computeDayChange(bars)
   const isPerp = asset.instrument_type === 'PERPETUAL'
-  const fundingPct = latestFunding ? num(latestFunding.funding_rate) * 100 : null
+  const fundingRate = latestFunding ? num(latestFunding.funding_rate) : null
   // Positive funding = longs pay shorts = bearish signal -> risk red;
   // negative = shorts pay longs = bullish -> profit green (task spec).
-  const fundingTone = fundingPct == null ? null : fundingPct >= 0 ? 'risk' : 'profit'
+  const fundingTone = fundingRate == null ? null : fundingRate >= 0 ? 'risk' : 'profit'
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_16rem]">
@@ -175,8 +176,7 @@ export function MarketChartSection({
                 {fmtPrice(dc.last)}
               </div>
               <div className={cn('font-mono text-sm tabular-nums', dc.change >= 0 ? 'text-profit' : 'text-risk')}>
-                {dc.change >= 0 ? '+' : ''}
-                {dc.changePct.toFixed(2)}% · 24h
+                {formatReturn(dc.changePct / 100)} · 24h
               </div>
             </div>
 
@@ -208,10 +208,9 @@ export function MarketChartSection({
             {isPerp && (
               <div className="flex items-center justify-between border-t border-border pt-3 text-sm">
                 <span className="text-fg-subtle">Funding rate</span>
-                {fundingPct != null ? (
+                {fundingRate != null ? (
                   <span className={cn('font-mono', fundingTone === 'risk' ? 'text-risk' : 'text-profit')}>
-                    {fundingPct >= 0 ? '+' : ''}
-                    {fundingPct.toFixed(4)}%
+                    {formatRate(fundingRate)}
                   </span>
                 ) : (
                   <Badge variant="neutral">no data</Badge>

@@ -6,16 +6,11 @@
 import { Chart } from '@/components/ui/Chart'
 import { chartAxis, chartTooltip, type ChartTheme } from '@/components/ui/chart-theme'
 import { EmptyState } from '@/components/ui/States'
+import { formatCapital, formatOI } from '@/lib/utils/format'
 import type { ConcentrationRow, DivergencePoint, LeverageRow } from '../analytics'
 import type { OpenInterest } from '@/features/markets/types'
 
-const fmtCompact = (v: number): string => {
-  const abs = Math.abs(v)
-  if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}B`
-  if (abs >= 1e6) return `${(v / 1e6).toFixed(1)}M`
-  if (abs >= 1e3) return `${(v / 1e3).toFixed(1)}K`
-  return v.toFixed(0)
-}
+const fmtCompact = (v: number): string => formatCapital(v)
 
 // ── Exposure gauge: gross exposure as % of configured capital, task-specific
 //    color zones (green <50%, amber 50-80%, red >80%) — deliberately its own
@@ -230,7 +225,7 @@ export function OpenInterestPriceChart({
             formatter: (params: unknown) => {
               const arr = params as { seriesName: string; value: [number, number]; axisValueLabel: string }[]
               const lines = arr.map((p) => {
-                if (p.seriesName === 'Open interest') return `OI: <b>${fmtCompact(p.value[1])}</b>`
+                if (p.seriesName === 'Open interest') return `OI: <b>${formatOI(p.value[1])}</b>`
                 return `Price: <b>${p.value[1].toLocaleString(undefined, { maximumFractionDigits: 2 })}</b>`
               })
               return `${arr[0]?.axisValueLabel}<br/>${lines.join('<br/>')}`
@@ -256,7 +251,7 @@ export function OpenInterestPriceChart({
               name: 'OI (USDT)',
               nameTextStyle: { color: theme.fgSubtle, fontSize: 10 },
               ...axis,
-              axisLabel: { ...axis.axisLabel, formatter: (v: number) => fmtCompact(v) },
+              axisLabel: { ...axis.axisLabel, formatter: (v: number) => formatOI(v) },
             },
             {
               type: 'value',

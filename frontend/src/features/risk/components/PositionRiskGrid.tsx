@@ -10,6 +10,7 @@ import { Badge, Panel, Section } from '@/components/ui'
 import { useAssets, useFundingRates } from '@/features/markets/hooks/useMarkets'
 import { FundingRateHistoryChart } from '@/features/markets/components/charts'
 import type { Position } from '@/features/portfolio/types'
+import { formatRate } from '@/lib/utils/format'
 import type { RiskLimit } from '../types'
 import { computeConcentration, computeLeverageRows, num } from '../analytics'
 import { ConcentrationChart, LeverageUtilizationChart } from './charts'
@@ -31,7 +32,7 @@ function FundingRateMonitor({ positions }: { positions: Position[] }) {
   const allRates = fundingQuery.data ?? []
   const recent = allRates.slice(-FUNDING_WINDOW_COUNT)
   const latest = recent.at(-1)
-  const latestPct = latest ? num(latest.funding_rate) * 100 : null
+  const latestRate = latest ? num(latest.funding_rate) : null
 
   return (
     <Section icon={<Sigma size={16} />} title="Funding rate monitor" description={activePerp ? `${activePerp.symbol}, last 48h of 8h funding periods.` : 'No perpetual instrument available.'}>
@@ -42,12 +43,11 @@ function FundingRateMonitor({ positions }: { positions: Position[] }) {
           <div className="skeleton h-[220px] w-full" />
         ) : (
           <>
-            {latestPct != null && (
+            {latestRate != null && (
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-[11px] uppercase tracking-wide text-fg-subtle">Latest rate</span>
-                <span className={`font-mono text-lg font-bold tabular-nums ${latestPct >= 0 ? 'text-risk' : 'text-profit'}`}>
-                  {latestPct >= 0 ? '+' : ''}
-                  {latestPct.toFixed(4)}%
+                <span className={`font-mono text-lg font-bold tabular-nums ${latestRate >= 0 ? 'text-risk' : 'text-profit'}`}>
+                  {formatRate(latestRate)}
                 </span>
               </div>
             )}

@@ -7,10 +7,11 @@ import { Gauge as GaugeIcon, Grid3x3 } from 'lucide-react'
 import { Panel, Section } from '@/components/ui'
 import { CorrelationMatrix } from '@/features/markets/components/CorrelationMatrix'
 import type { Position } from '@/features/portfolio/types'
+import { formatCapital } from '@/lib/utils/format'
 import { computeExposureSplit, num } from '../analytics'
 import { ExposureGauge } from './charts'
 
-const fmtMoney = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtMoney = (v: number) => formatCapital(v)
 
 export function ExposureOverview({ positions, configuredCapital }: { positions: Position[]; configuredCapital: string | null }) {
   const split = computeExposureSplit(positions)

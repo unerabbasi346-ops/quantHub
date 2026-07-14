@@ -15,18 +15,19 @@ import Link from 'next/link'
 import { ArrowUpRight, Brain } from 'lucide-react'
 import { Badge, Card, Sparkline } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatReturn, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import { useSyncStore } from '@/lib/store/sync'
 import type { StrategyPerformance } from '../hooks/useStrategyPerformance'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
 
 function returnPct(v: string | null): { text: string; tone: 'profit' | 'risk' | 'muted' } {
   if (v === null) return { text: '—', tone: 'muted' }
-  const n = Number.parseFloat(v) * 100
-  return { text: `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`, tone: n >= 0 ? 'profit' : 'risk' }
+  const n = Number.parseFloat(v)
+  return { text: formatReturn(n), tone: n >= 0 ? 'profit' : 'risk' }
 }
 
 function fmtSignalTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return formatTimestamp(iso)
 }
 
 // Honest "not computed" chip — real per-step equity-curve tracking does not
@@ -141,7 +142,7 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
           <Metric label="Signals" value={String(signals.length)} />
           <Metric
             label="Conviction"
-            value={conviction != null ? `${conviction >= 0 ? '+' : ''}${conviction.toFixed(3)}` : '—'}
+            value={conviction != null ? formatSignalStrength(conviction) : '—'}
             tone={conviction == null ? 'default' : conviction >= 0 ? 'profit' : 'risk'}
           />
           <Metric label="Asset" value={asset ?? '—'} />

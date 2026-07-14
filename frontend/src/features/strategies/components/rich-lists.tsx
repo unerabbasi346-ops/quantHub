@@ -12,19 +12,11 @@
 import { Hash, TrendingDown, TrendingUp, Wallet } from 'lucide-react'
 import { Badge, CryptoIcon, Panel, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import type { Backtest, Signal } from '../types'
 import { backtestStatusVariant, fmtMoney, fmtReturnPct } from './tables'
 
-const fmtDate = (ts: string | null) => (ts ? new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—')
-
-const relTime = (ts: string) => {
-  const ms = Date.now() - new Date(ts).getTime()
-  const mins = Math.round(ms / 60000)
-  if (mins < 60) return `${Math.max(mins, 0)}m ago`
-  const hours = Math.round(mins / 60)
-  if (hours < 48) return `${hours}h ago`
-  return `${Math.round(hours / 24)}d ago`
-}
+const fmtDate = (ts: string | null) => (ts ? formatTimestamp(ts) : '—')
 
 // ── Backtest run cards — glass tiles, 2/row on desktop, replacing the flat
 //    table for this page's dense visual layout. ──
@@ -113,8 +105,7 @@ export function RecentSignalRows({ signals, symbol }: { signals: Signal[]; symbo
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className={cn('font-mono text-sm font-semibold tabular-nums', v >= 0 ? 'text-profit' : 'text-risk')}>
-                    {v >= 0 ? '+' : ''}
-                    {v.toFixed(4)}
+                    {formatSignalStrength(v)}
                   </span>
                   <Badge variant={s.validation_status === 'VALID' ? 'profit' : 'warning'}>{s.validation_status}</Badge>
                 </div>
@@ -128,7 +119,7 @@ export function RecentSignalRows({ signals, symbol }: { signals: Signal[]; symbo
                   </div>
                 )}
               </div>
-              <span className="shrink-0 text-[11px] text-fg-subtle">{relTime(s.ts)}</span>
+              <span className="shrink-0 text-[11px] text-fg-subtle">{formatTimestamp(s.ts)}</span>
             </div>
           </div>
         )

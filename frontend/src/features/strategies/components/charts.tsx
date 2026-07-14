@@ -22,6 +22,7 @@
 import { Chart } from '@/components/ui/Chart'
 import { chartAxis, chartTooltip, type ChartTheme } from '@/components/ui/chart-theme'
 import { EmptyState } from '@/components/ui/States'
+import { formatSignalStrength } from '@/lib/utils/format'
 import type { ConsecutiveRun, SignalPoint } from '../analytics'
 
 const fmtTime = (ts: string) =>
@@ -188,7 +189,7 @@ export function SignalTimelineScatter({ points, height = 260 }: { points: Signal
             formatter: (p: unknown) => {
               const d = p as { value: [number, number] }
               const v = d.value[1]
-              return `${fmtTime(new Date(d.value[0]).toISOString())}<br/><b style="color:${v >= 0 ? theme.profit : theme.risk}">${v >= 0 ? '+' : ''}${v.toFixed(4)}</b>`
+              return `${fmtTime(new Date(d.value[0]).toISOString())}<br/><b style="color:${v >= 0 ? theme.profit : theme.risk}">${formatSignalStrength(v)}</b>`
             },
           }),
           grid: { left: 56, right: 16, top: 20, bottom: 28 },

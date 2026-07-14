@@ -47,6 +47,7 @@ import {
   type BadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatCapital, formatReturn, formatTimestamp } from '@/lib/utils/format'
 import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio, Position } from '@/features/portfolio/types'
 import { useOrders } from '@/features/execution/hooks/useExecution'
@@ -59,13 +60,11 @@ import { StrategySection } from './StrategySection'
 
 const PREFERRED_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT']
 
-const fmtMoney = (v: string | null) =>
-  v == null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtMoney = (v: string | null) => (v == null ? '—' : formatCapital(Number.parseFloat(v)))
 const fmtSigned = (v: number) => (v > 0 ? '+' : '') + fmtMoney(String(v))
 const fmtQty = (v: string) => Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 8 })
 const fmtLeverage = (v: string) => `${Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 6 })}×`
-const fmtTime = (iso: string | null) =>
-  !iso ? '—' : new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+const fmtTime = (iso: string | null) => (!iso ? '—' : formatTimestamp(iso))
 
 function WidgetHead({ icon, title, right }: { icon: ReactNode; title: string; right?: ReactNode }) {
   return (
@@ -253,7 +252,7 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
               <div className="mt-1 text-[11px] text-fg-subtle">
                 {marketAsset.symbol}
                 {dayChangePct != null && (
-                  <span className={dayChange! >= 0 ? 'text-profit' : 'text-risk'}> · {dayChange! >= 0 ? '+' : ''}{dayChangePct.toFixed(2)}% 24h</span>
+                  <span className={dayChange! >= 0 ? 'text-profit' : 'text-risk'}> · {formatReturn(dayChangePct / 100)} 24h</span>
                 )}
               </div>
             </>

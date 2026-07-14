@@ -38,17 +38,16 @@ import {
   type LinePoint,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
+import { formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import { useSyncStore } from '@/lib/store/sync'
 import { useBacktests, useSetStrategyStatus, useSignals, useStrategies } from '../hooks/useStrategies'
 import type { Backtest, Signal, Strategy } from '../types'
 import { BacktestRunsTable, fmtMoney, fmtReturnPct } from './tables'
 
 // ── formatters (display-only; API strings are the source of truth) ──
-const fmtSignal = (v: string) => {
-  const n = Number.parseFloat(v)
-  const s = n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })
-  return n > 0 ? `+${s}` : s
-}
+const fmtSignal = (v: string) => formatSignalStrength(Number.parseFloat(v))
+// Chart-axis labels need a stable absolute label (not "2h ago", which would
+// shift on every render) — kept distinct from formatTimestamp's relative form.
 const fmtTime = (ts: string) =>
   new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
@@ -339,7 +338,7 @@ function SignalTable({ signals }: { signals: Signal[] }) {
         id: 'ts',
         header: 'Time',
         accessorFn: (s) => new Date(s.ts).getTime(),
-        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{fmtTime(row.original.ts)}</span>,
+        cell: ({ row }) => <span className="whitespace-nowrap text-fg-muted">{formatTimestamp(row.original.ts)}</span>,
       },
       {
         id: 'value',

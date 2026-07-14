@@ -9,11 +9,9 @@ import { useQueries } from '@tanstack/react-query'
 import { GitCompare } from 'lucide-react'
 import { Badge, InstitutionalTable, type InstitutionalColumnDef, Panel, Section, pnlBadgeVariant } from '@/components/ui'
 import { strategiesService } from '@/features/strategies/services/strategies.service'
+import { fmtMoney, fmtReturnPct } from '@/features/strategies/components/tables'
 import type { Backtest, Strategy } from '@/features/strategies/types'
-
-const fmtReturnPct = (v: string | null) => (v === null ? '—' : `${(Number.parseFloat(v) * 100).toFixed(4)}%`)
-const fmtMoney = (v: string | null) =>
-  v === null ? '—' : Number.parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+import { formatCount } from '@/lib/utils/format'
 
 interface ComparisonRow {
   strategy: Strategy
@@ -68,7 +66,10 @@ export function StrategyComparison({ strategies }: { strategies: Strategy[] }) {
       id: 'trade_count',
       header: 'Trade Count',
       accessorFn: (r) => r.latest?.trade_count ?? r.latest?.results?.trade_count ?? -Infinity,
-      cell: ({ row }) => row.original.latest?.trade_count ?? row.original.latest?.results?.trade_count ?? '—',
+      cell: ({ row }) => {
+        const count = row.original.latest?.trade_count ?? row.original.latest?.results?.trade_count
+        return count != null ? formatCount(count) : '—'
+      },
       meta: { numeric: true },
     },
     {
