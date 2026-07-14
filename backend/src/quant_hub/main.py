@@ -18,6 +18,7 @@ from quant_hub.api.middleware import RequestIDMiddleware
 from quant_hub.api.ml import router as ml_router
 from quant_hub.api.v1.router import api_router
 from quant_hub.config import settings
+from quant_hub.hermes.api.hermes_router import router as hermes_router
 from quant_hub.infrastructure.cache import redis_pool
 from quant_hub.infrastructure.logging import configure_logging
 
@@ -66,3 +67,8 @@ app.include_router(api_router, prefix="/v1")
 # api/ml.py's module docstring): a separate, explicitly-named path per task
 # instruction, not part of the versioned governed REST API.
 app.include_router(ml_router, prefix="/api/ml")
+
+# Hermes observability surface — same deliberately-separate-from-/v1
+# convention as api/ml.py above (see hermes/api/hermes_router.py's module
+# docstring): coordinates/monitors only, never a governed REST resource.
+app.include_router(hermes_router, prefix="/api/hermes")
