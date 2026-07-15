@@ -135,7 +135,7 @@ export function RiskHeader({
           label="Margin used"
           value={margin ? `${margin.utilizationPct.toFixed(1)}%` : '—'}
           tone={margin ? (margin.utilizationPct > 80 ? 'risk' : margin.utilizationPct >= 50 ? 'warning' : 'profit') : 'default'}
-          hint={!margin ? 'F-19: no capital configured' : undefined}
+          hint={!margin ? 'no capital configured' : undefined}
         />
         <StatCard label="Active limits" value={limits.length} />
       </div>

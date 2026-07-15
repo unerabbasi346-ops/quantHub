@@ -3,6 +3,7 @@
 // Architecture: hooks separate business logic from presentation — Doc 08 §Architecture
 // Per Doc 00 §14.11
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ApiError } from '@/lib/api/client'
 import { strategiesService } from '../services/strategies.service'
 
 export function useStrategies() {
@@ -34,6 +35,24 @@ export function useBacktests(strategyId: string) {
   return useQuery({
     queryKey: ['backtests', strategyId],
     queryFn: () => strategiesService.getBacktests(strategyId),
+    enabled: Boolean(strategyId),
+  })
+}
+
+// Computed metrics 404 when the strategy has no COMPLETED backtest yet —
+// that's a real "no metrics" state, not a fetch failure, so it resolves to
+// null instead of an error.
+export function useStrategyMetrics(strategyId: string) {
+  return useQuery({
+    queryKey: ['strategy-metrics', strategyId],
+    queryFn: async () => {
+      try {
+        return await strategiesService.getMetrics(strategyId)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null
+        throw err
+      }
+    },
     enabled: Boolean(strategyId),
   })
 }

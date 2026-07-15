@@ -41,7 +41,6 @@ import type { Portfolio } from '@/features/portfolio/types'
 import { useOrdersByStrategy } from '@/features/execution/hooks/useExecution'
 import { useStrategies } from '@/features/strategies/hooks/useStrategies'
 import type { Strategy } from '@/features/strategies/types'
-import { PendingMetricTile } from '@/features/strategies/components/metric-tiles'
 import { useRiskAssessments, useRiskLimits, useRiskSnapshot } from '../hooks/useRisk'
 import type { PreTradeAssessment, RiskLimit, RiskSnapshot } from '../types'
 import { RiskHeader } from './RiskHeader'
@@ -78,7 +77,10 @@ export function RiskShell() {
   // surfaced dozens of dead one-off backtest portfolios instead of the 2
   // strategies that actually trade. The strategy's own most-recent real
   // order resolves which portfolio to show underneath.
-  const ordersQuery = useOrdersByStrategy(activeId)
+  // Only the single most recent order is needed to resolve which portfolio
+  // to show — a strategy can carry 40k+ backtest orders, and fetching all of
+  // them here (previously unbounded) took 20s+ and made this page look dead.
+  const ordersQuery = useOrdersByStrategy(activeId, 1)
   const orders = ordersQuery.data ?? []
   const resolvedPortfolioId = useMemo(() => {
     if (orders.length === 0) return null
@@ -94,7 +96,7 @@ export function RiskShell() {
       <PageHeader
         icon={<ShieldAlert size={18} />}
         title="Risk"
-        subtitle="Exposure, concentration, open interest & pre-trade assessments — Phase 3/S-10 recorded state."
+        subtitle="Exposure, concentration, open interest & pre-trade assessments — real recorded state."
       />
 
       {strategiesQuery.isLoading && <div className="skeleton h-24 w-full" />}
@@ -169,24 +171,21 @@ function RiskBody({
   )
 }
 
-// F-18 deferred metrics — honest visual shells (Pending F-18), never a
-// fabricated 0. Same established pattern as Strategy/Portfolio's
-// PendingMetricTile, not the "Computing…" framing (see metric-tiles.tsx).
+// VaR/CVaR/volatility/drawdown/beta need a real return-series or
+// equity-curve history this platform doesn't accumulate yet — one honest
+// line, not a grid of empty tile shells for each metric name.
 function DeferredMetricsPanel({ snapshot }: { snapshot: RiskSnapshot | null | undefined }) {
   if (!snapshot || snapshot.deferred_metrics.length === 0) return null
 
-  const shellFor = (name: string): 'ring' | 'bar' | 'number' => {
-    if (name.includes('var') || name.includes('cvar')) return 'ring'
-    if (name === 'max_drawdown') return 'bar'
-    return 'number'
-  }
-
   return (
-    <Section icon={<GaugeIcon size={16} />} title="Advanced risk metrics" description="VaR, CVaR, volatility, drawdown and beta need a real return-series / equity-curve history the platform doesn't accumulate yet (F-18).">
-      <Panel className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-5">
-        {snapshot.deferred_metrics.map((m) => (
-          <PendingMetricTile key={m.name} label={m.name.replace(/_/g, ' ')} ticket="F-18" shell={shellFor(m.name)} />
-        ))}
+    <Section icon={<GaugeIcon size={16} />} title="Advanced risk metrics">
+      <Panel className="flex items-center gap-3 p-4">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-fg-subtle">
+          <GaugeIcon size={16} />
+        </span>
+        <p className="text-sm text-fg-muted">
+          {snapshot.deferred_metrics.map((m) => m.name.replace(/_/g, ' ')).join(', ')} — requires return-series computation.
+        </p>
       </Panel>
     </Section>
   )
@@ -245,7 +244,7 @@ function Limits({ limits, query }: { limits: RiskLimit[]; query: ReturnType<type
       {query.isSuccess && limits.length === 0 && (
         <EmptyState
           title="No risk limits configured"
-          description="No governed risk limits are configured for this portfolio — shown honestly rather than a fabricated default set. Configurable metrics: gross/net exposure, leverage, position concentration, per-order notional (Doc 15 §11.5.7)."
+          description="No governed risk limits are configured for this portfolio — shown honestly rather than a fabricated default set. Configurable metrics: gross/net exposure, leverage, position concentration, per-order notional."
         />
       )}
       {query.isSuccess && limits.length > 0 && (

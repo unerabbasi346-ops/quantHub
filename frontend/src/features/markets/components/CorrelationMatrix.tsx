@@ -48,7 +48,7 @@ export function CorrelationMatrix({
         <p className="text-xs leading-relaxed text-fg-muted">
           <strong className="font-semibold text-fg">Market price-return correlation only.</strong>{' '}
           This is <strong className="font-semibold text-fg">not</strong> a portfolio risk metric — it is unrelated to VaR, CVaR,
-          beta or volatility, which aren&apos;t computed yet (F-18). It describes how these instruments&apos; prices have moved together, nothing about capital at risk.
+          beta or volatility, which aren&apos;t computed yet. It describes how these instruments&apos; prices have moved together, nothing about capital at risk.
         </p>
       </div>
 

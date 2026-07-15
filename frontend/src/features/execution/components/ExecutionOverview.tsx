@@ -28,7 +28,7 @@ export function ExecutionOverview({ orders, executions }: { orders: Order[]; exe
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <Section icon={<ListChecks size={16} />} title="Order status breakdown" description="Real lifecycle-state distribution (Doc 14 §10.7.4).">
+      <Section icon={<ListChecks size={16} />} title="Order status breakdown" description="Real lifecycle-state distribution.">
         <Panel className="p-4">
           {statusDist.length > 0 ? (
             <>

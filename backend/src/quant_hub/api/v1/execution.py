@@ -262,6 +262,7 @@ async def get_strategy_orders(
     order_repo: OrderRepo,
     asset_repo: AssetRepo,
     execution_repo: ExecutionRepo,
+    limit: int | None = Query(None, gt=0, le=5000),
 ) -> ResponseEnvelope[list[OrderOut]]:
     # Filters on core.orders.strategy_id directly (real FK lineage) rather
     # than routing through the strategy's own portfolio_id, which is unset
@@ -273,12 +274,12 @@ async def get_strategy_orders(
             ErrorCode.RESOURCE_NOT_FOUND,
             f"Strategy {strategy_id} not found",
         )
-    orders = await order_repo.list_by_strategy(strategy_id)
+    orders = await order_repo.list_by_strategy(strategy_id, limit=limit)
     assets: dict[UUID, Asset | None] = {}
     for order in orders:
         if order.asset_id not in assets:
             assets[order.asset_id] = await asset_repo.get_by_id(order.asset_id)
-    executions = await execution_repo.list_by_strategy(strategy_id)
+    executions = await execution_repo.list_by_strategy(strategy_id, limit=limit)
     realized_by_order: dict[UUID, Decimal | None] = {e.order_id: e.realized_pnl for e in executions}
     return ok(
         [
@@ -297,6 +298,7 @@ async def get_strategy_executions(
     strategy_id: UUID,
     strategy_repo: StrategyRepo,
     execution_repo: ExecutionRepo,
+    limit: int | None = Query(None, gt=0, le=5000),
 ) -> ResponseEnvelope[list[ExecutionOut]]:
     if await strategy_repo.get_by_id(strategy_id) is None:
         raise ApiError(
@@ -304,5 +306,5 @@ async def get_strategy_executions(
             ErrorCode.RESOURCE_NOT_FOUND,
             f"Strategy {strategy_id} not found",
         )
-    executions = await execution_repo.list_by_strategy(strategy_id)
+    executions = await execution_repo.list_by_strategy(strategy_id, limit=limit)
     return ok([ExecutionOut.from_recorded(e) for e in executions])

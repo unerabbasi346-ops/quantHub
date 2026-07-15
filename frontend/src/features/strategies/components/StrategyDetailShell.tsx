@@ -61,11 +61,11 @@ import {
   type Series,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatReturn, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
+import { formatMaxDrawdownPct, formatReturn, formatSharpe, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import { EASE_OUT } from '@/lib/motion'
 import { useSyncStore } from '@/lib/store/sync'
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
-import { useBacktests, useSignals, useStrategies } from '../hooks/useStrategies'
+import { useBacktests, useSignals, useStrategies, useStrategyMetrics } from '../hooks/useStrategies'
 import type { Signal, Strategy } from '../types'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
 import { consecutiveRuns, monthlyConvictionGrid, signalPoints } from '../analytics'
@@ -350,6 +350,8 @@ function StatPillStrip({
 function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
   const signalsQuery = useSignals(strategy.id, SIGNAL_HISTORY_LIMIT)
   const backtestsQuery = useBacktests(strategy.id)
+  const metricsQuery = useStrategyMetrics(strategy.id)
+  const metrics = metricsQuery.data
   const signals = signalsQuery.data ?? []
   const backtests = backtestsQuery.data ?? []
   const latest = backtests[0] ?? null
@@ -406,7 +408,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         <Section
           icon={<LineChartIcon size={16} />}
           title="Equity curve"
-          description="Signed conviction over time — an honest equity proxy (per-step P&L isn't tracked yet, F-21). Green above zero, red drawdown shading below."
+          description="Signed conviction over time — an honest equity proxy (per-step P&L isn't tracked yet). Green above zero, red drawdown shading below."
         >
           <Panel className="p-4">
             {signalsQuery.isLoading ? (
@@ -435,13 +437,33 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
 
         <Section icon={<GaugeIcon size={16} />} title="Performance metrics" description="Real where computable; honestly deferred otherwise.">
           <Panel className="grid grid-cols-2 gap-3 p-4">
-            <PendingMetricTile label="Win rate" ticket="F-21" shell="ring" />
-            <PendingMetricTile label="Sharpe ratio" ticket="F-21" shell="number" />
-            <PendingMetricTile label="Max drawdown" ticket="F-21" shell="bar" />
+            {metrics?.win_rate != null ? (
+              <RealRingTile label="Win rate" value={Number.parseFloat(metrics.win_rate)} />
+            ) : (
+              <PendingMetricTile label="Win rate" shell="ring" />
+            )}
+            {metrics?.sharpe_ratio != null ? (
+              <RealMetricTile label="Sharpe ratio" value={formatSharpe(Number.parseFloat(metrics.sharpe_ratio))} />
+            ) : (
+              <PendingMetricTile label="Sharpe ratio" shell="number" />
+            )}
+            {metrics?.max_drawdown_pct != null ? (
+              <RealMetricTile
+                label="Max drawdown"
+                value={formatMaxDrawdownPct(Number.parseFloat(metrics.max_drawdown_pct))}
+                tone="risk"
+              />
+            ) : (
+              <PendingMetricTile label="Max drawdown" shell="bar" />
+            )}
             <RealMetricTile icon={<Activity size={11} />} label="Total signals" value={signals.length} />
             <RealRingTile label="Valid rate" value={validity} hint={`${validCount}/${signals.length}`} />
             <RealMetricTile icon={<Hash size={11} />} label="Trade count" value={tradeCount ?? '—'} />
-            <PendingMetricTile label="Profit factor" ticket="F-21" shell="number" />
+            {metrics?.profit_factor != null ? (
+              <RealMetricTile label="Profit factor" value={Number.parseFloat(metrics.profit_factor).toFixed(2)} />
+            ) : (
+              <PendingMetricTile label="Profit factor" shell="number" />
+            )}
             <BacktestReturnTile
               label="Backtest return"
               valueText={fmtReturnPct(latest?.total_return ?? null)}
@@ -631,7 +653,7 @@ function ConfigChipsCard({ strategy }: { strategy: Strategy }) {
         </div>
       )}
       <p className="mt-4 border-t border-border pt-3 text-[11px] leading-relaxed text-fg-subtle">
-        Shows the current registration only — version history and rollback aren&apos;t available yet (F-9). Configuration
+        Shows the current registration only — version history and rollback aren&apos;t available yet. Configuration
         is owned by the strategy and shown exactly as registered.
       </p>
     </Panel>

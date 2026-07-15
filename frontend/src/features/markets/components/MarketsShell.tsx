@@ -220,7 +220,7 @@ export function MarketsShell() {
       <PageHeader
         icon={<CandlestickChart size={18} />}
         title="Markets"
-        subtitle="Live OHLCV market data, cross-asset analytics, and perpetual funding — Phase 1/S-10 ingested data."
+        subtitle="Live OHLCV market data, cross-asset analytics, and perpetual funding — real ingested data."
       />
 
       {assetsQuery.isLoading && <div className="skeleton h-16 w-full rounded-full" />}

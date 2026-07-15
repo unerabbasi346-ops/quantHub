@@ -70,7 +70,7 @@ export function PortfolioShell() {
       <PageHeader
         icon={<Wallet size={18} />}
         title="Portfolio"
-        subtitle="Strategy-driven NAV, positions and backtest performance — Phase 3/S-10 recorded state."
+        subtitle="Strategy-driven NAV, positions and backtest performance — real recorded state."
       />
 
       {strategiesQuery.isLoading && <div className="skeleton h-24 w-full" />}

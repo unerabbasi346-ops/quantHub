@@ -1,22 +1,24 @@
 // Governing specification: Doc 03 §Strategy Cards ("miniature research reports":
 //   Status, mini equity curve, Signal Count, Current Conviction, Current Asset,
 //   Last Signal + the risk metrics), Doc 04 §Strategy Performance Card.
-// Doc 00 §14.5/§14.7 — DATA HONESTY: every number real; uncomputed metrics show
-//   an explicit "Not yet computed" state (F-18 risk metrics / F-21 equity-curve),
-//   never a fabricated value. Per Doc 00 §14.11
+// Doc 00 §14.5/§14.7 — DATA HONESTY: every number real; a metric with no
+//   completed backtest to compute it from shows a plain dash, never a
+//   fabricated value. Per Doc 00 §14.11
 //
 // One glowing card per registered strategy. Clicking it opens /strategies/[id].
 // The card packs the Doc 03 field set that REAL data supports (signals-derived:
-// count, current conviction, asset, last signal) and honestly defers the metrics
-// the platform does not compute yet (drawdown / win rate / Sharpe).
+// count, current conviction, asset, last signal) plus the backtest-computed
+// risk metrics (drawdown / win rate / Sharpe) from the strategy's most recent
+// completed backtest.
 'use client'
 
 import Link from 'next/link'
 import { ArrowUpRight, Brain } from 'lucide-react'
 import { Badge, Card, Sparkline } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatReturn, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
+import { formatMaxDrawdownPct, formatReturn, formatSharpe, formatSignalStrength, formatTimestamp, formatWinRate } from '@/lib/utils/format'
 import { useSyncStore } from '@/lib/store/sync'
+import { useStrategyMetrics } from '../hooks/useStrategies'
 import type { StrategyPerformance } from '../hooks/useStrategyPerformance'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
 
@@ -28,23 +30,6 @@ function returnPct(v: string | null): { text: string; tone: 'profit' | 'risk' | 
 
 function fmtSignalTime(iso: string): string {
   return formatTimestamp(iso)
-}
-
-// Honest "not computed" chip — real per-step equity-curve tracking does not
-// exist yet, so drawdown / win-rate / Sharpe cannot be computed (F-18/F-21).
-function NotComputed({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-wide text-fg-subtle">{label}</span>
-      <span
-        title="Not yet computed — this needs a per-step equity curve, which the platform doesn't track yet. Shown honestly rather than as a fabricated number."
-        className="inline-flex w-fit items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[11px] font-medium text-fg-subtle"
-      >
-        <span aria-hidden className="h-1 w-1 rounded-full bg-fg-subtle" />
-        Not computed
-      </span>
-    </div>
-  )
 }
 
 // A real, computed metric cell.
@@ -68,6 +53,8 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
   const { strategy, signals, sparkline, latestReturn, hasBacktest, loading } = perf
   const ret = returnPct(latestReturn)
   const reference = isReferenceStrategy(strategy.name)
+  const metricsQuery = useStrategyMetrics(strategy.id)
+  const metrics = metricsQuery.data
 
   // Real, signals-derived fields (no fetch beyond what the card already has).
   const ordered = [...signals].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
@@ -148,11 +135,16 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
           <Metric label="Asset" value={asset ?? '—'} />
         </div>
 
-        {/* Honestly deferred risk metrics */}
+        {/* Backtest-computed risk metrics — real numbers where a completed
+            backtest has them, an honest dash otherwise. */}
         <div className="mt-auto grid grid-cols-3 gap-3">
-          <NotComputed label="Max drawdown" />
-          <NotComputed label="Win rate" />
-          <NotComputed label="Sharpe" />
+          <Metric
+            label="Max drawdown"
+            value={metrics?.max_drawdown_pct != null ? formatMaxDrawdownPct(Number.parseFloat(metrics.max_drawdown_pct)) : '—'}
+            tone={metrics?.max_drawdown_pct != null ? 'risk' : 'default'}
+          />
+          <Metric label="Win rate" value={metrics?.win_rate != null ? formatWinRate(Number.parseFloat(metrics.win_rate)) : '—'} />
+          <Metric label="Sharpe" value={metrics?.sharpe_ratio != null ? formatSharpe(Number.parseFloat(metrics.sharpe_ratio)) : '—'} />
         </div>
 
         {/* Last signal footer */}

@@ -10,10 +10,11 @@ import { BarChart3, CalendarRange, LayoutGrid, ShieldQuestion, Sigma } from 'luc
 import { Badge, EmptyState, Heatmap, Panel, Section, Tabs } from '@/components/ui'
 import { consecutiveRuns, monthlyConvictionGrid } from '@/features/strategies/analytics'
 import { ConsecutiveRunsChart } from '@/features/strategies/components/charts'
-import { PendingMetricTile, RealMetricTile } from '@/features/strategies/components/metric-tiles'
+import { useStrategyMetrics } from '@/features/strategies/hooks/useStrategies'
+import { PendingMetricTile, RealMetricTile, RealRingTile } from '@/features/strategies/components/metric-tiles'
 import { fmtMoney, fmtReturnPct } from '@/features/strategies/components/tables'
 import type { Backtest, Signal } from '@/features/strategies/types'
-import { formatCount, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
+import { formatCount, formatMaxDrawdownPct, formatSharpe, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import { longShortSplit } from '../analytics'
 import { LongShortDonut } from './charts'
 
@@ -25,6 +26,8 @@ function OverviewTab({ backtest }: { backtest: Backtest | null }) {
   const tradeCount = backtest?.trade_count ?? results?.trade_count ?? null
   const realizedNum = results ? Number.parseFloat(results.realized_pnl) : null
   const avgTradePnl = realizedNum != null && tradeCount ? realizedNum / tradeCount : null
+  const metricsQuery = useStrategyMetrics(backtest?.strategy_id ?? '')
+  const metrics = metricsQuery.data
 
   if (!backtest) {
     return <EmptyState title="No backtest runs" description="This strategy has no backtest yet — metrics appear once one completes." />
@@ -46,11 +49,23 @@ function OverviewTab({ backtest }: { backtest: Backtest | null }) {
         tone={avgTradePnl == null ? 'default' : avgTradePnl >= 0 ? 'profit' : 'risk'}
         hint="realized ÷ trade count"
       />
-      <PendingMetricTile label="Best trade" ticket="F-21" shell="number" />
-      <PendingMetricTile label="Worst trade" ticket="F-21" shell="number" />
-      <PendingMetricTile label="Win rate" ticket="F-21" shell="ring" />
-      <PendingMetricTile label="Sharpe ratio" ticket="F-21" shell="number" />
-      <PendingMetricTile label="Max drawdown" ticket="F-21" shell="bar" />
+      <PendingMetricTile label="Best trade" shell="number" />
+      <PendingMetricTile label="Worst trade" shell="number" />
+      {metrics?.win_rate != null ? (
+        <RealRingTile label="Win rate" value={Number.parseFloat(metrics.win_rate)} />
+      ) : (
+        <PendingMetricTile label="Win rate" shell="ring" />
+      )}
+      {metrics?.sharpe_ratio != null ? (
+        <RealMetricTile label="Sharpe ratio" value={formatSharpe(Number.parseFloat(metrics.sharpe_ratio))} />
+      ) : (
+        <PendingMetricTile label="Sharpe ratio" shell="number" />
+      )}
+      {metrics?.max_drawdown_pct != null ? (
+        <RealMetricTile label="Max drawdown" value={formatMaxDrawdownPct(Number.parseFloat(metrics.max_drawdown_pct))} tone="risk" />
+      ) : (
+        <PendingMetricTile label="Max drawdown" shell="bar" />
+      )}
     </Panel>
   )
 }
@@ -106,7 +121,7 @@ function TradeAnalysisTab({ signals }: { signals: Signal[] }) {
           </Panel>
         </Section>
 
-        <Section title="Long vs short split" description="Signal direction split — not a fill/trade split (no per-trade data exists, F-21).">
+        <Section title="Long vs short split" description="Signal direction split — not a fill/trade split (no per-trade data exists).">
           <Panel className="p-4">
             <LongShortDonut longCount={split.long} shortCount={split.short} flatCount={split.flat} height={240} />
           </Panel>

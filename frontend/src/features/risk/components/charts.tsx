@@ -20,7 +20,7 @@ export function ExposureGauge({ utilizationPct, height = 220 }: { utilizationPct
   if (utilizationPct == null) {
     return (
       <div style={{ height }}>
-        <EmptyState title="No capital configured" description="Exposure % needs a configured capital figure to divide against (F-19)." />
+        <EmptyState title="No capital configured" description="Exposure % needs a configured capital figure to divide against." />
       </div>
     )
   }

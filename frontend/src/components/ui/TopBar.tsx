@@ -311,7 +311,7 @@ export function TopBar() {
         <div className="mx-1 h-6 w-px bg-border" aria-hidden />
 
         {/* User — honest placeholder (G-AUTH-1: single-user local, no real auth). */}
-        <Tooltip content="Local operator — real accounts deferred (G-AUTH-1)">
+        <Tooltip content="Local operator — real accounts deferred">
           <button
             type="button"
             aria-label="Account (single-user local platform)"

@@ -21,18 +21,18 @@ export function useExecutions(orderId: string) {
   })
 }
 
-export function useOrdersByStrategy(strategyId: string) {
+export function useOrdersByStrategy(strategyId: string, limit?: number) {
   return useQuery({
-    queryKey: ['orders-by-strategy', strategyId],
-    queryFn: () => executionService.getOrdersByStrategy(strategyId),
+    queryKey: ['orders-by-strategy', strategyId, limit],
+    queryFn: () => executionService.getOrdersByStrategy(strategyId, limit),
     enabled: Boolean(strategyId),
   })
 }
 
-export function useExecutionsByStrategy(strategyId: string) {
+export function useExecutionsByStrategy(strategyId: string, limit?: number) {
   return useQuery({
-    queryKey: ['executions-by-strategy', strategyId],
-    queryFn: () => executionService.getExecutionsByStrategy(strategyId),
+    queryKey: ['executions-by-strategy', strategyId, limit],
+    queryFn: () => executionService.getExecutionsByStrategy(strategyId, limit),
     enabled: Boolean(strategyId),
   })
 }

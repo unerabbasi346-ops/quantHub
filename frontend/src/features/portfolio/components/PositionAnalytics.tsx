@@ -219,7 +219,7 @@ export function PositionAnalytics({
             </span>
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-fg">
-                Not configured <Badge variant="warning">F-19</Badge>
+                Not configured
               </div>
               <p className="mt-1 text-xs leading-relaxed text-fg-muted">
                 This portfolio has no operator-configured capital figure — utilization can&apos;t be computed without a denominator.

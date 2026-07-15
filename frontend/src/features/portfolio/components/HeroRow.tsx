@@ -39,7 +39,7 @@ export function HeroRow({
       <Section
         icon={<LineChartIcon size={16} />}
         title="Portfolio equity"
-        description="Signed conviction over time — an honest equity proxy (per-step P&L isn't tracked yet, F-21), not a real cash P&L curve."
+        description="Signed conviction over time — an honest equity proxy (per-step P&L isn't tracked yet), not a real cash P&L curve."
       >
         <Panel className="p-4">
           <ConvictionEquityChart points={points} height={340} />

@@ -161,7 +161,7 @@ export function PortfolioHeader({
             label="Capital utilization"
             value={utilization ? `${utilization.utilizationPct.toFixed(1)}%` : '—'}
             tone={utilization ? utilizationTone(utilization.utilizationPct) : 'default'}
-            hint={utilization ? `${formatCapital(utilization.deployed)} deployed` : 'F-19: no capital configured'}
+            hint={utilization ? `${formatCapital(utilization.deployed)} deployed` : 'no capital configured'}
           />
         </div>
       )}

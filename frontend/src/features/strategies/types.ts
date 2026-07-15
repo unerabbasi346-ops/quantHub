@@ -72,6 +72,21 @@ export interface BacktestResults {
   reproducibility_hash: string
 }
 
+// Computed performance metrics (api/v1/strategies.py's ComputedMetricsOut) —
+// the analytics.backtest_computed_metrics row for a strategy's most recent
+// COMPLETED backtest. Each field is null when it genuinely couldn't be
+// computed (insufficient trade data) — never a fabricated number.
+export interface ComputedMetrics {
+  backtest_id: UUID
+  win_rate: string | null
+  sharpe_ratio: string | null
+  sortino_ratio: string | null
+  max_drawdown_pct: string | null
+  calmar_ratio: string | null
+  profit_factor: string | null
+  expectancy_per_trade: string | null
+}
+
 export interface Backtest {
   id: UUID
   strategy_id: UUID | null

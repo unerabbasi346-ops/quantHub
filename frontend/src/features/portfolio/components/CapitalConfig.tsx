@@ -138,11 +138,11 @@ export function CapitalConfig({ portfolio, openMarketValue = 0 }: { portfolio: P
 
         {current && <Utilization configuredCapital={current} openMarketValue={openMarketValue} />}
 
-        {/* Honest F-19 disclosure — always visible, never buried */}
+        {/* Honest capital-config disclosure — always visible, never buried */}
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/25 bg-warning-soft/40 px-3 py-2.5">
           <Info size={15} className="mt-0.5 shrink-0 text-warning" />
           <p className="text-xs leading-relaxed text-fg-muted">
-            <Badge variant="warning" className="mr-1.5 align-middle">F-19</Badge>
+            <Badge variant="warning" className="mr-1.5 align-middle">Config only</Badge>
             This is a configuration value only. It has <strong className="font-semibold text-fg">no backing NAV/cash ledger</strong> and does
             not feed leverage or any risk-limit calculation — those still take equity as an explicit input. A real capital ledger remains deferred.
           </p>

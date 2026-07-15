@@ -14,7 +14,7 @@ export function ResearchShell() {
       icon={<FlaskConical size={30} strokeWidth={1.75} />}
       title="Research"
       description="Feature engineering, experiment tracking, and model registry (Phase 3B) will appear here when a real ML/research workflow exists to populate them."
-      note="Deferred indefinitely per S-7 · resumes on a real ML/feature-sharing trigger"
+      note="Resumes once a real ML or feature-sharing need exists"
       planned={['Feature store & lineage', 'Experiment tracking', 'Model registry & promotion']}
     />
   )

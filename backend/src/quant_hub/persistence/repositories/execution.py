@@ -172,19 +172,39 @@ class SQLAlchemyOrderRepository(BaseRepository[object], OrderRepository):
             rows = result.mappings().all()
         return [_row_to_order(row) for row in rows]
 
-    async def list_by_strategy(self, strategy_id: UUID) -> list[RecordedOrder]:
-        result = await self._session.execute(
-            text(
-                f"""
-                SELECT {_ORDER_COLS}
-                FROM core.orders
-                WHERE strategy_id = :strategy_id
-                ORDER BY created_at, id
-                """
-            ),
-            {"strategy_id": strategy_id},
-        )
-        return [_row_to_order(row) for row in result.mappings().all()]
+    async def list_by_strategy(
+        self, strategy_id: UUID, limit: int | None = None
+    ) -> list[RecordedOrder]:
+        # Same unbounded-fetch perf issue as list_by_portfolio (a strategy can
+        # carry 40k+ backtest orders) — same DESC+LIMIT+reverse fix.
+        if limit is not None:
+            result = await self._session.execute(
+                text(
+                    f"""
+                    SELECT {_ORDER_COLS}
+                    FROM core.orders
+                    WHERE strategy_id = :strategy_id
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"strategy_id": strategy_id, "limit": limit},
+            )
+            rows = list(reversed(result.mappings().all()))
+        else:
+            result = await self._session.execute(
+                text(
+                    f"""
+                    SELECT {_ORDER_COLS}
+                    FROM core.orders
+                    WHERE strategy_id = :strategy_id
+                    ORDER BY created_at, id
+                    """
+                ),
+                {"strategy_id": strategy_id},
+            )
+            rows = result.mappings().all()
+        return [_row_to_order(row) for row in rows]
 
     async def _transition(
         self,
@@ -347,19 +367,42 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
         )
         return [_row_to_execution(row) for row in result.mappings().all()]
 
-    async def list_by_strategy(self, strategy_id: UUID) -> list[RecordedExecution]:
-        result = await self._session.execute(
-            text(
-                """
-                SELECT e.id, e.order_id, e.portfolio_id, e.asset_id, e.side, e.quantity,
-                       e.price, e.commission, e.net_amount, e.venue, e.executed_at,
-                       e.created_at, e.realized_pnl
-                FROM core.executions e
-                JOIN core.orders o ON o.id = e.order_id
-                WHERE o.strategy_id = :strategy_id
-                ORDER BY e.executed_at, e.id
-                """
-            ),
-            {"strategy_id": strategy_id},
-        )
-        return [_row_to_execution(row) for row in result.mappings().all()]
+    async def list_by_strategy(
+        self, strategy_id: UUID, limit: int | None = None
+    ) -> list[RecordedExecution]:
+        # Same unbounded-fetch perf issue as the order repos — a strategy can
+        # carry 40k+ backtest fills.
+        if limit is not None:
+            result = await self._session.execute(
+                text(
+                    """
+                    SELECT e.id, e.order_id, e.portfolio_id, e.asset_id, e.side, e.quantity,
+                           e.price, e.commission, e.net_amount, e.venue, e.executed_at,
+                           e.created_at, e.realized_pnl
+                    FROM core.executions e
+                    JOIN core.orders o ON o.id = e.order_id
+                    WHERE o.strategy_id = :strategy_id
+                    ORDER BY e.executed_at DESC, e.id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"strategy_id": strategy_id, "limit": limit},
+            )
+            rows = list(reversed(result.mappings().all()))
+        else:
+            result = await self._session.execute(
+                text(
+                    """
+                    SELECT e.id, e.order_id, e.portfolio_id, e.asset_id, e.side, e.quantity,
+                           e.price, e.commission, e.net_amount, e.venue, e.executed_at,
+                           e.created_at, e.realized_pnl
+                    FROM core.executions e
+                    JOIN core.orders o ON o.id = e.order_id
+                    WHERE o.strategy_id = :strategy_id
+                    ORDER BY e.executed_at, e.id
+                    """
+                ),
+                {"strategy_id": strategy_id},
+            )
+            rows = result.mappings().all()
+        return [_row_to_execution(row) for row in rows]

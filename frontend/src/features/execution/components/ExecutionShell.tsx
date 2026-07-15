@@ -43,8 +43,11 @@ export function ExecutionShell() {
   const activeId = selectedId ?? strategies[0]?.id ?? ''
   const activeStrategy = strategies.find((s) => s.id === activeId) ?? null
 
-  const ordersQuery = useOrdersByStrategy(activeId)
-  const executionsQuery = useExecutionsByStrategy(activeId)
+  // A strategy can carry 40k+ backtest orders/fills — unbounded fetches here
+  // previously shipped the whole table (tens of MB, 20s+) on every page load.
+  const ORDER_HISTORY_LIMIT = 1000
+  const ordersQuery = useOrdersByStrategy(activeId, ORDER_HISTORY_LIMIT)
+  const executionsQuery = useExecutionsByStrategy(activeId, ORDER_HISTORY_LIMIT)
   const signalsQuery = useSignals(activeId, SIGNAL_HISTORY_LIMIT)
 
   const orders = ordersQuery.data ?? []
@@ -55,8 +58,8 @@ export function ExecutionShell() {
   // strategy's orders, independent of the header's single selection.
   const allStrategyOrders = useQueries({
     queries: strategies.map((s) => ({
-      queryKey: ['orders-by-strategy', s.id],
-      queryFn: () => executionService.getOrdersByStrategy(s.id),
+      queryKey: ['orders-by-strategy', s.id, ORDER_HISTORY_LIMIT],
+      queryFn: () => executionService.getOrdersByStrategy(s.id, ORDER_HISTORY_LIMIT),
       enabled: strategies.length > 0,
     })),
   })

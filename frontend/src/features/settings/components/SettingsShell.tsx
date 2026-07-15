@@ -13,7 +13,7 @@ export function SettingsShell() {
       icon={<Settings size={30} strokeWidth={1.75} />}
       title="Settings"
       description="Workspace and account preferences will live here once the platform grows beyond a single local operator."
-      note="Deferred per S-6 · real auth/accounts per G-AUTH-1"
+      note="Arrives once the platform grows beyond a single local operator"
       planned={['Theme & display density', 'Default portfolio & base currency', 'API keys & data sources']}
     />
   )

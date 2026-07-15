@@ -36,6 +36,21 @@ export function formatRatio(value: number): string {
   return value.toFixed(2)
 }
 
+// analytics.backtest_computed_metrics fields — win_rate/profit_factor are
+// 0-1 fractions (need *100); max_drawdown_pct is already stored in percent
+// units, so it must NOT be multiplied again.
+export function formatWinRate(value: number): string {
+  return `${(value * 100).toFixed(1)}%`
+}
+
+export function formatSharpe(value: number): string {
+  return value.toFixed(2)
+}
+
+export function formatMaxDrawdownPct(value: number): string {
+  return `-${Math.abs(value).toFixed(2)}%`
+}
+
 // Capital/P&L dollar amounts — K/M/B suffix above $1,000, plain 2dp below,
 // "$0.00" for anything that rounds to zero.
 export function formatCapital(value: number): string {

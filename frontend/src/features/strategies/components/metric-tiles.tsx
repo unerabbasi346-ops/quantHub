@@ -101,15 +101,13 @@ type PendingShell = 'ring' | 'bar' | 'number'
 
 // Not genuinely computed yet — shell rendered inert (track only, no fabricated
 // fill/reading) at low opacity with a subtle pulse (it reads as "deferred",
-// not "broken"), plus an explicit ticket-referenced "Pending" badge so the
-// deferral reads as deliberate.
+// not "broken"), plus a plain "Pending" badge so the deferral reads as
+// deliberate without leaking an internal tracking code.
 export function PendingMetricTile({
   label,
-  ticket,
   shell = 'number',
 }: {
   label: string
-  ticket: string
   shell?: PendingShell
 }) {
   return (
@@ -130,7 +128,7 @@ export function PendingMetricTile({
         <Clock size={10} className="shrink-0" /> {label}
       </span>
       <Badge variant="warning" className="text-[9px]" title="Not yet computed — shown honestly rather than as a fabricated number.">
-        Pending {ticket}
+        Pending
       </Badge>
     </div>
   )

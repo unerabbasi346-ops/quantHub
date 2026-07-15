@@ -16,10 +16,11 @@ export const executionService = {
     apiClient.get<Execution[]>(`/v1/orders/${orderId}/executions`),
   // Strategy-scoped blotter feed — filters on core.orders.strategy_id
   // directly (real FK lineage), the Execution page's strategy selector.
-  getOrdersByStrategy: (strategyId: string) =>
-    apiClient.get<Order[]>(`/v1/strategies/${strategyId}/orders`),
+  // A strategy can carry 40k+ backtest orders — same `limit` cap as getOrders.
+  getOrdersByStrategy: (strategyId: string, limit?: number) =>
+    apiClient.get<Order[]>(`/v1/strategies/${strategyId}/orders${limit ? `?limit=${limit}` : ''}`),
   // Strategy-scoped fill batch feed — for analytics (trade ratio, P&L over
   // time, fill size distribution) without an N+1 per-order fetch.
-  getExecutionsByStrategy: (strategyId: string) =>
-    apiClient.get<Execution[]>(`/v1/strategies/${strategyId}/executions`),
+  getExecutionsByStrategy: (strategyId: string, limit?: number) =>
+    apiClient.get<Execution[]>(`/v1/strategies/${strategyId}/executions${limit ? `?limit=${limit}` : ''}`),
 }
