@@ -127,8 +127,18 @@ def _composite_score(
 
 async def _orders_today_stats(session: AsyncSession) -> tuple[int, int]:
     """(orders_today, filled_today) — raw counts off core.orders, no
-    execution-domain import. UTC calendar day, matching the platform's
-    established "today" convention (Execution page, F-21 pass)."""
+    execution-domain import. UTC calendar day via DATE(created_at AT TIME
+    ZONE 'UTC') = CURRENT_DATE, matching the platform's established "today"
+    convention (Execution page, F-21 pass).
+
+    VERIFIED (not a bug, investigated on request): this WHERE clause always
+    scoped to the UTC calendar day — a prior report of 130,780 orders "today"
+    was a real count of backtest-replay orders whose created_at legitimately
+    fell within that UTC day (Postgres server TimeZone is UTC; confirmed
+    server-side both forms of the date filter return identical counts). Live
+    trading and backtest replay share core.orders with no distinguishing
+    flag, so re-running a backtest will spike this figure again — that is
+    real data, not a query defect."""
     row = (
         await session.execute(
             text(
@@ -137,7 +147,7 @@ async def _orders_today_stats(session: AsyncSession) -> tuple[int, int]:
                     COUNT(*) AS total,
                     COUNT(*) FILTER (WHERE status = 'FILLED') AS filled
                 FROM core.orders
-                WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+                WHERE DATE(created_at AT TIME ZONE 'UTC') = CURRENT_DATE
                 """
             )
         )

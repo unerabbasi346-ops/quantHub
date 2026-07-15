@@ -165,6 +165,15 @@ function EngineStatusRow({ icon, label, status, variant, detail, muted }: Engine
   )
 }
 
+// Honesty caveat (owner-requested fix): analytics.ml_models.metrics.accuracy
+// is computed by MODEL.evaluate() ON ITS OWN TRAINING SET (see
+// api/ml.py's _run_training) — not a held-out/out-of-sample split. A 1.00
+// here means the model fit its training data perfectly, not that it
+// predicts unseen data well. Surfaced everywhere accuracy renders (this
+// row + the Monitoring page's ML model table) so it can never read as real
+// predictive performance.
+const ACCURACY_CAVEAT = 'Training accuracy — not validated out-of-sample.'
+
 // Health-score ring tone — mirrors the System Health Strip gauge on the
 // Monitoring page (same 0-100 composite Hermes computes server-side).
 function healthTone(score: number): 'profit' | 'warning' | 'risk' {
@@ -222,9 +231,13 @@ function IntelligenceWorkspace() {
           status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.ml_engine.trained_count} trained`}
           variant={healthQuery.isError ? 'risk' : health && health.ml_engine.trained_count > 0 ? 'profit' : 'neutral'}
           detail={
-            health?.ml_engine.last_accuracy != null
-              ? `last accuracy ${formatRatio(health.ml_engine.last_accuracy)}`
-              : 'analytics.ml_models'
+            health?.ml_engine.last_accuracy != null ? (
+              <span title={ACCURACY_CAVEAT}>
+                last accuracy {formatRatio(health.ml_engine.last_accuracy)} <span className="italic">(training, not OOS)</span>
+              </span>
+            ) : (
+              'analytics.ml_models'
+            )
           }
         />
         <EngineStatusRow

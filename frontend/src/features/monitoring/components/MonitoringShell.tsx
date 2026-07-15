@@ -265,6 +265,13 @@ function StrategyLifecycleSection({ strategies }: { strategies: StrategyLifecycl
   )
 }
 
+// Honesty caveat (owner-requested fix, mirrors HeroSection.tsx's
+// ACCURACY_CAVEAT): analytics.ml_models.metrics.accuracy is MODEL.evaluate()
+// scored on its OWN training set (api/ml.py's _run_training) — not a held-
+// out/out-of-sample split. Never let a 1.00 here read as real predictive
+// performance.
+const ACCURACY_CAVEAT = 'Training accuracy — not validated out-of-sample.'
+
 // ── Section 4: ML Operations ─────────────────────────────────────────────
 function MLOpsSection({ models, jobs }: { models: MLModelStatus[]; jobs: TrainingJob[] }) {
   const modelColumns = useMemo<InstitutionalColumnDef<MLModelStatus>[]>(
@@ -278,9 +285,14 @@ function MLOpsSection({ models, jobs }: { models: MLModelStatus[]; jobs: Trainin
       },
       {
         id: 'accuracy',
-        header: 'Accuracy',
+        header: () => <span title={ACCURACY_CAVEAT}>Accuracy*</span>,
         accessorFn: (m) => m.accuracy ?? -1,
-        cell: ({ row }) => (row.original.accuracy != null ? formatRatio(row.original.accuracy) : '—'),
+        cell: ({ row }) =>
+          row.original.accuracy != null ? (
+            <span title={ACCURACY_CAVEAT}>{formatRatio(row.original.accuracy)}</span>
+          ) : (
+            '—'
+          ),
         meta: { numeric: true },
       },
       {
@@ -294,7 +306,11 @@ function MLOpsSection({ models, jobs }: { models: MLModelStatus[]; jobs: Trainin
   )
 
   return (
-    <Section icon={<Cpu size={16} />} title="ML operations" description="Model registry (analytics.ml_models) and in-flight training jobs.">
+    <Section
+      icon={<Cpu size={16} />}
+      title="ML operations"
+      description={`Model registry (analytics.ml_models) and in-flight training jobs. * ${ACCURACY_CAVEAT}`}
+    >
       <div className="space-y-4">
         <Panel className="overflow-hidden">
           {models.length === 0 ? (
