@@ -4,11 +4,10 @@
 //   handbook/ui/visual_engineering/10_DASHBOARD_MASTER_BLUEPRINT §Hero Section
 //   / §AI Intelligence Panel. Doc 00 §14.5/§14.7 DATA HONESTY.
 //
-// PHASE 1 — DASHBOARD ARCHITECTURE ONLY (presentation layer, Doc 02/10):
-// the Hero Intelligence Area. Left (70%) is the real primary market chart —
-// reuses the same real useAssets/useBars data and PriceChart component the
-// Markets page renders, just the first active instrument, so it is never a
-// second, competing "hero" invented for this page. Right (30%) is the
+// DASHBOARD ARCHITECTURE (presentation layer, Doc 02/10): the Hero
+// Intelligence Area. Left (70%) is the auto-rotating strategy conviction
+// chart (owner request — replaces the earlier market candlestick chart,
+// which now lives only on the Markets page). Right (30%) is the
 // Intelligence Workspace: one EngineStatusRow per REAL backend engine this
 // platform actually has (Strategy/Portfolio/Risk/Execution), plus a
 // permanently honest "AI Engine — not connected" row — never a fake
@@ -24,23 +23,18 @@ import {
   ArrowLeftRight,
   Bot,
   Brain,
-  CandlestickChart,
   Cpu,
   Database,
   ShieldAlert,
 } from 'lucide-react'
-import { Badge, CryptoIcon, EmptyState, ErrorState, glassSurface, Ring, type BadgeVariant } from '@/components/ui'
+import { Badge, EmptyState, ErrorState, glassSurface, Ring, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatRatio, formatReturn, formatTimestamp } from '@/lib/utils/format'
+import { formatRatio, formatTimestamp } from '@/lib/utils/format'
 import { useReveal } from '@/lib/motion'
-import { useSyncStore } from '@/lib/store/sync'
-import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
-import { PriceChart } from '@/features/markets/components/PriceChart'
 import { useHermesHealth } from '@/features/hermes/hooks/useHermes'
-
-const num = (v: string) => Number.parseFloat(v)
-const fmtPrice = (v: string | number) =>
-  Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+import { useStrategies } from '@/features/strategies/hooks/useStrategies'
+import { useStrategyPerformance } from '@/features/strategies/hooks/useStrategyPerformance'
+import { RotatingStrategyChart } from '@/features/strategies/components/RotatingStrategyChart'
 
 export function HeroSection() {
   return (
@@ -48,82 +42,41 @@ export function HeroSection() {
       aria-label="Hero intelligence area"
       className="grid grid-cols-1 gap-6 lg:grid-cols-[7fr_3fr]"
     >
-      <HeroMarketChart />
+      <HeroStrategyChart />
       <IntelligenceWorkspace />
     </section>
   )
 }
 
-// ── Left: Hero Market Chart (70%) ───────────────────────────────────────
-// Preferred default instrument for the Hero, in priority order — all real,
-// registered spot pairs; not a fabricated choice. Falls through to the first
-// registered asset if none of these are present, so the Hero never depends
-// on any one symbol existing (Doc 00 §14.5 honesty: never hide behind a
-// hardcoded assumption).
-const PREFERRED_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT']
+// ── Left: Hero Strategy Chart (70%) ─────────────────────────────────────
+// The rotating conviction chart is the Hero's primary visual (owner
+// request) — replaces the market candlestick chart entirely. A single
+// min-h wrapper matches the Intelligence Workspace's footprint; the chart
+// owns its own card surface (no double-nested glass panel).
+function HeroStrategyChart() {
+  const query = useStrategies()
+  const strategies = query.data ?? []
+  const performance = useStrategyPerformance(strategies)
 
-function HeroMarketChart() {
-  const assetsQuery = useAssets()
-  const assets = assetsQuery.data ?? []
-  // Global Synchronization (Doc 11): "Selecting Asset updates every page" —
-  // an asset picked on Markets is what the Hero shows next, ahead of the
-  // static preference list, which only applies once nothing has been chosen.
-  const syncedSymbol = useSyncStore((s) => s.selectedAssetSymbol)
-  const synced = syncedSymbol ? assets.find((a) => a.symbol === syncedSymbol) : undefined
-  const asset = synced ?? PREFERRED_SYMBOLS.map((sym) => assets.find((a) => a.symbol === sym)).find(Boolean) ?? assets[0] ?? null
-  const barsQuery = useBars(asset?.id ?? '', '1h')
-  const bars = barsQuery.data ?? []
-  const last = bars.at(-1)
-  const prev24 = bars.at(-25) ?? bars[0]
-  const change = last && prev24 ? num(last.close) - num(prev24.close) : null
-  const changePct = change != null && prev24 ? (change / num(prev24.close)) * 100 : null
-
-  const reveal = useReveal('card')
   return (
-    <motion.div {...reveal} className={cn(glassSurface('glow'), 'flex min-h-[26rem] flex-col p-5')}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-            <CandlestickChart size={16} />
-          </span>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              {asset && <CryptoIcon symbol={asset.symbol} size={18} />}
-              <h2 className="truncate text-sm font-semibold tracking-tight text-fg">
-                {asset ? `${asset.symbol} · Hero Market Chart` : 'Hero Market Chart'}
-              </h2>
-            </div>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">
-              {asset ? `${asset.exchange} · 1h · live ingested bars` : 'Primary tracked instrument'}
-            </p>
-          </div>
+    <div className="min-h-[26rem]">
+      {query.isLoading && <div className={cn(glassSurface('elevated'), 'skeleton h-full min-h-[26rem] w-full')} />}
+      {query.isError && (
+        <div className={cn(glassSurface('elevated'), 'flex min-h-[26rem] items-center justify-center p-5')}>
+          <ErrorState description="Could not load strategies." onRetry={() => query.refetch()} />
         </div>
-        {last && (
-          <div className="text-right">
-            <div className="font-mono text-lg font-semibold tabular-nums text-fg">{fmtPrice(last.close)}</div>
-            {changePct != null && (
-              <div className={cn('font-mono text-[11px] tabular-nums', change! >= 0 ? 'text-profit' : 'text-risk')}>
-                {formatReturn(changePct / 100)} · 24h
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="mt-4 flex-1">
-        {assetsQuery.isLoading && <div className="skeleton h-full min-h-[20rem] w-full" />}
-        {assetsQuery.isError && <ErrorState description="Could not load instruments." onRetry={() => assetsQuery.refetch()} />}
-        {assetsQuery.isSuccess && assets.length === 0 && (
-          <EmptyState icon={<CandlestickChart size={20} />} title="No instruments" description="No tradable assets are registered yet." />
-        )}
-        {asset && barsQuery.isLoading && <div className="skeleton h-full min-h-[20rem] w-full" />}
-        {asset && barsQuery.isError && <ErrorState description="Could not load bars." onRetry={() => barsQuery.refetch()} />}
-        {asset && barsQuery.isSuccess && bars.length === 0 && (
-          <EmptyState title="No bars" description={`No bars ingested for ${asset.symbol} yet.`} />
-        )}
-        {asset && barsQuery.isSuccess && bars.length > 0 && <PriceChart bars={bars} />}
-      </div>
-    </motion.div>
+      )}
+      {query.isSuccess && strategies.length === 0 && (
+        <div className={cn(glassSurface('elevated'), 'flex min-h-[26rem] items-center justify-center p-5')}>
+          <EmptyState
+            icon={<Brain size={20} />}
+            title="No strategies registered"
+            description="Register a strategy to see it here. Run: python scripts/register_strategy.py --all"
+          />
+        </div>
+      )}
+      {query.isSuccess && strategies.length > 0 && <RotatingStrategyChart items={performance} />}
+    </div>
   )
 }
 

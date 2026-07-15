@@ -28,6 +28,7 @@
 
 import { useMemo, type ReactNode } from 'react'
 import { ArrowLeftRight, CandlestickChart, Gauge, LayoutDashboard, ShieldAlert, TrendingUp, Wallet } from 'lucide-react'
+import { useQueries } from '@tanstack/react-query'
 import {
   Badge,
   Card,
@@ -53,8 +54,10 @@ import type { Portfolio, Position } from '@/features/portfolio/types'
 import { useOrders } from '@/features/execution/hooks/useExecution'
 import type { Order } from '@/features/execution/types'
 import { useRiskSnapshot } from '@/features/risk/hooks/useRisk'
-import { useSyncStore } from '@/lib/store/sync'
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
+import { useStrategies } from '@/features/strategies/hooks/useStrategies'
+import { strategiesService } from '@/features/strategies/services/strategies.service'
+import type { Backtest } from '@/features/strategies/types'
 import { HeroSection } from './HeroSection'
 import { StrategySection } from './StrategySection'
 
@@ -170,18 +173,41 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
   const riskQuery = useRiskSnapshot(portfolioId)
   const open = (positionsQuery.data ?? []).filter((p) => !p.is_closed)
   const marketValue = open.reduce((s, p) => s + Number.parseFloat(p.market_value), 0)
-  const unrealized = open.reduce((s, p) => s + Number.parseFloat(p.unrealized_pnl), 0)
-  const realized = open.reduce((s, p) => s + Number.parseFloat(p.realized_pnl_today), 0)
   const snap = riskQuery.data
+  // Risk card: gross exposure AS A PERCENT of capital — gross_leverage
+  // already is exposure/equity (Doc 14 §Risk). Showing the same number as
+  // a raw dollar figure previously made this card read identically to the
+  // Portfolio card for any single-position, unlevered book.
+  const grossExposurePct = snap ? Number.parseFloat(snap.gross_leverage) : null
 
-  const syncedSymbol = useSyncStore((s) => s.selectedAssetSymbol)
+  // Performance card: best (highest total_return) COMPLETED backtest across
+  // every registered strategy — not live unrealized P&L, which is a single
+  // open position's noise, not a performance figure.
+  const strategiesQuery = useStrategies()
+  const strategies = strategiesQuery.data ?? []
+  const backtestQueries = useQueries({
+    queries: strategies.map((s) => ({
+      queryKey: ['backtests', s.id],
+      queryFn: () => strategiesService.getBacktests(s.id),
+      enabled: Boolean(s.id),
+    })),
+  })
+  const allBacktests: Backtest[] = backtestQueries.flatMap((q) => q.data ?? [])
+  const bestBacktest = allBacktests
+    .filter((b) => b.total_return != null)
+    .reduce<Backtest | null>((best, b) => {
+      const ret = Number.parseFloat(b.total_return!)
+      const bestRet = best ? Number.parseFloat(best.total_return!) : -Infinity
+      return ret > bestRet ? b : best
+    }, null)
+  const bestReturnPct = bestBacktest ? Number.parseFloat(bestBacktest.total_return!) : null
+
+  // Market card: BTC specifically (Doc 10 §Analytics Grid names this card
+  // "Market Overview" — a fixed reference instrument, not the page's
+  // synced/selected asset, which belongs to the Markets page).
   const assetsQuery = useAssets()
   const assets = assetsQuery.data ?? []
-  const marketAsset =
-    (syncedSymbol ? assets.find((a) => a.symbol === syncedSymbol) : undefined) ??
-    PREFERRED_SYMBOLS.map((sym) => assets.find((a) => a.symbol === sym)).find(Boolean) ??
-    assets[0] ??
-    null
+  const marketAsset = assets.find((a) => a.symbol === 'BTC/USDT') ?? null
   const barsQuery = useBars(marketAsset?.id ?? '', '1h')
   const bars = barsQuery.data ?? []
   const last = bars.at(-1)
@@ -229,15 +255,27 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<ShieldAlert size={16} />} title="Risk" />
         <CardContent>
-          <div className="font-mono text-metric font-bold tabular-nums text-fg">{snap ? fmtMoney(snap.gross_exposure) : '—'}</div>
-          <div className="mt-1 text-[11px] text-fg-subtle">{snap ? `lev ${fmtLeverage(snap.gross_leverage)} gross exposure` : 'no snapshot yet'}</div>
+          <div className="font-mono text-metric font-bold tabular-nums text-fg">
+            {grossExposurePct != null ? formatReturn(grossExposurePct) : '—'}
+          </div>
+          <div className="mt-1 text-[11px] text-fg-subtle">
+            {snap ? `${fmtMoney(snap.gross_exposure)} gross exposure` : 'no snapshot yet'}
+          </div>
         </CardContent>
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<TrendingUp size={16} />} title="Performance" />
         <CardContent>
-          <div className={cn('font-mono text-metric font-bold tabular-nums', unrealized >= 0 ? 'text-profit' : 'text-risk')}>{fmtSigned(unrealized)}</div>
-          <div className="mt-1 text-[11px] text-fg-subtle">{fmtSigned(realized)} realized today</div>
+          {bestReturnPct != null ? (
+            <>
+              <div className={cn('font-mono text-metric font-bold tabular-nums', bestReturnPct >= 0 ? 'text-profit' : 'text-risk')}>
+                {formatReturn(bestReturnPct)}
+              </div>
+              <div className="mt-1 truncate text-[11px] text-fg-subtle">best backtest · {bestBacktest?.name}</div>
+            </>
+          ) : (
+            <div className="text-sm text-fg-muted">No completed backtests yet.</div>
+          )}
         </CardContent>
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
@@ -390,7 +428,7 @@ function orderStatusVariant(status: Order['status']): BadgeVariant {
 
 function RecentExecutionsWidget({ portfolioId, className }: { portfolioId: string; className?: string }) {
   const query = useOrders(portfolioId, 200)
-  const recent = [...(query.data ?? [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 6)
+  const recent = [...(query.data ?? [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 10)
 
   const columns = useMemo<InstitutionalColumnDef<Order>[]>(
     () => [

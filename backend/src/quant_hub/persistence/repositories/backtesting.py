@@ -249,8 +249,9 @@ class SQLAlchemyBacktestRepository(BaseRepository[object], BacktestRepository):
         result = await self._session.execute(
             text(
                 """
-                SELECT id, strategy_id, name, status, total_return, trade_count,
-                       final_capital, reproducibility_hash, results,
+                SELECT id, strategy_id, name, status, start_date, end_date,
+                       total_return, trade_count, final_capital,
+                       reproducibility_hash, results,
                        started_at, completed_at, created_at
                 FROM analytics.backtests
                 WHERE strategy_id = :strategy_id

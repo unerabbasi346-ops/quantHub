@@ -2,9 +2,10 @@
 //   §Dashboards. Doc 08 §Architecture (dashboard composes feature hooks).
 //   Doc 00 §14.5 (data honesty). Per Doc 00 §14.11
 //
-// The dashboard's strategy hero (owner request, points 4–6): an auto-rotating
-// conviction chart alongside one glowing card per registered strategy. Scales
-// to any number of strategies (currently 2). Reads REAL core.strategies /
+// The dashboard's strategy workspace (owner request, points 4–6): one
+// glowing card per registered strategy. The rotating conviction chart now
+// lives in the Hero (HeroSection.tsx) — not duplicated here. Scales to any
+// number of strategies (currently 2). Reads REAL core.strategies /
 // core.signals / analytics.backtests only.
 'use client'
 
@@ -12,7 +13,6 @@ import { Brain } from 'lucide-react'
 import { Badge, EmptyState, ErrorState } from '@/components/ui'
 import { useStrategies } from '@/features/strategies/hooks/useStrategies'
 import { useStrategyPerformance } from '@/features/strategies/hooks/useStrategyPerformance'
-import { RotatingStrategyChart } from '@/features/strategies/components/RotatingStrategyChart'
 import { StrategyCard } from '@/features/strategies/components/StrategyCard'
 
 export function StrategySection() {
@@ -36,12 +36,9 @@ export function StrategySection() {
       </div>
 
       {query.isLoading && (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          <div className="skeleton h-80 xl:col-span-2" />
-          <div className="space-y-4">
-            <div className="skeleton h-40" />
-            <div className="skeleton h-40" />
-          </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="skeleton h-40" />
+          <div className="skeleton h-40" />
         </div>
       )}
       {query.isError && <ErrorState description="Could not load strategies." onRetry={() => query.refetch()} />}
@@ -54,15 +51,10 @@ export function StrategySection() {
       )}
 
       {query.isSuccess && strategies.length > 0 && (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          <div className="min-h-[22rem] xl:col-span-2">
-            <RotatingStrategyChart items={performance} />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
-            {performance.map((perf) => (
-              <StrategyCard key={perf.strategy.id} perf={perf} />
-            ))}
-          </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {performance.map((perf) => (
+            <StrategyCard key={perf.strategy.id} perf={perf} />
+          ))}
         </div>
       )}
     </section>
