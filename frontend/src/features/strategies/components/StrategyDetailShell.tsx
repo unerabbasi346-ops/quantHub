@@ -70,6 +70,7 @@ import type { Signal, Strategy } from '../types'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
 import { consecutiveRuns, monthlyConvictionGrid, signalPoints } from '../analytics'
 import { ConsecutiveRunsChart, ConvictionEquityChart, SignalStrengthDistributionChart, SignalTimelineScatter } from './charts'
+import { MLIntelligenceSection } from './MLIntelligence'
 import { BacktestReturnTile, PendingMetricTile, RealMetricTile, RealRingTile } from './metric-tiles'
 import { BacktestRunCards, RecentSignalRows } from './rich-lists'
 import { fmtMoney, fmtReturnPct } from './tables'
@@ -395,6 +396,11 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         <StatPillStrip strategy={strategy} totalSignals={signals.length} validity={validity} latest={latest} latestSignal={latestSignal} />
       </Panel>
 
+      {/* ── ML Intelligence — prominent, placed right after the header per
+          owner request (see MLIntelligence.tsx's module docstring for why
+          this is a Section rather than a page-wide tab). ── */}
+      <MLIntelligenceSection signals={signals} symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null} />
+
       {/* ── Section 2: equity/conviction curve (60%) + performance metrics grid (40%) ── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
         <Section
@@ -487,9 +493,9 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
               <>
                 <SignalStrengthDistributionChart values={signalValues} height={200} />
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-fg-subtle">
-                  <span>min <span className="font-mono text-fg-muted">{fmtSignal(String(Math.min(...signalValues)))}</span></span>
+                  <span>min <span className="font-mono text-fg-muted">{fmtSignal(String(signalValues.reduce((a, b) => Math.min(a, b), Infinity)))}</span></span>
                   <span>median <span className="font-mono text-fg-muted">{fmtSignal(String(median(signalValues)))}</span></span>
-                  <span>max <span className="font-mono text-fg-muted">{fmtSignal(String(Math.max(...signalValues)))}</span></span>
+                  <span>max <span className="font-mono text-fg-muted">{fmtSignal(String(signalValues.reduce((a, b) => Math.max(a, b), -Infinity)))}</span></span>
                   <span>mean <span className="font-mono text-fg-muted">{avgConviction != null ? fmtSignal(String(avgConviction)) : '—'}</span></span>
                 </div>
               </>

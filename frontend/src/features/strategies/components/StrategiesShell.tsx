@@ -308,7 +308,7 @@ function PerformanceTab({ signals, loading }: { signals: Signal[]; loading: bool
         <StatCard label="Recent signals" value={total} />
         <StatCard label="Valid" value={valid} tone="profit" />
         <StatCard label="Avg conviction" value={fmtSignal(String(avg))} tone={avg >= 0 ? 'profit' : 'risk'} />
-        <StatCard label="Max |conviction|" value={fmtSignal(String(values.length ? Math.max(...values.map(Math.abs)) : 0))} />
+        <StatCard label="Max |conviction|" value={fmtSignal(String(values.reduce((a, b) => Math.max(a, Math.abs(b)), 0)))} />
       </div>
     </div>
   )

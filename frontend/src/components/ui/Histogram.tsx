@@ -36,8 +36,8 @@ export function Histogram({
   // Identical binning to the original SVG implementation.
   const bins = useMemo(() => {
     if (values.length < 2) return []
-    const min = Math.min(...values)
-    const max = Math.max(...values)
+    const min = values.reduce((a, b) => Math.min(a, b), Infinity)
+    const max = values.reduce((a, b) => Math.max(a, b), -Infinity)
     const span = max - min || 1
     const w = span / buckets
     const out = Array.from({ length: buckets }, (_, i) => ({

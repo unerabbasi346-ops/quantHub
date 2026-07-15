@@ -17,8 +17,10 @@ export function FillSizeHistogram({ notionals, height = 220 }: { notionals: numb
   const buckets = 10
   const bins = useMemo(() => {
     if (notionals.length < 2) return []
-    const min = Math.min(...notionals)
-    const max = Math.max(...notionals)
+    // Not Math.min(...notionals)/Math.max(...notionals) — spreading 100k+
+    // fills into a function call blows the JS call stack (RangeError).
+    const min = notionals.reduce((a, b) => Math.min(a, b), Infinity)
+    const max = notionals.reduce((a, b) => Math.max(a, b), -Infinity)
     const span = max - min || 1
     const w = span / buckets
     const out = Array.from({ length: buckets }, (_, i) => ({ from: min + i * w, to: min + (i + 1) * w, count: 0 }))

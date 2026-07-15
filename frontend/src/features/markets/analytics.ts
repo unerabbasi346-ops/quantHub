@@ -29,8 +29,8 @@ export function computeDayChange(bars: OHLCVBar[]): DayChange | null {
     last,
     change,
     changePct: first !== 0 ? (change / first) * 100 : 0,
-    high: Math.max(...window.map((b) => num(b.high))),
-    low: Math.min(...window.map((b) => num(b.low))),
+    high: window.reduce((m, b) => Math.max(m, num(b.high)), -Infinity),
+    low: window.reduce((m, b) => Math.min(m, num(b.low)), Infinity),
     volume: window.reduce((s, b) => s + num(b.volume), 0),
   }
 }
@@ -87,7 +87,10 @@ export function computePriceStats(bars: OHLCVBar[]): PriceStats {
 
   const last7d = bars.slice(-7 * 24)
   const range7d = last7d.length
-    ? { high: Math.max(...last7d.map((b) => num(b.high))), low: Math.min(...last7d.map((b) => num(b.low))) }
+    ? {
+        high: last7d.reduce((m, b) => Math.max(m, num(b.high)), -Infinity),
+        low: last7d.reduce((m, b) => Math.min(m, num(b.low)), Infinity),
+      }
     : null
   const avgVolume7d = last7d.length ? last7d.reduce((s, b) => s + num(b.volume), 0) / last7d.length : null
 

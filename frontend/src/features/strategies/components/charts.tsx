@@ -22,8 +22,8 @@
 import { Chart } from '@/components/ui/Chart'
 import { chartAxis, chartTooltip, type ChartTheme } from '@/components/ui/chart-theme'
 import { EmptyState } from '@/components/ui/States'
-import { formatSignalStrength } from '@/lib/utils/format'
-import type { ConsecutiveRun, SignalPoint } from '../analytics'
+import { formatRatio, formatSignalStrength } from '@/lib/utils/format'
+import type { ConsecutiveRun, MLConfidencePoint, SignalPoint } from '../analytics'
 
 const fmtTime = (ts: string) =>
   new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -51,8 +51,8 @@ export function ConvictionEquityChart({
   const values = points.map((p) => p.value)
   const posData = values.map((v) => (v >= 0 ? v : 0))
   const negData = values.map((v) => (v < 0 ? v : 0))
-  const dataMax = Math.max(...values, 0)
-  const dataMin = Math.min(...values, 0)
+  const dataMax = values.reduce((a, b) => Math.max(a, b), 0)
+  const dataMin = values.reduce((a, b) => Math.min(a, b), 0)
 
   return (
     <Chart
@@ -175,7 +175,7 @@ export function SignalTimelineScatter({ points, height = 260 }: { points: Signal
     )
   }
 
-  const maxAbs = Math.max(...points.map((p) => Math.abs(p.value)), 1e-9)
+  const maxAbs = points.reduce((m, p) => Math.max(m, Math.abs(p.value)), 1e-9)
 
   return (
     <Chart
@@ -207,6 +207,60 @@ export function SignalTimelineScatter({ points, height = 260 }: { points: Signal
                 },
               })),
               symbolSize: (val: number[]) => 4 + (Math.abs(val[1]) / maxAbs) * 14,
+            },
+          ],
+        }
+      }}
+    />
+  )
+}
+
+// ── ML confidence over time: X = signal time, Y = ml_confidence (0-1), dot
+//    size = |signal strength|, color = direction_agreement (green true, red
+//    false, neutral when the backend didn't resolve an agreement value).
+//    Only ever fed points that already passed the ml_confidence != null
+//    filter (analytics.ts's mlConfidencePoints) — never plots a fabricated
+//    confidence for a pre-ML-deployment signal. ──
+export function MLConfidenceScatterChart({ points, height = 260 }: { points: MLConfidencePoint[]; height?: number }) {
+  if (points.length === 0) {
+    return (
+      <div style={{ height }}>
+        <EmptyState title="No ML confidence data" description="No signals carry an ML confidence score yet — this appears once a deployed model scores new signals." />
+      </div>
+    )
+  }
+
+  return (
+    <Chart
+      height={height}
+      ariaLabel="ML confidence over time"
+      option={(theme: ChartTheme) => {
+        const axis = chartAxis(theme)
+        return {
+          tooltip: chartTooltip(theme, {
+            trigger: 'item',
+            formatter: (p: unknown) => {
+              const d = p as { value: [number, number, number, number] }
+              const [tsMs, confidence, strength, agreementFlag] = d.value
+              const agreementLabel = agreementFlag === 1 ? 'agrees' : agreementFlag === -1 ? 'disagrees' : 'n/a'
+              return `${fmtTime(new Date(tsMs).toISOString())}<br/>confidence <b>${formatRatio(confidence)}</b><br/>strength <b>${formatSignalStrength(strength)}</b><br/>direction ${agreementLabel}`
+            },
+          }),
+          grid: { left: 56, right: 16, top: 20, bottom: 28 },
+          xAxis: { type: 'time', ...axis, splitLine: { show: false } },
+          yAxis: { type: 'value', min: 0, max: 1, ...axis },
+          series: [
+            {
+              type: 'scatter',
+              data: points.map((p) => {
+                const agreementFlag = p.agreement === true ? 1 : p.agreement === false ? -1 : 0
+                const colorToken = p.agreement === true ? 'profit' : p.agreement === false ? 'risk' : 'fg'
+                return {
+                  value: [new Date(p.ts).getTime(), p.confidence, p.strength, agreementFlag],
+                  itemStyle: { color: theme.alpha(colorToken, p.agreement == null ? 0.4 : 0.75) },
+                }
+              }),
+              symbolSize: (val: number[]) => 4 + Math.min(val[2], 1) * 16,
             },
           ],
         }
@@ -310,8 +364,8 @@ export function SignalStrengthDistributionChart({
     )
   }
 
-  const min = Math.min(...values)
-  const max = Math.max(...values)
+  const min = values.reduce((a, b) => Math.min(a, b), Infinity)
+  const max = values.reduce((a, b) => Math.max(a, b), -Infinity)
   const span = max - min || 1
   const w = span / buckets
   const bins = Array.from({ length: buckets }, (_, i) => ({ from: min + i * w, to: min + (i + 1) * w, count: 0 }))

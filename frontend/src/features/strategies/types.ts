@@ -42,6 +42,17 @@ export interface Signal {
   direction: string
   implied_size_usdt: string | null
   implied_leverage: string
+  // ML suggestion fields (api/v1/strategies.py's SignalOut docstring): all
+  // null unless a DEPLOYED XGBoost_MetaLabeler model exists. Never persisted
+  // to core.signals — computed at read time, same pattern as the implied-
+  // sizing fields above. ml_tp_suggestion/ml_sl_suggestion/ml_breakeven are
+  // SUGGESTIONS derived from real bar volatility, not executed levels.
+  ml_confidence: string | null
+  ml_probability: string | null
+  ml_direction_agreement: boolean | null
+  ml_tp_suggestion: string | null
+  ml_sl_suggestion: string | null
+  ml_breakeven: string | null
 }
 
 // The engine's self-describing §10.3.7 result summary (Decimals already

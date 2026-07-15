@@ -61,7 +61,20 @@ export function Section({
           )}
         </div>
         {actions && (
-          <motion.div {...actionsReveal} className="flex shrink-0 items-center gap-2">
+          // z-20 (explicit, not `auto`): framer-motion's `y` animation leaves a
+          // permanent inline `transform: translateY(0px)` after settling (see
+          // lib/motion/variants.ts's `visible` variant) — any non-`none`
+          // transform establishes a stacking context (same mechanism the
+          // `filter`-stripping comment in lib/motion/reveal.ts calls out for a
+          // different property, just never cleaned up for `transform`). With
+          // NO explicit z-index this context and content's charts/tables below
+          // (Chart.tsx's own motion.div, same lingering-transform mechanism)
+          // are peers ordered by paint order — the later-painted content wins
+          // and can render its actions dropdown behind a chart. An explicit
+          // z-index always outranks an implicit/auto one, regardless of DOM
+          // order, so this fixes it for every Section usage at once (e.g.
+          // Risk's OI-vs-price asset dropdown).
+          <motion.div {...actionsReveal} className="relative z-20 flex shrink-0 items-center gap-2">
             {actions}
           </motion.div>
         )}

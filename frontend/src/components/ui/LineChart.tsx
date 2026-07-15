@@ -47,8 +47,8 @@ export function LineChart({
   }
 
   const values = data.map((d) => d.value)
-  const dataMin = Math.min(...values)
-  const dataMax = Math.max(...values)
+  const dataMin = values.reduce((a, b) => Math.min(a, b), Infinity)
+  const dataMax = values.reduce((a, b) => Math.max(a, b), -Infinity)
   const yMin = zeroBaseline ? Math.min(dataMin, 0) : undefined
   const yMax = zeroBaseline ? Math.max(dataMax, 0) : undefined
 

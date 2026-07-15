@@ -36,8 +36,8 @@ export function Sparkline({
     return <div style={{ width, height }} className={cn('inline-block', className)} aria-hidden />
   }
 
-  const min = Math.min(...data)
-  const max = Math.max(...data)
+  const min = data.reduce((a, b) => Math.min(a, b), Infinity)
+  const max = data.reduce((a, b) => Math.max(a, b), -Infinity)
   const span = max - min || 1
   const pad = 2
   const stepX = (width - pad * 2) / (data.length - 1)

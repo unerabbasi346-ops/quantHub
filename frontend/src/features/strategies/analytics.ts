@@ -67,6 +67,29 @@ export function signalPoints(signals: Signal[]): SignalPoint[] {
     .map((s) => ({ ts: s.ts, value: Number.parseFloat(s.value) }))
 }
 
+export interface MLConfidencePoint {
+  ts: string
+  confidence: number
+  strength: number
+  agreement: boolean | null
+}
+
+// Only signals with a real ml_confidence (DEPLOYED XGBoost_MetaLabeler at
+// signal-read time — api/v1/strategies.py's SignalOut) contribute a point;
+// signals from before a model was deployed are silently excluded rather than
+// plotted at a fabricated confidence of 0.
+export function mlConfidencePoints(signals: Signal[]): MLConfidencePoint[] {
+  return [...signals]
+    .filter((s) => s.ml_confidence != null)
+    .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
+    .map((s) => ({
+      ts: s.ts,
+      confidence: Number.parseFloat(s.ml_confidence!),
+      strength: Math.abs(Number.parseFloat(s.value)),
+      agreement: s.ml_direction_agreement,
+    }))
+}
+
 export interface ConsecutiveRun {
   /** +1 for a run of positive (or zero) conviction, -1 for negative. */
   sign: 1 | -1

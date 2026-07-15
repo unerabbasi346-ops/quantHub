@@ -21,6 +21,12 @@ function spotSymbolFor(perpSymbol: string): string {
   return perpSymbol.split(':')[0]
 }
 
+// z-50 here + `position: relative` on the wrapper were already correct in
+// isolation, but the dropdown still rendered behind OpenInterestPriceChart:
+// the real cause was one level up — Section's `actions` slot (this dropdown's
+// parent) had no explicit z-index, so it lost to the chart's own stacking
+// context on paint order alone. Fixed at the source in components/ui/
+// Section.tsx (see that file's comment) rather than working around it here.
 function AssetDropdown({ assets, active, onSelect }: { assets: Asset[]; active: Asset | null; onSelect: (a: Asset) => void }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)

@@ -85,7 +85,7 @@ export function BacktestRunCards({ backtests }: { backtests: Backtest[] }) {
 //    bar, the strategy's instrument icon, a large colored strength value,
 //    relative time, validation badge, and up to two metadata pairs. ──
 export function RecentSignalRows({ signals, symbol }: { signals: Signal[]; symbol: string | null }) {
-  const maxAbs = Math.max(...signals.map((s) => Math.abs(Number.parseFloat(s.value))), 1e-9)
+  const maxAbs = signals.reduce((m, s) => Math.max(m, Math.abs(Number.parseFloat(s.value))), 1e-9)
 
   return (
     <Panel className="divide-y divide-border/60 overflow-hidden">

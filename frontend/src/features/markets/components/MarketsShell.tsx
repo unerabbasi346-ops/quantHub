@@ -71,8 +71,8 @@ function resample(bars: OHLCVBar[], tf: Timeframe): OHLCVBar[] {
       ...g[0],
       interval: tf,
       open: g[0].open,
-      high: String(Math.max(...highs)),
-      low: String(Math.min(...lows)),
+      high: String(highs.reduce((a, b) => Math.max(a, b), -Infinity)),
+      low: String(lows.reduce((a, b) => Math.min(a, b), Infinity)),
       close: g[g.length - 1].close,
       volume: String(vol),
     }
