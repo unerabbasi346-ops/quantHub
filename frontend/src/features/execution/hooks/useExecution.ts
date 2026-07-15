@@ -5,10 +5,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { executionService } from '../services/execution.service'
 
-export function useOrders(portfolioId: string) {
+export function useOrders(portfolioId: string, limit?: number) {
   return useQuery({
-    queryKey: ['orders', portfolioId],
-    queryFn: () => executionService.getOrders(portfolioId),
+    queryKey: ['orders', portfolioId, limit],
+    queryFn: () => executionService.getOrders(portfolioId, limit),
     enabled: Boolean(portfolioId),
   })
 }

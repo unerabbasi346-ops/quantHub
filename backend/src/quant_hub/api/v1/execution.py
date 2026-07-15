@@ -39,7 +39,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
 from quant_hub.api.dependencies import AssetRepo, ExecutionRepo, OrderRepo, PortfolioRepo, StrategyRepo
@@ -169,6 +169,7 @@ async def get_portfolio_orders(
     asset_repo: AssetRepo,
     strategy_repo: StrategyRepo,
     execution_repo: ExecutionRepo,
+    limit: int | None = Query(None, gt=0, le=5000),
 ) -> ResponseEnvelope[list[OrderOut]]:
     # 404 on an unknown portfolio so a client distinguishes "no such
     # portfolio" from "portfolio exists but has placed no orders" (empty list).
@@ -178,7 +179,7 @@ async def get_portfolio_orders(
             ErrorCode.RESOURCE_NOT_FOUND,
             f"Portfolio {portfolio_id} not found",
         )
-    orders = await order_repo.list_by_portfolio(portfolio_id)
+    orders = await order_repo.list_by_portfolio(portfolio_id, limit=limit)
     # Resolve each DISTINCT asset/strategy once (judgment call #2 in module
     # docstring — same dedup-per-distinct-id pattern, now extended to
     # strategy_id).

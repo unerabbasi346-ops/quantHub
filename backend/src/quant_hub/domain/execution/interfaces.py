@@ -73,13 +73,18 @@ class OrderRepository(ABC):
     async def get_by_idempotency_key(self, key: UUID) -> RecordedOrder | None: ...
 
     @abstractmethod
-    async def list_by_portfolio(self, portfolio_id: UUID) -> list[RecordedOrder]:
-        """All orders for `portfolio_id`, oldest-first (created_at, id).
+    async def list_by_portfolio(
+        self, portfolio_id: UUID, limit: int | None = None
+    ) -> list[RecordedOrder]:
+        """Orders for `portfolio_id`, oldest-first (created_at, id).
 
         Return type tightened from `list[object]` to `list[RecordedOrder]` in
         Step 4.4, its first real consumer (GET /v1/portfolios/{id}/orders — the
         blotter). The concrete impl already returned RecordedOrder; the
         contract now says so.
+
+        `limit`, when given, caps the result to the most recent N orders
+        (still returned oldest-first).
         """
         ...
 

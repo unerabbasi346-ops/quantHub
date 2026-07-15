@@ -389,7 +389,7 @@ function orderStatusVariant(status: Order['status']): BadgeVariant {
 }
 
 function RecentExecutionsWidget({ portfolioId, className }: { portfolioId: string; className?: string }) {
-  const query = useOrders(portfolioId)
+  const query = useOrders(portfolioId, 200)
   const recent = [...(query.data ?? [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 6)
 
   const columns = useMemo<InstitutionalColumnDef<Order>[]>(
@@ -441,7 +441,11 @@ function RecentExecutionsWidget({ portfolioId, className }: { portfolioId: strin
 // rate and approval rate (approved = anything not REJECTED). Real order rows
 // only; "today" is the local calendar day, and an empty day says so.
 function ExecutionSummaryWidget({ portfolioId }: { portfolioId: string }) {
-  const query = useOrders(portfolioId)
+  // ponytail: shares RecentExecutionsWidget's limit=200 fetch (same
+  // queryKey — one network call). Undercounts "today" if a portfolio places
+  // >200 orders in a day; raise the limit or add a server-side since= filter
+  // if that becomes real.
+  const query = useOrders(portfolioId, 200)
   const all = query.data ?? []
   const startOfDay = new Date()
   startOfDay.setHours(0, 0, 0, 0)

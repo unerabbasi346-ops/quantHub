@@ -134,21 +134,43 @@ class SQLAlchemyOrderRepository(BaseRepository[object], OrderRepository):
         row = result.mappings().one_or_none()
         return None if row is None else _row_to_order(row)
 
-    async def list_by_portfolio(self, portfolio_id: UUID) -> list[RecordedOrder]:
+    async def list_by_portfolio(
+        self, portfolio_id: UUID, limit: int | None = None
+    ) -> list[RecordedOrder]:
         # Ordered (created_at, id) for a stable, deterministic blotter feed —
         # id breaks ties when two orders share a created_at (Step 4.4).
-        result = await self._session.execute(
-            text(
-                f"""
-                SELECT {_ORDER_COLS}
-                FROM core.orders
-                WHERE portfolio_id = :portfolio_id
-                ORDER BY created_at, id
-                """
-            ),
-            {"portfolio_id": portfolio_id},
-        )
-        return [_row_to_order(row) for row in result.mappings().all()]
+        # `limit` caps to the most recent N (perf: portfolios can carry 40k+
+        # orders — unbounded fetch was shipping the whole table to the
+        # dashboard on every poll). DESC+LIMIT then reverse keeps the
+        # oldest-first contract callers rely on.
+        if limit is not None:
+            result = await self._session.execute(
+                text(
+                    f"""
+                    SELECT {_ORDER_COLS}
+                    FROM core.orders
+                    WHERE portfolio_id = :portfolio_id
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"portfolio_id": portfolio_id, "limit": limit},
+            )
+            rows = list(reversed(result.mappings().all()))
+        else:
+            result = await self._session.execute(
+                text(
+                    f"""
+                    SELECT {_ORDER_COLS}
+                    FROM core.orders
+                    WHERE portfolio_id = :portfolio_id
+                    ORDER BY created_at, id
+                    """
+                ),
+                {"portfolio_id": portfolio_id},
+            )
+            rows = result.mappings().all()
+        return [_row_to_order(row) for row in rows]
 
     async def list_by_strategy(self, strategy_id: UUID) -> list[RecordedOrder]:
         result = await self._session.execute(

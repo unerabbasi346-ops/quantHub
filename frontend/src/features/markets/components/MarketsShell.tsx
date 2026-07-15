@@ -197,7 +197,9 @@ export function MarketsShell() {
   const signalsById = useSignalsById()
   const portfoliosQuery = usePortfolios()
   const portfolioId = portfoliosQuery.data?.[0]?.id ?? ''
-  const ordersQuery = useOrders(portfolioId)
+  // ponytail: 500 recent orders is enough to mark fills on the chart's
+  // default view; raise if fills need to reach further back in history.
+  const ordersQuery = useOrders(portfolioId, 500)
   const markers: FillMarker[] = (ordersQuery.data ?? [])
     .filter((o) => o.asset_id === activeId && o.status === 'FILLED')
     .map((o) => {

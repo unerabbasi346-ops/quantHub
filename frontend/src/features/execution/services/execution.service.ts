@@ -6,8 +6,11 @@ import type { Execution, Order } from '../types'
 
 export const executionService = {
   // The blotter feed — orders for a portfolio (api/v1/execution.py, Step 4.4).
-  getOrders: (portfolioId: string) =>
-    apiClient.get<Order[]>(`/v1/portfolios/${portfolioId}/orders`),
+  // `limit` caps to the most recent N orders — portfolios can carry 40k+ rows,
+  // so callers that don't need full history (dashboard widgets, chart
+  // markers) must pass one.
+  getOrders: (portfolioId: string, limit?: number) =>
+    apiClient.get<Order[]>(`/v1/portfolios/${portfolioId}/orders${limit ? `?limit=${limit}` : ''}`),
   // Per-order execution fills — the drill-down over core.executions.
   getExecutions: (orderId: string) =>
     apiClient.get<Execution[]>(`/v1/orders/${orderId}/executions`),
