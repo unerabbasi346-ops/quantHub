@@ -110,6 +110,7 @@ class SQLAlchemyBacktestRepository(BaseRepository[object], BacktestRepository):
                     trade_count = :trade_count,
                     results = CAST(:results AS JSONB),
                     reproducibility_hash = :reproducibility_hash,
+                    benchmark_return = :benchmark_return,
                     completed_at = clock_timestamp(),
                     updated_at = clock_timestamp()
                 WHERE id = :id
@@ -122,6 +123,7 @@ class SQLAlchemyBacktestRepository(BaseRepository[object], BacktestRepository):
                 "trade_count": result.trade_count,
                 "results": json.dumps(_result_to_json(result)),
                 "reproducibility_hash": result.reproducibility_hash,
+                "benchmark_return": result.benchmark_return,
             },
         )
 

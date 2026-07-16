@@ -279,3 +279,9 @@ class RecordedExecution:
     executed_at: object
     created_at: object
     realized_pnl: Decimal | None = None  # this fill's realized P&L; NULL only for pre-migration rows never backfilled
+    # Backtest trade-result fields (Engine TP/SL step) — populated ONLY on the
+    # CLOSING fill of a backtest trade (TP/SL/END_OF_DATA exit); NULL on an
+    # entry fill and on every live/paper execution, which has no TP/SL concept.
+    price_return_pct: Decimal | None = None  # (exit-entry)/entry*100, signed to match trade direction
+    market_move_pct: Decimal | None = None   # same formula, unsigned magnitude
+    exit_reason: str | None = None           # "TP_HIT" | "SL_HIT" | "END_OF_DATA"

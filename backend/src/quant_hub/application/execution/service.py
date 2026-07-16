@@ -91,6 +91,10 @@ class ExecutionService:
         risk_request: PreTradeRiskRequest,
         executed_at: object,
         leverage: Decimal | None = None,
+        *,
+        price_return_pct: Decimal | None = None,
+        market_move_pct: Decimal | None = None,
+        exit_reason: str | None = None,
     ) -> ExecutionOutcome:
         """Run one order through gate -> (validate|reject) -> fill -> position.
 
@@ -105,6 +109,12 @@ class ExecutionService:
         risk_request.price) rather than looked up here — the caller that built
         the order from a perpetual instrument knows its configured leverage,
         keeping ExecutionService free of an AssetRepository dependency.
+
+        `price_return_pct`/`market_move_pct`/`exit_reason`: backtest-engine-only
+        trade-result fields, passed straight through to ExecutionRepository.record
+        on this order's fill. None for every live/paper order and every
+        backtest entry order — supplied only when the caller is closing a
+        backtest trade (TP/SL/END_OF_DATA exit).
         """
         decision = await self._risk_gate.evaluate(risk_request)
 
@@ -149,7 +159,10 @@ class ExecutionService:
         update = apply_fill_to_position(cur_qty, cur_avg, fill.signed_quantity, fill.price)
         market_value = (update.quantity * fill.price).quantize(_MV_SCALE, rounding=ROUND_HALF_EVEN)
 
-        execution = await self._executions.record(fill, update.realized_pnl)
+        execution = await self._executions.record(
+            fill, update.realized_pnl,
+            price_return_pct=price_return_pct, market_move_pct=market_move_pct, exit_reason=exit_reason,
+        )
         await self._orders.mark_filled(order.id, fill.quantity, fill.price)
 
         # Margin state (§10.6.6, migration e7a3c1f5b9d2) for a perpetual

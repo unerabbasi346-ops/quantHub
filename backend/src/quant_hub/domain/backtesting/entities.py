@@ -71,3 +71,28 @@ class BacktestResult:
     total_return: Decimal
     trade_count: int
     reproducibility_hash: str
+    # Doc 14 §10.3.8 Benchmark Specification (Engine TP/SL step, migration
+    # d3f7a2c9b5e1): BTC/USDT buy-and-hold return over the same [start, end]
+    # window, for comparing total_return against. None when no benchmark
+    # instrument's bars are available for the period — never fabricated.
+    benchmark_return: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class TradeExit:
+    """One closed backtest trade's realized outcome (Engine TP/SL step).
+
+    Produced when the engine's one-trade-at-a-time position hits its TP, its
+    SL, or the replay simply runs out of bars while still in the trade
+    (END_OF_DATA — closed at the last bar's close, not a fabricated fill).
+    `price_return_pct`/`market_move_pct` mirror the columns migration
+    d3f7a2c9b5e1 adds to core.executions, computed here and persisted onto
+    the closing fill's execution row by the engine.
+    """
+
+    entry_price: Decimal
+    exit_price: Decimal
+    exit_reason: str  # "TP_HIT" | "SL_HIT" | "END_OF_DATA"
+    trade_duration_bars: int
+    price_return_pct: Decimal  # signed: matches trade direction (long/short)
+    market_move_pct: Decimal   # unsigned magnitude of the same price move

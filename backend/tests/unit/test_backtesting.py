@@ -177,9 +177,19 @@ class _FakeExecutionOutcome:
 class _FakeExecution:
     def __init__(self) -> None:
         self.calls = 0
+        self.exit_calls: list[dict] = []  # calls that carried Rule 4 trade-result kwargs
 
-    async def process_order(self, order, request, executed_at) -> _FakeExecutionOutcome:
+    async def process_order(
+        self, order, request, executed_at,
+        price_return_pct=None, market_move_pct=None, exit_reason=None,
+    ) -> _FakeExecutionOutcome:
         self.calls += 1
+        if exit_reason is not None:
+            self.exit_calls.append({
+                "price_return_pct": price_return_pct,
+                "market_move_pct": market_move_pct,
+                "exit_reason": exit_reason,
+            })
         return _FakeExecutionOutcome()
 
 
@@ -222,15 +232,26 @@ def _config() -> BacktestConfig:
 
 @pytest.mark.asyncio
 async def test_engine_replays_all_bars_and_fills() -> None:
+    # _bar's open=high=low=close (no wick) makes ATR14 unavailable this early
+    # (< 15 bars) -> tp=sl=entry_price exactly, so every entry is immediately
+    # TP_HIT on the very next bar (price steps by 1 every bar here) and,
+    # since is_in_trade goes False again before this SAME bar's signal
+    # section runs, the always-firing _FakeStrategy re-enters same-bar too
+    # (Rule 2 only forbids a new entry WHILE still in a trade — it does not
+    # forbid a fresh entry the instant a trade closes). Net: bars 1-3 each
+    # do an exit+re-entry (2 fills), bar 4 (last) does an exit+re-entry+
+    # END_OF_DATA close of that fresh position (3 fills) -> 4+4+... see
+    # inline count below; signals_generated stays 4 (one generate_signals
+    # call per bar while flat, same as before this rule set existed).
     bars = [_bar(i, str(100 + i)) for i in range(5)]
     execution = _FakeExecution()
     engine = _engine(bars, execution)
     _bt_id, result = await engine.run(_config(), strategy_id=uuid4(), portfolio_id=uuid4())
     assert result.bars_processed == 5
-    # signals emitted from bar index 1 onward (>=2 bars) -> 4 signals/orders/fills
     assert result.signals_generated == 4
-    assert result.orders_created == 4 and result.orders_filled == 4
-    assert execution.calls == 4  # the engine delegated to the (real-typed) execution service
+    assert result.orders_created == result.orders_filled == execution.calls == 8
+    assert len(execution.exit_calls) == 4  # every exit carries Rule 4's trade-result fields
+    assert all(c["exit_reason"] in ("TP_HIT", "END_OF_DATA") for c in execution.exit_calls)
 
 
 @pytest.mark.asyncio
@@ -250,3 +271,125 @@ async def test_different_data_changes_hash() -> None:
     _i, ra = await _engine(bars_a).run(_config(), strategy_id=uuid4(), portfolio_id=uuid4())
     _j, rb = await _engine(bars_b).run(_config(), strategy_id=uuid4(), portfolio_id=uuid4())
     assert ra.reproducibility_hash != rb.reproducibility_hash
+
+
+# ── Rule 2 (one-trade-at-a-time) / Rule 3 (TP/SL exit) ──────────────────────
+# A real (non-degenerate) ATR needs >=15 bars of history, so these tests use
+# a strategy that only fires while the view is 16-20 bars long: bar index 15
+# is the entry (first bar with real ATR available), 16-19 are HELD bars where
+# the strategy fires again every time but the engine must SKIP (Rule 2) since
+# a trade is open, and bar 20 is engineered to hit TP/SL (or not, for the
+# "still open" control) with the strategy deliberately silent so the test
+# isolates the TP/SL check from any same-bar re-entry.
+
+
+def _wick_bar(i: int, close: float, high: float, low: float) -> OHLCVBar:
+    return OHLCVBar(
+        asset_id=uuid4(), interval="1h", ts=_T0 + timedelta(hours=i),
+        open=Decimal(str(close)), high=Decimal(str(high)), low=Decimal(str(low)),
+        close=Decimal(str(close)), volume=Decimal("1"), vwap=None, trade_count=None,
+        adjustment_factor=None, data_quality=Decimal("1"), source="test",
+    )
+
+
+def _atr_setup_bars() -> list[OHLCVBar]:
+    # i=0..15: alternating 100/102 close, constant wick +-1 -> constant
+    # True Range = 3 for every step -> ATR14 = 3 exactly (see test_trade_rules.py
+    # for the same closed-form check on the pure function).
+    return [_wick_bar(i, 102 if i % 2 else 100, (102 if i % 2 else 100) + 1, (102 if i % 2 else 100) - 1)
+            for i in range(16)]
+
+
+class _WindowedFakeStrategy(Strategy):
+    """Fires a fixed long signal only while the point-in-time view is 16-20
+    bars long — isolates one entry (bar 15) + several held bars (16-19) from
+    the TP/SL bar (20), where this strategy is deliberately silent.
+    """
+
+    async def generate_signals(self, view, config):
+        bars = await view.latest_bars(_ASSET, "1h", limit=1000)
+        if 16 <= len(bars) <= 20:
+            return [Signal(asset=_ASSET, value=Decimal("0.5"), ts=bars[-1].ts, metadata={})]
+        return []
+
+
+def _windowed_engine(bars: list[OHLCVBar], execution: "_FakeExecution"):
+    return BacktestEngine(
+        bars=_FakeBars(bars), assets=_FakeAssets(uuid4()), positions=_FakePositions(),
+        backtests=_FakeBacktests(), signal_recorder=_FakeSignalRecorder(),
+        sizer=LinearConvictionSizer(), constructor=WeightedSumConstructor(),
+        order_gen=_FakeOrderGen(), execution=execution,
+        strategy_plugin=_WindowedFakeStrategy(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_one_trade_at_a_time_skips_signal_while_in_trade() -> None:
+    setup = _atr_setup_bars()  # i=0..15
+    held = [_wick_bar(i, 101, 101.5, 100.5) for i in range(16, 20)]  # i=16..19, well inside [96,111]
+    bars = setup + held  # 20 bars total, entry at i=15, held through i=19
+    execution = _FakeExecution()
+    _bt_id, result = await _windowed_engine(bars, execution).run(
+        _config_for(bars), strategy_id=uuid4(), portfolio_id=uuid4(),
+    )
+    # Rule 2 gates signal generation itself while in a trade — the engine
+    # never even CALLS generate_signals for i=16..19 (a stronger skip than
+    # generating and discarding), so signals_generated stays at 1 despite
+    # the strategy being willing to fire on all 4 of those held bars.
+    # No TP/SL bar follows, so the trade is still open when the replay runs
+    # out of bars -> one END_OF_DATA close, not a fabricated extra fill.
+    assert result.signals_generated == 1
+    assert result.orders_created == 2   # entry + END_OF_DATA close
+    assert result.orders_filled == 2
+    assert execution.calls == 2
+    assert execution.exit_calls[0]["exit_reason"] == "END_OF_DATA"
+
+
+@pytest.mark.asyncio
+async def test_tp_hit_exits_trade_and_resets_is_in_trade() -> None:
+    setup = _atr_setup_bars()
+    held = [_wick_bar(i, 101, 101.5, 100.5) for i in range(16, 20)]
+    # entry_price=102 (bar 15, odd index -> 102), ATR=3 -> tp=102+9=111, sl=102-6=96.
+    # bar 20: high=113 clears tp=111; low=111 does NOT clear sl=96 -> TP_HIT only.
+    tp_bar = [_wick_bar(20, 112, 113, 111)]
+    bars = setup + held + tp_bar  # 21 bars, strategy silent at i=20 (view len 21)
+    execution = _FakeExecution()
+    _bt_id, result = await _windowed_engine(bars, execution).run(
+        _config_for(bars), strategy_id=uuid4(), portfolio_id=uuid4(),
+    )
+    # entry (i=15) + exit (i=20) = 2 orders/fills; no END_OF_DATA close needed
+    # since the trade already closed via TP before the replay ran out of bars.
+    assert result.orders_created == 2
+    assert result.orders_filled == 2
+    assert len(execution.exit_calls) == 1
+    exit_call = execution.exit_calls[0]
+    assert exit_call["exit_reason"] == "TP_HIT"
+    assert exit_call["price_return_pct"] == (Decimal("111") - Decimal("102")) / Decimal("102") * Decimal("100")
+
+
+@pytest.mark.asyncio
+async def test_sl_hit_exits_trade_and_resets_is_in_trade() -> None:
+    setup = _atr_setup_bars()
+    held = [_wick_bar(i, 101, 101.5, 100.5) for i in range(16, 20)]
+    # Same entry/tp/sl as the TP test (102 / 111 / 96). bar 20: low=95 clears
+    # sl=96; high=97 does NOT clear tp=111 -> SL_HIT only.
+    sl_bar = [_wick_bar(20, 96, 97, 95)]
+    bars = setup + held + sl_bar
+    execution = _FakeExecution()
+    _bt_id, result = await _windowed_engine(bars, execution).run(
+        _config_for(bars), strategy_id=uuid4(), portfolio_id=uuid4(),
+    )
+    assert result.orders_created == 2
+    assert result.orders_filled == 2
+    assert len(execution.exit_calls) == 1
+    exit_call = execution.exit_calls[0]
+    assert exit_call["exit_reason"] == "SL_HIT"
+    assert exit_call["price_return_pct"] == (Decimal("96") - Decimal("102")) / Decimal("102") * Decimal("100")
+
+
+def _config_for(bars: list[OHLCVBar]) -> BacktestConfig:
+    return BacktestConfig(
+        name="rule-test", symbol="BTC/USDT", exchange="binance", asset_class="crypto",
+        interval="1h", strategy_config={}, start=bars[0].ts, end=bars[-1].ts,
+        initial_capital=Decimal("100000"), max_position_pct=Decimal("0.10"),
+    )

@@ -278,6 +278,9 @@ def _row_to_execution(row: object) -> RecordedExecution:
         executed_at=row["executed_at"],
         created_at=row["created_at"],
         realized_pnl=row["realized_pnl"],
+        price_return_pct=row["price_return_pct"],
+        market_move_pct=row["market_move_pct"],
+        exit_reason=row["exit_reason"],
     )
 
 
@@ -288,7 +291,15 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
     (caller owns the transaction boundary).
     """
 
-    async def record(self, fill: Fill, realized_pnl: Decimal) -> RecordedExecution:
+    async def record(
+        self,
+        fill: Fill,
+        realized_pnl: Decimal,
+        *,
+        price_return_pct: Decimal | None = None,
+        market_move_pct: Decimal | None = None,
+        exit_reason: str | None = None,
+    ) -> RecordedExecution:
         """Persist a simulated Fill as a core.executions row.
 
         `net_amount` is the signed cash effect (§10.9.4): BUY is cash out
@@ -296,6 +307,9 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
         to the column scale NUMERIC(20,4). `realized_pnl` (migration
         a2e4c7b1d6f9) is the caller-computed PositionUpdate.realized_pnl for
         this fill — already quantized to NUMERIC(20,4) by apply_fill_to_position.
+        `price_return_pct`/`market_move_pct`/`exit_reason` are None on every
+        entry fill and every live/paper fill — supplied only by the backtest
+        engine on a trade's closing fill.
         """
         gross = fill.quantity * fill.price
         if fill.side is OrderSide.BUY:
@@ -308,12 +322,15 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
             """
             INSERT INTO core.executions
                 (order_id, portfolio_id, asset_id, side, quantity, price,
-                 commission, net_amount, venue, executed_at, realized_pnl)
+                 commission, net_amount, venue, executed_at, realized_pnl,
+                 price_return_pct, market_move_pct, exit_reason)
             VALUES
                 (:order_id, :portfolio_id, :asset_id, :side, :quantity, :price,
-                 :commission, :net_amount, :venue, :executed_at, :realized_pnl)
+                 :commission, :net_amount, :venue, :executed_at, :realized_pnl,
+                 :price_return_pct, :market_move_pct, :exit_reason)
             RETURNING id, order_id, portfolio_id, asset_id, side, quantity, price,
-                      commission, net_amount, venue, executed_at, created_at, realized_pnl
+                      commission, net_amount, venue, executed_at, created_at, realized_pnl,
+                      price_return_pct, market_move_pct, exit_reason
             """
         )
         result = await self._session.execute(
@@ -330,6 +347,9 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
                 "venue": fill.venue,
                 "executed_at": fill.executed_at,
                 "realized_pnl": realized_pnl,
+                "price_return_pct": price_return_pct,
+                "market_move_pct": market_move_pct,
+                "exit_reason": exit_reason,
             },
         )
         return _row_to_execution(result.mappings().one())
@@ -339,7 +359,8 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
             text(
                 """
                 SELECT id, order_id, portfolio_id, asset_id, side, quantity, price,
-                       commission, net_amount, venue, executed_at, created_at, realized_pnl
+                       commission, net_amount, venue, executed_at, created_at, realized_pnl,
+                       price_return_pct, market_move_pct, exit_reason
                 FROM core.executions
                 WHERE order_id = :order_id
                 ORDER BY executed_at, id
@@ -357,7 +378,8 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
             text(
                 """
                 SELECT id, order_id, portfolio_id, asset_id, side, quantity, price,
-                       commission, net_amount, venue, executed_at, created_at, realized_pnl
+                       commission, net_amount, venue, executed_at, created_at, realized_pnl,
+                       price_return_pct, market_move_pct, exit_reason
                 FROM core.executions
                 WHERE portfolio_id = :portfolio_id
                 ORDER BY executed_at, id
@@ -378,7 +400,8 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
                     """
                     SELECT e.id, e.order_id, e.portfolio_id, e.asset_id, e.side, e.quantity,
                            e.price, e.commission, e.net_amount, e.venue, e.executed_at,
-                           e.created_at, e.realized_pnl
+                           e.created_at, e.realized_pnl,
+                           e.price_return_pct, e.market_move_pct, e.exit_reason
                     FROM core.executions e
                     JOIN core.orders o ON o.id = e.order_id
                     WHERE o.strategy_id = :strategy_id
@@ -395,7 +418,8 @@ class SQLAlchemyExecutionRepository(BaseRepository[object], ExecutionRepository)
                     """
                     SELECT e.id, e.order_id, e.portfolio_id, e.asset_id, e.side, e.quantity,
                            e.price, e.commission, e.net_amount, e.venue, e.executed_at,
-                           e.created_at, e.realized_pnl
+                           e.created_at, e.realized_pnl,
+                           e.price_return_pct, e.market_move_pct, e.exit_reason
                     FROM core.executions e
                     JOIN core.orders o ON o.id = e.order_id
                     WHERE o.strategy_id = :strategy_id

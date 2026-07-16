@@ -133,7 +133,15 @@ class ExecutionRepository(ABC):
     """Persistence contract for core.executions — Doc 07 §Implementation Rules."""
 
     @abstractmethod
-    async def record(self, fill: Fill, realized_pnl: Decimal) -> RecordedExecution:
+    async def record(
+        self,
+        fill: Fill,
+        realized_pnl: Decimal,
+        *,
+        price_return_pct: Decimal | None = None,
+        market_move_pct: Decimal | None = None,
+        exit_reason: str | None = None,
+    ) -> RecordedExecution:
         """Persist a Fill as an immutable core.executions row — §10.9.4.
 
         `realized_pnl` is the PositionUpdate.realized_pnl this fill produced
@@ -141,6 +149,11 @@ class ExecutionRepository(ABC):
         the caller BEFORE this call (it needs the pre-fill position state),
         then persisted onto the trade record it belongs to (migration
         a2e4c7b1d6f9).
+
+        `price_return_pct`/`market_move_pct`/`exit_reason` (backtest TP/SL
+        step, migration <trade_result>): supplied ONLY by the backtest engine
+        on a trade's CLOSING fill — None everywhere else (a live/paper fill,
+        or a backtest's own entry fill), matching RecordedExecution's docstring.
         """
         ...
 
