@@ -32,8 +32,42 @@
 
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import * as echarts from 'echarts'
+// Tree-shaken ECharts: Turbopack resolves the full 'echarts' package entry in
+// a way that skips its side-effect renderer registration ("Renderer 'undefined'
+// is not imported"). Explicit echarts/core + use() registration is the
+// build-tool-proof form. Every series/component any QuantHub chart uses must
+// be registered HERE — this file is the single engine bridge.
+import * as echarts from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import {
+  LineChart as EChartsLine,
+  BarChart as EChartsBar,
+  ScatterChart as EChartsScatter,
+  GaugeChart as EChartsGauge,
+  HeatmapChart as EChartsHeatmap,
+  PieChart as EChartsPie,
+} from 'echarts/charts'
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+  VisualMapComponent,
+  GraphicComponent,
+  MarkLineComponent,
+  MarkPointComponent,
+  TitleComponent,
+  DataZoomComponent,
+} from 'echarts/components'
 import type { EChartsOption } from 'echarts'
+import type { EChartsType } from 'echarts/core'
+
+echarts.use([
+  CanvasRenderer,
+  EChartsLine, EChartsBar, EChartsScatter, EChartsGauge, EChartsHeatmap, EChartsPie,
+  GridComponent, TooltipComponent, LegendComponent, VisualMapComponent,
+  GraphicComponent, MarkLineComponent, MarkPointComponent, TitleComponent,
+  DataZoomComponent,
+])
 import { cn } from '@/lib/utils/cn'
 import { useReveal, DURATION } from '@/lib/motion'
 import { useChartTheme, useChartAnimation, type ChartTheme } from './chart-theme'
@@ -63,12 +97,12 @@ export function Chart({ option, height = 280, className, onEvents, ariaLabel }: 
   const animate = useChartAnimation()
   const reveal = useReveal('cardContent')
   const hostRef = useRef<HTMLDivElement | null>(null)
-  const instanceRef = useRef<echarts.ECharts | null>(null)
+  const instanceRef = useRef<EChartsType | null>(null)
 
   // Init once the host exists; dispose on unmount.
   useEffect(() => {
     if (!hostRef.current) return
-    const inst = echarts.init(hostRef.current, undefined, { renderer: 'canvas' })
+    const inst = echarts.init(hostRef.current)
     instanceRef.current = inst
     const ro = new ResizeObserver(() => inst.resize())
     ro.observe(hostRef.current)
