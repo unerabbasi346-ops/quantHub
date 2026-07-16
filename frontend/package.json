@@ -4,7 +4,7 @@
   "private": true,
   "description": "Quant Hub — dashboard UI. Governing specification: Doc 03 Technology Stack (QH-003 v1.0), Doc 08 Frontend Architecture (QH-008 v1.0). Per Doc 00 §14.11.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

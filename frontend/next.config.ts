@@ -17,9 +17,27 @@ const nextConfig: NextConfig = {
   },
   // Doc 08 §Performance: optimise imports for large libraries — per-icon/
   // per-module imports instead of pulling each package's full barrel file
-  // into every route that touches it.
+  // into every route that touches it. echarts-for-react dropped from the
+  // requested list — not a dependency of this app (Chart.tsx wraps raw
+  // `echarts` directly), so listing it here would be dead config.
   experimental: {
-    optimizePackageImports: ['echarts', 'framer-motion', 'lucide-react'],
+    optimizePackageImports: [
+      'echarts',
+      'framer-motion',
+      'lucide-react',
+      '@tanstack/react-table',
+      '@tanstack/react-virtual',
+    ],
+  },
+  // Only read when the dev server runs with `next dev --turbopack` — the
+  // package.json `dev` script now does (below). NOT under `experimental`:
+  // Next 15.5 promoted Turbopack config to a top-level key and logs a
+  // deprecation warning for `experimental.turbo` (verified live). An empty
+  // `rules` is a valid, harmless placeholder: no custom loader rules
+  // needed today, but this is where a future one (e.g. an SVG loader)
+  // would go without restructuring the config.
+  turbopack: {
+    rules: {},
   },
 }
 

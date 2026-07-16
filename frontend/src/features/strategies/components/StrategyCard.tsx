@@ -20,7 +20,7 @@
 // donut with nothing to plot.
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, Brain, RotateCw } from 'lucide-react'
@@ -59,7 +59,7 @@ function Metric({ label, value, tone = 'default' }: { label: string; value: stri
   )
 }
 
-export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
+export const StrategyCard = memo(function StrategyCard({ perf }: { perf: StrategyPerformance }) {
   const { strategy, signals, sparkline, latestReturn, hasBacktest, loading } = perf
   const ret = returnPct(latestReturn)
   const reference = isReferenceStrategy(strategy.name)
@@ -247,4 +247,4 @@ export function StrategyCard({ perf }: { perf: StrategyPerformance }) {
       </motion.div>
     </Card>
   )
-}
+})

@@ -146,7 +146,7 @@ function healthTone(score: number): 'profit' | 'warning' | 'risk' {
   return 'risk'
 }
 
-function IntelligenceWorkspace() {
+const IntelligenceWorkspace = memo(function IntelligenceWorkspace() {
   const healthQuery = useHermesHealth()
   const health = healthQuery.data ?? null
 
@@ -247,4 +247,4 @@ function IntelligenceWorkspace() {
       </div>
     </motion.div>
   )
-}
+})

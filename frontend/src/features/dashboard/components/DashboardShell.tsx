@@ -26,7 +26,7 @@
 // Feed sections (previously one merged grid) to match the mandated order.
 'use client'
 
-import { useMemo, type ReactNode } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
 import { ArrowLeftRight, CandlestickChart, Gauge, LayoutDashboard, ShieldAlert, TrendingUp, Wallet } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import {
@@ -168,7 +168,7 @@ function DashboardFooter() {
 // Portfolio / Risk / Performance / Market Overview — not an undifferentiated
 // stat strip. Every figure reads from a hook already used elsewhere in the
 // app (Positions/Risk/Markets) — no new endpoint, no fabricated number.
-function AnalyticsGrid({ portfolioId: _portfolioId }: { portfolioId: string }) {
+const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }: { portfolioId: string }) {
   // Backtest-centric redesign (UI wiring step, owner request): all 4 cards
   // now read from real backtest/strategy data instead of the live portfolio
   // — a single unlevered spot position ($25.25) made every card read nearly
@@ -344,7 +344,7 @@ function AnalyticsGrid({ portfolioId: _portfolioId }: { portfolioId: string }) {
       </Card>
     </div>
   )
-}
+})
 
 function PortfolioSummaryWidget({ portfolioId, className }: { portfolioId: string; className?: string }) {
   const query = usePositions(portfolioId)
