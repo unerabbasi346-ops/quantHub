@@ -50,6 +50,7 @@ from uuid import UUID
 import pandas as pd
 from fastapi import APIRouter, Query, Response, status
 from pydantic import BaseModel, field_serializer
+from sqlalchemy import text as sa_text
 
 from quant_hub.api.dependencies import (
     AssetRepo,
@@ -560,6 +561,70 @@ async def get_strategy_backtests(
         )
     rows = await backtest_repo.list_by_strategy(strategy_id)
     return ok([_serialize_backtest_row(row) for row in rows])
+
+
+class MonthlyReturnOut(BaseModel):
+    """One month's REAL realized trading P&L for a strategy, aggregated
+    server-side from core.executions rows (via core.orders.strategy_id).
+    Absolute P&L in the execution currency, not a percent — the platform has
+    no per-month capital ledger, and fabricating a denominator would violate
+    Doc 00 §14.5 data honesty. NUMERIC as string, matching every other money
+    field in this module.
+    """
+
+    year: int
+    month: int  # 1-12
+    realized_pnl: Decimal
+    trade_count: int
+
+    @field_serializer("realized_pnl")
+    def _serialize_pnl(self, v: Decimal) -> str:
+        return str(v)
+
+
+@router.get(
+    "/strategies/{strategy_id}/monthly-returns",
+    response_model=ResponseEnvelope[list[MonthlyReturnOut]],
+    summary="Monthly realized P&L for a strategy, computed from executions",
+)
+async def get_strategy_monthly_returns(
+    strategy_id: UUID,
+    strategy_repo: StrategyRepo,
+    session: DbSession,
+) -> ResponseEnvelope[list[MonthlyReturnOut]]:
+    """One row per calendar month with at least one execution — bounded by
+    calendar time (60 rows for 5 years), not by execution count, so the
+    monthly heatmap never needs to page through the signal feed's 1000-row
+    cap."""
+    if await strategy_repo.get_by_id(strategy_id) is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} not found",
+        )
+    result = await session.execute(
+        sa_text(
+            """
+            SELECT EXTRACT(YEAR FROM e.executed_at)::int AS year,
+                   EXTRACT(MONTH FROM e.executed_at)::int AS month,
+                   COALESCE(SUM(e.realized_pnl), 0) AS realized_pnl,
+                   COUNT(*)::int AS trade_count
+            FROM core.executions e
+            JOIN core.orders o ON o.id = e.order_id
+            WHERE o.strategy_id = :strategy_id AND e.realized_pnl IS NOT NULL
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+            """
+        ),
+        {"strategy_id": strategy_id},
+    )
+    return ok([
+        MonthlyReturnOut(
+            year=row.year, month=row.month,
+            realized_pnl=row.realized_pnl, trade_count=row.trade_count,
+        )
+        for row in result
+    ])
 
 
 class ComputedMetricsOut(BaseModel):

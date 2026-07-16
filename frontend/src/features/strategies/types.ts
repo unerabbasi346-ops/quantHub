@@ -105,3 +105,12 @@ export interface Backtest {
   completed_at: ISOTimestamp | null
   created_at: ISOTimestamp
 }
+
+// GET /v1/strategies/{id}/monthly-returns — one row per calendar month with
+// executions; realized_pnl is REAL aggregated execution P&L (NUMERIC string).
+export interface MonthlyReturn {
+  year: number
+  month: number // 1-12
+  realized_pnl: string
+  trade_count: number
+}

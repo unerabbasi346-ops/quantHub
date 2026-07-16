@@ -105,7 +105,7 @@ export function PortfolioShell() {
             strategyId={activeStrategy.id}
           />
 
-          <BacktestAnalyticsTabs backtest={latestBacktest} signals={signals} />
+          <BacktestAnalyticsTabs backtest={latestBacktest} signals={signals} strategyId={activeStrategy.id} />
 
           <StrategyComparison strategies={strategies} />
 

@@ -31,6 +31,16 @@ export function useSignals(strategyId: string, limit = 100) {
   })
 }
 
+// Server-side monthly realized P&L calendar (one row per month) — bounded by
+// calendar time, so a 5-year strategy never hits the signal feed's row cap.
+export function useMonthlyReturns(strategyId: string) {
+  return useQuery({
+    queryKey: ['monthly-returns', strategyId],
+    queryFn: () => strategiesService.getMonthlyReturns(strategyId),
+    enabled: Boolean(strategyId),
+  })
+}
+
 export function useBacktests(strategyId: string) {
   return useQuery({
     queryKey: ['backtests', strategyId],

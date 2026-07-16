@@ -4,7 +4,7 @@
 // by the Strategy detail workspace's monthly heatmap, timeline scatter and
 // consecutive-run chart, kept out of the component file so the math is
 // independently readable/testable.
-import type { Signal } from './types'
+import type { MonthlyReturn, Signal } from './types'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -50,6 +50,39 @@ export function monthlyConvictionGrid(signals: Signal[]): MonthlyConvictionGrid 
       const mean = arr.reduce((a, b) => a + b, 0) / arr.length
       maxAbs = Math.max(maxAbs, Math.abs(mean))
       return mean
+    })
+  })
+
+  return { years, months: MONTH_LABELS, grid, maxAbs: maxAbs || 1 }
+}
+
+// REAL monthly realized P&L calendar from the server-side monthly-returns
+// endpoint (aggregated from core.executions) — replaces the signal-mean proxy
+// wherever execution history exists. Same grid shape as monthlyConvictionGrid
+// so the Heatmap wiring is shared.
+export function monthlyReturnsGrid(rows: MonthlyReturn[]): MonthlyConvictionGrid {
+  if (rows.length === 0) return { years: [], months: MONTH_LABELS, grid: [], maxAbs: 0 }
+
+  const byKey = new Map<string, number>()
+  let minYear = Infinity
+  let maxYear = -Infinity
+  for (const r of rows) {
+    minYear = Math.min(minYear, r.year)
+    maxYear = Math.max(maxYear, r.year)
+    byKey.set(`${r.year}-${r.month}`, Number.parseFloat(r.realized_pnl))
+  }
+
+  const years: string[] = []
+  for (let y = minYear; y <= maxYear; y++) years.push(String(y))
+
+  let maxAbs = 0
+  const grid: (number | null)[][] = years.map((yStr) => {
+    const y = Number(yStr)
+    return MONTH_LABELS.map((_, m) => {
+      const v = byKey.get(`${y}-${m + 1}`)
+      if (v === undefined) return null
+      maxAbs = Math.max(maxAbs, Math.abs(v))
+      return v
     })
   })
 

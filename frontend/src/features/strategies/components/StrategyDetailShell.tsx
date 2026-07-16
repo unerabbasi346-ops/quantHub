@@ -65,10 +65,10 @@ import { formatMaxDrawdownPct, formatReturn, formatSharpe, formatSignalStrength,
 import { EASE_OUT } from '@/lib/motion'
 import { useSyncStore } from '@/lib/store/sync'
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
-import { useBacktests, useSignals, useStrategies, useStrategyMetrics } from '../hooks/useStrategies'
+import { useBacktests, useMonthlyReturns, useSignals, useStrategies, useStrategyMetrics } from '../hooks/useStrategies'
 import type { Signal, Strategy } from '../types'
 import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOLTIP } from '../labels'
-import { consecutiveRuns, monthlyConvictionGrid, signalPoints } from '../analytics'
+import { consecutiveRuns, monthlyConvictionGrid, monthlyReturnsGrid, signalPoints } from '../analytics'
 import { ConsecutiveRunsChart, ConvictionEquityChart, SignalStrengthDistributionChart, SignalTimelineScatter } from './charts'
 import { MLIntelligenceSection } from './MLIntelligence'
 import { BacktestReturnTile, PendingMetricTile, RealMetricTile, RealRingTile } from './metric-tiles'
@@ -368,7 +368,14 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
   const fillRate = results && results.orders_created > 0 ? results.orders_filled / results.orders_created : null
   const reference = isReferenceStrategy(strategy.name)
 
-  const monthly = useMemo(() => monthlyConvictionGrid(signals), [signals])
+  const monthlyReturnsQuery = useMonthlyReturns(strategy.id)
+  const monthlyRows = monthlyReturnsQuery.data ?? []
+  // Prefer the REAL realized-P&L calendar (server-side, from executions);
+  // fall back to the signal-mean proxy only when no execution history exists.
+  const monthlyPnl = useMemo(() => monthlyReturnsGrid(monthlyRows), [monthlyRows])
+  const monthlyProxy = useMemo(() => monthlyConvictionGrid(signals), [signals])
+  const monthlyIsPnl = monthlyPnl.years.length > 0
+  const monthly = monthlyIsPnl ? monthlyPnl : monthlyProxy
   const timelinePoints = useMemo(() => signalPoints(signals), [signals])
   const runs = useMemo(() => consecutiveRuns(signals), [signals])
 
@@ -478,11 +485,15 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
       {/* ── Section 3: monthly signal performance heatmap (full width) ── */}
       <Section
         icon={<CalendarRange size={16} />}
-        title="Monthly signal performance"
-        description="Average signed Alpha Score by month — an honest proxy for strategy lean, not a realized P&L calendar."
+        title={monthlyIsPnl ? 'Monthly realized P&L' : 'Monthly signal performance'}
+        description={
+          monthlyIsPnl
+            ? 'Realized trading P&L per calendar month, aggregated from this strategy’s real executions.'
+            : 'Average signed Alpha Score by month — an honest proxy for strategy lean, not a realized P&L calendar.'
+        }
       >
         <Panel className="p-4">
-          {signalsQuery.isLoading ? (
+          {signalsQuery.isLoading || monthlyReturnsQuery.isLoading ? (
             <div className="skeleton h-[240px] w-full" />
           ) : monthly.years.length === 0 ? (
             <div className="flex h-[200px] items-center justify-center text-sm text-fg-muted">Not enough signals to build a monthly grid yet.</div>
@@ -495,7 +506,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
               min={-monthly.maxAbs}
               max={monthly.maxAbs}
               height={Math.max(180, monthly.years.length * 70 + 90)}
-              valueFormat={(v) => formatSignalStrength(v)}
+              valueFormat={(v) => (monthlyIsPnl ? fmtMoney(String(v)) : formatSignalStrength(v))}
             />
           )}
         </Panel>

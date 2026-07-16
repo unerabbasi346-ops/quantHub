@@ -8,9 +8,9 @@
 import { useMemo } from 'react'
 import { BarChart3, CalendarRange, LayoutGrid, ShieldQuestion, Sigma } from 'lucide-react'
 import { Badge, EmptyState, Heatmap, Panel, Section, Tabs } from '@/components/ui'
-import { consecutiveRuns, monthlyConvictionGrid } from '@/features/strategies/analytics'
+import { consecutiveRuns, monthlyConvictionGrid, monthlyReturnsGrid } from '@/features/strategies/analytics'
 import { ConsecutiveRunsChart } from '@/features/strategies/components/charts'
-import { useStrategyMetrics } from '@/features/strategies/hooks/useStrategies'
+import { useMonthlyReturns, useStrategyMetrics } from '@/features/strategies/hooks/useStrategies'
 import { PendingMetricTile, RealMetricTile, RealRingTile } from '@/features/strategies/components/metric-tiles'
 import { fmtMoney, fmtReturnPct } from '@/features/strategies/components/tables'
 import type { Backtest, Signal } from '@/features/strategies/types'
@@ -70,8 +70,18 @@ function OverviewTab({ backtest }: { backtest: Backtest | null }) {
   )
 }
 
-function MonthlyReturnsTab({ signals }: { signals: Signal[] }) {
-  const monthly = useMemo(() => monthlyConvictionGrid(signals), [signals])
+function MonthlyReturnsTab({ signals, strategyId }: { signals: Signal[]; strategyId: string }) {
+  const returnsQuery = useMonthlyReturns(strategyId)
+  const rows = returnsQuery.data ?? []
+  // REAL realized-P&L calendar (server-side, from executions) when execution
+  // history exists; the signal-mean proxy only as a fallback.
+  const monthlyPnl = useMemo(() => monthlyReturnsGrid(rows), [rows])
+  const monthlyProxy = useMemo(() => monthlyConvictionGrid(signals), [signals])
+  const isPnl = monthlyPnl.years.length > 0
+  const monthly = isPnl ? monthlyPnl : monthlyProxy
+  if (returnsQuery.isLoading) {
+    return <div className="skeleton h-[240px] w-full" />
+  }
   if (monthly.years.length === 0) {
     return <EmptyState title="Not enough trade history" description="Not enough signals yet to build a monthly grid." />
   }
@@ -85,7 +95,7 @@ function MonthlyReturnsTab({ signals }: { signals: Signal[] }) {
         min={-monthly.maxAbs}
         max={monthly.maxAbs}
         height={Math.max(180, monthly.years.length * 70 + 90)}
-        valueFormat={(v) => formatSignalStrength(v)}
+        valueFormat={(v) => (isPnl ? fmtMoney(String(v)) : formatSignalStrength(v))}
       />
     </Panel>
   )
@@ -131,13 +141,13 @@ function TradeAnalysisTab({ signals }: { signals: Signal[] }) {
   )
 }
 
-export function BacktestAnalyticsTabs({ backtest, signals }: { backtest: Backtest | null; signals: Signal[] }) {
+export function BacktestAnalyticsTabs({ backtest, signals, strategyId }: { backtest: Backtest | null; signals: Signal[]; strategyId: string }) {
   return (
     <Section icon={<LayoutGrid size={16} />} title="Backtest analytics" description="This strategy's real backtest performance, browsable in place.">
       <Tabs
         items={[
           { value: 'overview', label: 'Overview', content: <OverviewTab backtest={backtest} /> },
-          { value: 'monthly', label: 'Monthly Returns', content: <MonthlyReturnsTab signals={signals} /> },
+          { value: 'monthly', label: 'Monthly Returns', content: <MonthlyReturnsTab signals={signals} strategyId={strategyId} /> },
           { value: 'trades', label: 'Trade Analysis', content: <TradeAnalysisTab signals={signals} /> },
         ]}
       />

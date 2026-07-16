@@ -525,9 +525,17 @@ async def test_signal_ml_fields_populated_with_deployed_model_and_enough_bars(ap
     from quant_hub.ml.ml_engine import XGBoostMetaLabeler
     from quant_hub.persistence.repositories.ml_models import SQLAlchemyMLModelRepository
 
+    from quant_hub.ml.feature_engineering import SPOT_FEATURE_NAMES
+
+    # Train on the REAL SPOT feature set (6 columns) so the deployed model
+    # genuinely matches what _compute_ml_insights builds for a SPOT signal —
+    # a mismatched shape is the (also-tested) honest-null case, not this one.
     rng = random.Random(7)
-    X = pd.DataFrame([[rng.gauss(0, 1)] for _ in range(30)], columns=["f0"])
-    y = pd.Series([1 if v > 0 else 0 for v in X["f0"]])
+    X = pd.DataFrame(
+        [[rng.gauss(0, 1) for _ in SPOT_FEATURE_NAMES] for _ in range(30)],
+        columns=list(SPOT_FEATURE_NAMES),
+    )
+    y = pd.Series([1 if v > 0 else 0 for v in X[SPOT_FEATURE_NAMES[0]]])
     model = XGBoostMetaLabeler(params={"n_estimators": 10})
     model.train(X, y)
     artifact_path = str(Path(tempfile.gettempdir()) / f"test_ml_signal_{sid}.joblib")

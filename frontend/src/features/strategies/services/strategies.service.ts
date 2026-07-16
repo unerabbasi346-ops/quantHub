@@ -2,7 +2,7 @@
 // API Layer: all backend communication through centralized client — Doc 08 §API Layer
 // Per Doc 00 §14.11
 import { apiClient } from '@/lib/api/client'
-import type { Backtest, ComputedMetrics, Signal, Strategy } from '../types'
+import type { Backtest, ComputedMetrics, MonthlyReturn, Signal, Strategy } from '../types'
 
 export const strategiesService = {
   // The registry — every registered strategy (api/v1/strategies.py, Step 4.5).
@@ -18,6 +18,10 @@ export const strategiesService = {
   // callers treat that as "no metrics", not an error.
   getMetrics: (strategyId: string) =>
     apiClient.get<ComputedMetrics>(`/v1/strategies/${strategyId}/metrics`),
+  // Monthly realized P&L calendar, aggregated server-side from executions —
+  // one row per month, so 5 years is 60 rows (never hits the signal cap).
+  getMonthlyReturns: (strategyId: string) =>
+    apiClient.get<MonthlyReturn[]>(`/v1/strategies/${strategyId}/monthly-returns`),
   // Write: governed Activate/Deactivate lifecycle transition (Doc 14 §10.2.6;
   // api/v1/strategies.py PATCH /strategies/{id}/status). The first real write.
   setStatus: (strategyId: string, status: 'ACTIVE' | 'INACTIVE') =>
