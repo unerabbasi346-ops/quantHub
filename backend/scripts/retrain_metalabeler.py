@@ -30,7 +30,7 @@ from quant_hub.domain.market_data.entities import AssetRef
 from quant_hub.domain.strategy_engine.entities import Signal as DomainSignal
 from quant_hub.infrastructure.backtesting.point_in_time_view import PointInTimeMarketDataView
 from quant_hub.infrastructure.database import AsyncSessionLocal
-from quant_hub.ml.feature_engineering import FEATURE_NAMES, compute_signal_features
+from quant_hub.ml.feature_engineering import compute_signal_features, feature_mask, feature_names_for
 from quant_hub.ml.ml_engine import XGBoostMetaLabeler
 from quant_hub.persistence.repositories.market_data import (
     SQLAlchemyAssetRepository,
@@ -50,9 +50,13 @@ MAX_SIGNALS_PER_STRATEGY = 5000
 _ARTIFACT_ROOT = Path(__file__).resolve().parents[1] / "artifacts" / "ml"
 
 
-async def _build_dataset() -> tuple[pd.DataFrame, pd.Series]:
-    rows: list[dict[str, float]] = []
-    labels: list[int] = []
+async def _build_dataset() -> dict[str, tuple[pd.DataFrame, pd.Series]]:
+    """One dataset per instrument type — SPOT signals have no funding/OI, so
+    they train a 6-feature model; PERPETUAL signals train the 8-feature one.
+    Mixing them (previous behavior) made 2 of 8 columns structurally zero for
+    every SPOT row: held-out accuracy 0.4676 vs 0.5424 majority baseline."""
+    rows: dict[str, list[dict[str, float]]] = {"SPOT": [], "PERPETUAL": []}
+    labels: dict[str, list[int]] = {"SPOT": [], "PERPETUAL": []}
 
     async with AsyncSessionLocal() as session:
         strategy_repo = SQLAlchemyStrategyRepository(session)
@@ -119,69 +123,93 @@ async def _build_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 direction = 1.0 if float(s.value) > 0 else -1.0
                 label = 1 if direction * realized_return > 0 else 0
 
-                rows.append(features)
-                labels.append(label)
+                itype = asset_ref.instrument_type
+                rows[itype].append(features)
+                labels[itype].append(label)
 
-    X = pd.DataFrame(rows, columns=list(FEATURE_NAMES))
-    y = pd.Series(labels, name="profitable")
-    return X, y
+    return {
+        itype: (
+            pd.DataFrame(rows[itype], columns=list(feature_names_for(itype))),
+            pd.Series(labels[itype], name="profitable"),
+        )
+        for itype in rows
+        if rows[itype]
+    }
 
 
 async def main() -> None:
-    X, y = await _build_dataset()
-    n = len(X)
-    print(f"\nDataset: {n} labeled signals, {X.shape[1]} features, positive rate={y.mean():.3f}" if n else "\nDataset empty.")
-    if n < 50:
-        print("Too few labeled signals to train meaningfully (need >= 50). Stopping.")
+    import uuid
+
+    datasets = await _build_dataset()
+    if not datasets:
+        print("\nDataset empty.")
         return
 
-    # Chronological split (rows are already in signal-ts order per strategy,
-    # concatenated strategy-by-strategy — re-sort isn't needed for the
-    # per-strategy time-ordering property that matters: no signal's features
-    # were built from another signal's future).
-    split = int(n * 0.8)
-    X_train, X_test = X.iloc[:split], X.iloc[split:]
-    y_train, y_test = y.iloc[:split], y.iloc[split:]
-    print(f"Train: {len(X_train)}  Test (held out): {len(X_test)}")
+    for itype, (X, y) in datasets.items():
+        n = len(X)
+        print(f"\n== {itype} == {n} labeled signals, {X.shape[1]} features, positive rate={y.mean():.3f}")
+        if n < 50:
+            print("Too few labeled signals to train meaningfully (need >= 50). Skipping.")
+            continue
 
-    model = XGBoostMetaLabeler()
-    model.train(X_train, y_train)
-    metrics = model.evaluate(X_test, y_test)
+        # Chronological split (rows are already in signal-ts order per strategy,
+        # concatenated strategy-by-strategy — re-sort isn't needed for the
+        # per-strategy time-ordering property that matters: no signal's features
+        # were built from another signal's future).
+        split = int(n * 0.8)
+        X_train, X_test = X.iloc[:split], X.iloc[split:]
+        y_train, y_test = y.iloc[:split], y.iloc[split:]
+        print(f"Train: {len(X_train)}  Test (held out): {len(X_test)}")
 
-    print("\nHeld-out test metrics:")
-    print(f"  accuracy:  {metrics['accuracy']:.4f}")
-    print(f"  precision: {metrics['precision']:.4f}")
-    print(f"  recall:    {metrics['recall']:.4f}")
-    print("  feature_importance:")
-    for name, imp in sorted(metrics["feature_importance"].items(), key=lambda kv: -kv[1]):
-        print(f"    {name:24s} {imp:.4f}")
+        model = XGBoostMetaLabeler()
+        model.train(X_train, y_train)
+        metrics = model.evaluate(X_test, y_test)
 
-    _ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
-    import uuid
-    job_id = str(uuid.uuid4())
-    artifact_path = str(_ARTIFACT_ROOT / "XGBoost_MetaLabeler" / f"{job_id}.joblib")
-    model.save_model(artifact_path)
+        # Majority-class rate of the held-out set: the accuracy a constant
+        # predictor gets for free. A model below this is worse than useless.
+        baseline = max(float(y_test.mean()), 1.0 - float(y_test.mean()))
 
-    async with AsyncSessionLocal() as session:
-        ml_repo = SQLAlchemyMLModelRepository(session)
-        await ml_repo.register_trained(
-            model_type="XGBoost_MetaLabeler",
-            version=job_id,
-            framework="xgboost",
-            artifact_path=artifact_path,
-            config=model.params,
-            metrics={
-                "accuracy": float(metrics["accuracy"]),
-                "precision": float(metrics["precision"]),
-                "recall": float(metrics["recall"]),
-                "train_rows": len(X_train),
-                "test_rows": len(X_test),
-                "horizon_bars": HORIZON_BARS,
-                "features": list(FEATURE_NAMES),
-            },
-        )
-        await session.commit()
-    print(f"\nDeployed as XGBoost_MetaLabeler version={job_id}")
+        print("Held-out test metrics:")
+        print(f"  accuracy:  {metrics['accuracy']:.4f}  (majority baseline {baseline:.4f})")
+        print(f"  precision: {metrics['precision']:.4f}")
+        print(f"  recall:    {metrics['recall']:.4f}")
+        print("  feature_importance:")
+        for name, imp in sorted(metrics["feature_importance"].items(), key=lambda kv: -kv[1]):
+            print(f"    {name:24s} {imp:.4f}")
+
+        if float(metrics["accuracy"]) <= baseline:
+            print(f"NOT DEPLOYED: accuracy {metrics['accuracy']:.4f} <= majority baseline {baseline:.4f} — "
+                  "model adds nothing over always predicting the majority class.")
+            continue
+
+        model_type = f"XGBoost_MetaLabeler_{itype}"
+        _ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
+        job_id = str(uuid.uuid4())
+        artifact_path = str(_ARTIFACT_ROOT / model_type / f"{job_id}.joblib")
+        model.save_model(artifact_path)
+
+        async with AsyncSessionLocal() as session:
+            ml_repo = SQLAlchemyMLModelRepository(session)
+            await ml_repo.register_trained(
+                model_type=model_type,
+                version=job_id,
+                framework="xgboost",
+                artifact_path=artifact_path,
+                config=model.params,
+                metrics={
+                    "accuracy": float(metrics["accuracy"]),
+                    "precision": float(metrics["precision"]),
+                    "recall": float(metrics["recall"]),
+                    "baseline": baseline,
+                    "train_rows": len(X_train),
+                    "test_rows": len(X_test),
+                    "horizon_bars": HORIZON_BARS,
+                    "features": list(feature_names_for(itype)),
+                    "feature_mask": feature_mask(itype),
+                },
+            )
+            await session.commit()
+        print(f"Deployed as {model_type} version={job_id}")
 
 
 if __name__ == "__main__":

@@ -46,14 +46,17 @@ async def compute_signal_features(signal: Signal, view: MarketDataView, interval
     """Real feature vector for one signal, built ONLY from data a
     point-in-time-correct `view` exposes for `signal.asset` — no lookahead.
 
-    Returns a fixed 8-key dict (stable column order for the model):
-      price_momentum_5, price_momentum_20, volatility_20, volume_ratio,
-      funding_rate, open_interest_change, signal_value, signal_abs
+    Feature set depends on the asset's instrument type (metalabeler retrain
+    finding: funding_rate/open_interest_change are structurally 0 for every
+    SPOT signal — 2 of 8 columns pure noise, dragging held-out accuracy
+    below the majority-class baseline):
+      SPOT      → the 6 SPOT_FEATURE_NAMES keys only
+      PERPETUAL → all 8 PERP_FEATURE_NAMES keys
 
-    A feature that genuinely cannot be computed (insufficient bar history,
-    no funding/OI data for a spot instrument or an unfunded window) is 0.0
-    — the same "0 for spot" honest-fallback convention the task specifies,
-    extended to "0 when unavailable" rather than a fabricated number.
+    Use `feature_names_for(instrument_type)` for the matching stable column
+    order. A feature that genuinely cannot be computed (insufficient bar
+    history, unfunded window) is 0.0 — "0 when unavailable", never a
+    fabricated number.
     """
     bars: list[OHLCVBar] = list(await view.latest_bars(signal.asset, interval, limit=_BARS_NEEDED))
     closes = [float(b.close) for b in bars]
@@ -78,33 +81,54 @@ async def compute_signal_features(signal: Signal, view: MarketDataView, interval
         if avg_volume != 0:
             volume_ratio = volumes[-1] / avg_volume
 
-    funding_rate = 0.0
-    funding = await view.latest_funding_rates(signal.asset, limit=1)
-    if funding:
-        funding_rate = float(funding[-1].funding_rate)
-
-    open_interest_change = 0.0
-    oi = await view.latest_open_interest(signal.asset, limit=2)
-    if len(oi) >= 2 and oi[-2].open_interest_usdt != 0:
-        prev = float(oi[-2].open_interest_usdt)
-        curr = float(oi[-1].open_interest_usdt)
-        open_interest_change = (curr - prev) / prev
-
     signal_value = float(signal.value)
-
-    return {
+    features = {
         "price_momentum_5": price_momentum_5,
         "price_momentum_20": price_momentum_20,
         "volatility_20": volatility_20,
         "volume_ratio": volume_ratio,
-        "funding_rate": funding_rate,
-        "open_interest_change": open_interest_change,
         "signal_value": signal_value,
         "signal_abs": abs(signal_value),
     }
 
+    if signal.asset.instrument_type == "PERPETUAL":
+        funding_rate = 0.0
+        funding = await view.latest_funding_rates(signal.asset, limit=1)
+        if funding:
+            funding_rate = float(funding[-1].funding_rate)
 
-FEATURE_NAMES: tuple[str, ...] = (
+        open_interest_change = 0.0
+        oi = await view.latest_open_interest(signal.asset, limit=2)
+        if len(oi) >= 2 and oi[-2].open_interest_usdt != 0:
+            prev = float(oi[-2].open_interest_usdt)
+            curr = float(oi[-1].open_interest_usdt)
+            open_interest_change = (curr - prev) / prev
+
+        features["funding_rate"] = funding_rate
+        features["open_interest_change"] = open_interest_change
+
+    return features
+
+
+SPOT_FEATURE_NAMES: tuple[str, ...] = (
     "price_momentum_5", "price_momentum_20", "volatility_20", "volume_ratio",
-    "funding_rate", "open_interest_change", "signal_value", "signal_abs",
+    "signal_value", "signal_abs",
 )
+
+PERP_FEATURE_NAMES: tuple[str, ...] = SPOT_FEATURE_NAMES + (
+    "funding_rate", "open_interest_change",
+)
+
+# Backwards-compatible alias: the full (perpetual) feature set.
+FEATURE_NAMES: tuple[str, ...] = PERP_FEATURE_NAMES
+
+
+def feature_names_for(instrument_type: str) -> tuple[str, ...]:
+    """Stable model column order for an asset's instrument type."""
+    return PERP_FEATURE_NAMES if instrument_type == "PERPETUAL" else SPOT_FEATURE_NAMES
+
+
+def feature_mask(instrument_type: str) -> dict[str, bool]:
+    """Which of the full 8 features are active for this instrument type."""
+    active = set(feature_names_for(instrument_type))
+    return {name: name in active for name in PERP_FEATURE_NAMES}

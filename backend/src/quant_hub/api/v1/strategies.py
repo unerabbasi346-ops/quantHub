@@ -76,7 +76,7 @@ from quant_hub.domain.strategy_engine.implied_sizing import (
 )
 from quant_hub.domain.strategy_engine.strategy import MarketDataView
 from quant_hub.infrastructure.backtesting.point_in_time_view import PointInTimeMarketDataView
-from quant_hub.ml.feature_engineering import FEATURE_NAMES, compute_signal_features
+from quant_hub.ml.feature_engineering import compute_signal_features, feature_names_for
 from quant_hub.ml.ml_engine import XGBoostMetaLabeler
 from quant_hub.ml.model_factory import create_model
 
@@ -171,7 +171,10 @@ async def _compute_ml_insights(
     stdev = variance.sqrt()
 
     features = await compute_signal_features(signal, view, interval)
-    X = pd.DataFrame([[features[name] for name in FEATURE_NAMES]], columns=list(FEATURE_NAMES))
+    # Column set/order matches the instrument type the model was trained for
+    # (SPOT models: 6 features; PERPETUAL: 8) — feature_engineering owns both.
+    names = feature_names_for(signal.asset.instrument_type)
+    X = pd.DataFrame([[features[name] for name in names]], columns=list(names))
     try:
         probability = float(model.predict(X)[0])
     except ValueError:
@@ -459,19 +462,26 @@ async def get_strategy_signals(
     # FIELDS docstring for the full set of flagged judgment calls. Loaded
     # ONCE per request (not per signal): the deployed model artifact and,
     # per DISTINCT asset_id, its most recent _VOLATILITY_WINDOW bars.
-    ml_model: XGBoostMetaLabeler | None = None
-    ml_record = await ml_repo.get_latest_deployed("XGBoost_MetaLabeler")
-    if ml_record is not None:
+    # Per-instrument-type models (SPOT: 6 features, PERPETUAL: 8); the
+    # un-suffixed legacy "XGBoost_MetaLabeler" registration is the fallback
+    # so pre-split deployments keep serving until both retrains have run.
+    ml_models: dict[str, XGBoostMetaLabeler] = {}
+    for _itype in ("SPOT", "PERPETUAL"):
+        ml_record = await ml_repo.get_latest_deployed(f"XGBoost_MetaLabeler_{_itype}")
+        if ml_record is None:
+            ml_record = await ml_repo.get_latest_deployed("XGBoost_MetaLabeler")
+        if ml_record is None:
+            continue
         try:
             candidate = create_model("XGBoost_MetaLabeler", dict(ml_record.config))
             candidate.load_model(ml_record.artifact_path)
-            ml_model = candidate
+            ml_models[_itype] = candidate
         except (FileNotFoundError, OSError, ValueError):
             # The registry row exists but its artifact file is missing/
             # unreadable — degrade to "no model available" rather than a
             # 500, matching the "never fabricated" mandate (no insights is
             # honest; a crash is not).
-            ml_model = None
+            pass
 
     interval = str(strategy.config.get("interval", "1h"))
     # Per-distinct-asset caches for point-in-time view construction: full
@@ -516,12 +526,14 @@ async def get_strategy_signals(
     for s in signals:
         leverage = await _implied_leverage_for(s.asset_id)
         ml_insights = None
-        if ml_model is not None:
+        if ml_models:
             resolved = await _view_for(s.asset_id, s.ts)
             if resolved is not None:
                 asset_ref, view = resolved
-                domain_signal = DomainSignal(asset=asset_ref, value=s.value, ts=s.ts)
-                ml_insights = await _compute_ml_insights(domain_signal, ml_model, view, interval)
+                ml_model = ml_models.get(asset_ref.instrument_type)
+                if ml_model is not None:
+                    domain_signal = DomainSignal(asset=asset_ref, value=s.value, ts=s.ts)
+                    ml_insights = await _compute_ml_insights(domain_signal, ml_model, view, interval)
         out.append(
             SignalOut.from_recorded(
                 s, configured_capital=configured_capital, implied_leverage=leverage, ml_insights=ml_insights
