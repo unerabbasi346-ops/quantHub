@@ -76,7 +76,7 @@ export function RotatingStrategyChart({ items }: { items: StrategyPerformance[] 
                 </Badge>
               )}
             </div>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">Signed conviction over time · signals feed</p>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">Signed Alpha Score over time · signals feed</p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-fg-subtle">

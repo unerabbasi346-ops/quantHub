@@ -92,12 +92,14 @@ export interface Backtest {
   strategy_id: UUID | null
   name: string
   status: string
+  symbol: string | null
   start_date: ISOTimestamp | null
   end_date: ISOTimestamp | null
   total_return: string | null
   trade_count: number | null
   final_capital: string | null
   reproducibility_hash: string | null
+  benchmark_return: string | null
   results: BacktestResults | null
   started_at: ISOTimestamp | null
   completed_at: ISOTimestamp | null

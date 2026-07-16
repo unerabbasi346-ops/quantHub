@@ -330,6 +330,11 @@ class BacktestOut(BaseModel):
     strategy_id: UUID | None
     name: str
     status: str
+    # The instrument this backtest ran against — read from config->>'symbol'
+    # (BacktestConfig.symbol was already stored in the config JSONB at
+    # creation time; this just promotes it to a top-level field). None for
+    # a pre-existing row whose config predates this field being read.
+    symbol: str | None = None
     start_date: datetime | None
     end_date: datetime | None
     total_return: Decimal | None
@@ -340,8 +345,12 @@ class BacktestOut(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
+    # Rule 5 (Engine step): BTC/USDT buy-and-hold over the same window, for
+    # comparing against total_return. None on a backtest run before that
+    # column existed, or when no benchmark instrument was ingested.
+    benchmark_return: Decimal | None = None
 
-    @field_serializer("total_return", "final_capital", when_used="json")
+    @field_serializer("total_return", "final_capital", "benchmark_return", when_used="json")
     def _serialize_decimal(self, value: Decimal | None) -> str | None:
         return None if value is None else format(value, "f")
 

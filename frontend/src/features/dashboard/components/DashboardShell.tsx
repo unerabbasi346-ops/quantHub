@@ -48,7 +48,7 @@ import {
   type BadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatCapital, formatReturn, formatTimestamp } from '@/lib/utils/format'
+import { formatCapital, formatMaxDrawdownPct, formatReturn, formatTimestamp } from '@/lib/utils/format'
 import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio, Position } from '@/features/portfolio/types'
 import { useOrders } from '@/features/execution/hooks/useExecution'
@@ -168,21 +168,12 @@ function DashboardFooter() {
 // Portfolio / Risk / Performance / Market Overview — not an undifferentiated
 // stat strip. Every figure reads from a hook already used elsewhere in the
 // app (Positions/Risk/Markets) — no new endpoint, no fabricated number.
-function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
-  const positionsQuery = usePositions(portfolioId)
-  const riskQuery = useRiskSnapshot(portfolioId)
-  const open = (positionsQuery.data ?? []).filter((p) => !p.is_closed)
-  const marketValue = open.reduce((s, p) => s + Number.parseFloat(p.market_value), 0)
-  const snap = riskQuery.data
-  // Risk card: gross exposure AS A PERCENT of capital — gross_leverage
-  // already is exposure/equity (Doc 14 §Risk). Showing the same number as
-  // a raw dollar figure previously made this card read identically to the
-  // Portfolio card for any single-position, unlevered book.
-  const grossExposurePct = snap ? Number.parseFloat(snap.gross_leverage) : null
-
-  // Performance card: best (highest total_return) COMPLETED backtest across
-  // every registered strategy — not live unrealized P&L, which is a single
-  // open position's noise, not a performance figure.
+function AnalyticsGrid({ portfolioId: _portfolioId }: { portfolioId: string }) {
+  // Backtest-centric redesign (UI wiring step, owner request): all 4 cards
+  // now read from real backtest/strategy data instead of the live portfolio
+  // — a single unlevered spot position ($25.25) made every card read nearly
+  // identically before. `portfolioId` is kept in the signature (call site
+  // still resolves it) but no longer used here.
   const strategiesQuery = useStrategies()
   const strategies = strategiesQuery.data ?? []
   const backtestQueries = useQueries({
@@ -193,7 +184,34 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
     })),
   })
   const allBacktests: Backtest[] = backtestQueries.flatMap((q) => q.data ?? [])
-  const bestBacktest = allBacktests
+  const completedBacktests = allBacktests.filter((b) => b.status === 'COMPLETED')
+
+  // Portfolio card: total capital across every completed backtest run.
+  const totalBacktestCapital = completedBacktests.reduce(
+    (s, b) => s + (b.final_capital != null ? Number.parseFloat(b.final_capital) : 0), 0,
+  )
+  const distinctAssets = new Set(completedBacktests.map((b) => b.symbol).filter((s): s is string => Boolean(s)))
+
+  // Risk card: max drawdown across every strategy's computed metrics —
+  // small N (registered strategies), same per-strategy fetch pattern as
+  // the backtests above.
+  const metricsQueries = useQueries({
+    queries: strategies.map((s) => ({
+      queryKey: ['strategy-metrics', s.id],
+      queryFn: () => strategiesService.getMetrics(s.id),
+      enabled: Boolean(s.id),
+    })),
+  })
+  const drawdowns = metricsQueries
+    .map((q) => q.data?.max_drawdown_pct)
+    .filter((v): v is string => v != null)
+    .map(Number.parseFloat)
+  const worstDrawdown = drawdowns.length ? Math.max(...drawdowns) : null
+
+  // Performance card: best (highest total_return) COMPLETED backtest across
+  // every registered strategy — not live unrealized P&L, which is a single
+  // open position's noise, not a performance figure.
+  const bestBacktest = completedBacktests
     .filter((b) => b.total_return != null)
     .reduce<Backtest | null>((best, b) => {
       const ret = Number.parseFloat(b.total_return!)
@@ -201,19 +219,30 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
       return ret > bestRet ? b : best
     }, null)
   const bestReturnPct = bestBacktest ? Number.parseFloat(bestBacktest.total_return!) : null
+  const bestBenchmarkPct = bestBacktest?.benchmark_return != null ? Number.parseFloat(bestBacktest.benchmark_return) : null
 
-  // Market card: BTC specifically (Doc 10 §Analytics Grid names this card
-  // "Market Overview" — a fixed reference instrument, not the page's
-  // synced/selected asset, which belongs to the Markets page).
+  // Market card: BTC + ETH, Doc 10 §Analytics Grid's "Market Overview" —
+  // fixed reference instruments, not the page's synced/selected asset
+  // (which belongs to the Markets page).
   const assetsQuery = useAssets()
   const assets = assetsQuery.data ?? []
-  const marketAsset = assets.find((a) => a.symbol === 'BTC/USDT') ?? null
-  const barsQuery = useBars(marketAsset?.id ?? '', '1h')
-  const bars = barsQuery.data ?? []
-  const last = bars.at(-1)
-  const first24 = bars.slice(-24)
-  const dayChange = last && first24[0] ? Number.parseFloat(last.close) - Number.parseFloat(first24[0].close) : null
-  const dayChangePct = dayChange != null && first24[0] ? (dayChange / Number.parseFloat(first24[0].close)) * 100 : null
+  const btcAsset = assets.find((a) => a.symbol === 'BTC/USDT') ?? null
+  const ethAsset = assets.find((a) => a.symbol === 'ETH/USDT') ?? null
+  const btcBarsQuery = useBars(btcAsset?.id ?? '', '1h')
+  const ethBarsQuery = useBars(ethAsset?.id ?? '', '1h')
+
+  const pctChange = (bars: { close: string }[]) => {
+    const last = bars.at(-1)
+    const first24 = bars.slice(-24)[0]
+    if (!last || !first24) return null
+    return ((Number.parseFloat(last.close) - Number.parseFloat(first24.close)) / Number.parseFloat(first24.close)) * 100
+  }
+  const btcBars = btcBarsQuery.data ?? []
+  const ethBars = ethBarsQuery.data ?? []
+  const btcLast = btcBars.at(-1)
+  const ethLast = ethBars.at(-1)
+  const btcChangePct = pctChange(btcBars)
+  const ethChangePct = pctChange(ethBars)
 
   // Doc 02 §Grid System: "12 Column Grid, Equal Columns, Equal Gutters."
   // §Analytics Grid: "Desktop 4 Columns / Laptop 2 / Tablet 2 / Mobile 1."
@@ -233,7 +262,7 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
   // "desktop") — both always present in Tailwind's core preset regardless of
   // this project's custom-screen config, so they don't depend on whatever is
   // stopping the custom variants from compiling.
-  if (positionsQuery.isLoading)
+  if (strategiesQuery.isLoading)
     return (
       <div className="grid grid-cols-12 gap-4">
         <div className="skeleton col-span-12 h-28 md:col-span-6 xl:col-span-3" />
@@ -248,18 +277,19 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<Wallet size={16} />} title="Portfolio" />
         <CardContent>
-          <div className="font-mono text-metric font-bold tabular-nums text-fg">{fmtMoney(String(marketValue))}</div>
-          <div className="mt-1 text-[11px] text-fg-subtle">{open.length} open position{open.length === 1 ? '' : 's'}</div>
+          <div className="font-mono text-metric font-bold tabular-nums text-fg">{fmtMoney(String(totalBacktestCapital))}</div>
+          <div className="mt-1 text-[11px] text-fg-subtle">
+            total capital across {completedBacktests.length} completed backtest{completedBacktests.length === 1 ? '' : 's'}
+          </div>
         </CardContent>
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<ShieldAlert size={16} />} title="Risk" />
         <CardContent>
-          <div className="font-mono text-metric font-bold tabular-nums text-fg">
-            {grossExposurePct != null ? formatReturn(grossExposurePct) : '—'}
-          </div>
+          <div className="font-mono text-metric font-bold tabular-nums text-fg">{distinctAssets.size}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">
-            {snap ? `${fmtMoney(snap.gross_exposure)} gross exposure` : 'no snapshot yet'}
+            asset{distinctAssets.size === 1 ? '' : 's'} traded
+            {worstDrawdown != null && <> · {formatMaxDrawdownPct(worstDrawdown)} worst drawdown</>}
           </div>
         </CardContent>
       </Card>
@@ -271,7 +301,10 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
               <div className={cn('font-mono text-metric font-bold tabular-nums', bestReturnPct >= 0 ? 'text-profit' : 'text-risk')}>
                 {formatReturn(bestReturnPct)}
               </div>
-              <div className="mt-1 truncate text-[11px] text-fg-subtle">best backtest · {bestBacktest?.name}</div>
+              <div className="mt-1 truncate text-[11px] text-fg-subtle">
+                best backtest · {bestBacktest?.name}
+                {bestBenchmarkPct != null && <> · vs BTC {formatReturn(bestBenchmarkPct)}</>}
+              </div>
             </>
           ) : (
             <div className="text-sm text-fg-muted">No completed backtests yet.</div>
@@ -280,22 +313,32 @@ function AnalyticsGrid({ portfolioId }: { portfolioId: string }) {
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
         <WidgetHead icon={<CandlestickChart size={16} />} title="Market overview" />
-        <CardContent>
-          {marketAsset && last ? (
-            <>
-              <div className="flex items-center gap-2">
-                <CryptoIcon symbol={marketAsset.symbol} size={18} />
-                <span className="font-mono text-metric font-bold tabular-nums text-fg">{fmtMoney(last.close)}</span>
+        <CardContent className="space-y-2.5">
+          {btcAsset && btcLast ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <CryptoIcon symbol={btcAsset.symbol} size={16} />
+                <span className="font-mono text-sm font-bold tabular-nums text-fg">{fmtMoney(btcLast.close)}</span>
               </div>
-              <div className="mt-1 text-[11px] text-fg-subtle">
-                {marketAsset.symbol}
-                {dayChangePct != null && (
-                  <span className={dayChange! >= 0 ? 'text-profit' : 'text-risk'}> · {formatReturn(dayChangePct / 100)} 24h</span>
-                )}
-              </div>
-            </>
+              {btcChangePct != null && (
+                <span className={cn('text-[11px]', btcChangePct >= 0 ? 'text-profit' : 'text-risk')}>{formatReturn(btcChangePct / 100)}</span>
+              )}
+            </div>
           ) : (
-            <div className="text-sm text-fg-muted">No ingested instrument yet.</div>
+            <div className="text-[11px] text-fg-muted">BTC not ingested yet.</div>
+          )}
+          {ethAsset && ethLast ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <CryptoIcon symbol={ethAsset.symbol} size={16} />
+                <span className="font-mono text-sm font-bold tabular-nums text-fg">{fmtMoney(ethLast.close)}</span>
+              </div>
+              {ethChangePct != null && (
+                <span className={cn('text-[11px]', ethChangePct >= 0 ? 'text-profit' : 'text-risk')}>{formatReturn(ethChangePct / 100)}</span>
+              )}
+            </div>
+          ) : (
+            <div className="text-[11px] text-fg-muted">ETH not ingested yet.</div>
           )}
         </CardContent>
       </Card>

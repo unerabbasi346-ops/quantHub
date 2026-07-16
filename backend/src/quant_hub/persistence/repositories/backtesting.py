@@ -254,7 +254,8 @@ class SQLAlchemyBacktestRepository(BaseRepository[object], BacktestRepository):
                 SELECT id, strategy_id, name, status, start_date, end_date,
                        total_return, trade_count, final_capital,
                        reproducibility_hash, results,
-                       started_at, completed_at, created_at
+                       started_at, completed_at, created_at,
+                       config ->> 'symbol' AS symbol, benchmark_return
                 FROM analytics.backtests
                 WHERE strategy_id = :strategy_id
                 ORDER BY created_at DESC

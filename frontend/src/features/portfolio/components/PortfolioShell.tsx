@@ -102,6 +102,7 @@ export function PortfolioShell() {
             positionsLoading={positionsQuery.isLoading}
             positionsError={positionsQuery.isError}
             onRetry={() => positionsQuery.refetch()}
+            strategyId={activeStrategy.id}
           />
 
           <BacktestAnalyticsTabs backtest={latestBacktest} signals={signals} />

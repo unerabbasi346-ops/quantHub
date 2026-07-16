@@ -12,9 +12,16 @@
 import { Hash, TrendingDown, TrendingUp, Wallet } from 'lucide-react'
 import { Badge, CryptoIcon, Panel, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
+import { formatCapital, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import type { Backtest, Signal } from '../types'
 import { backtestStatusVariant, fmtMoney, fmtReturnPct } from './tables'
+
+const fmtPct1 = (v: string) => `${(Number.parseFloat(v) * 100).toFixed(1)}%`
+// Mirrors backend Rule 1 (domain/backtesting/trade_rules.py::compute_position_size):
+// 2% of capital by default, 3% when ml_confidence > 0.70 — derivable client-side
+// from the same field the backend reads, not a second source of truth.
+const positionSizePct = (confidence: string | null) =>
+  confidence != null && Number.parseFloat(confidence) > 0.7 ? '3%' : '2%'
 
 const fmtDate = (ts: string | null) => (ts ? formatTimestamp(ts) : '—')
 
@@ -92,34 +99,54 @@ export function RecentSignalRows({ signals, symbol }: { signals: Signal[]; symbo
       {signals.map((s) => {
         const v = Number.parseFloat(s.value)
         const pct = Math.min(100, (Math.abs(v) / maxAbs) * 100)
-        const metadataEntries = Object.entries(s.metadata ?? {}).slice(0, 2)
+        const isLong = s.direction.toUpperCase() === 'LONG' || v >= 0
+        // Risk/Reward = |TP - entry| / |entry - SL| — entry is ml_breakeven
+        // (the real bar close the suggestions were computed against). Real
+        // only when the deployed model produced all three; never fabricated.
+        const entry = s.ml_breakeven != null ? Number.parseFloat(s.ml_breakeven) : null
+        const tp = s.ml_tp_suggestion != null ? Number.parseFloat(s.ml_tp_suggestion) : null
+        const sl = s.ml_sl_suggestion != null ? Number.parseFloat(s.ml_sl_suggestion) : null
+        const riskReward = entry != null && tp != null && sl != null && entry !== sl
+          ? Math.abs(tp - entry) / Math.abs(entry - sl)
+          : null
+
         return (
-          <div key={s.id} className="flex items-stretch gap-3 px-3 py-2.5">
+          <div key={s.id} className="flex items-stretch gap-3 px-3 py-3">
             <span
               className={cn('w-1 shrink-0 rounded-full', v >= 0 ? 'bg-profit' : 'bg-risk')}
               style={{ opacity: 0.35 + (pct / 100) * 0.65 }}
               aria-hidden
             />
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              {symbol && <CryptoIcon symbol={symbol} size={22} />}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className={cn('font-mono text-sm font-semibold tabular-nums', v >= 0 ? 'text-profit' : 'text-risk')}>
-                    {formatSignalStrength(v)}
-                  </span>
-                  <Badge variant={s.validation_status === 'VALID' ? 'profit' : 'warning'}>{s.validation_status}</Badge>
-                </div>
-                {metadataEntries.length > 0 && (
-                  <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-fg-subtle">
-                    {metadataEntries.map(([k, mv]) => (
-                      <span key={k}>
-                        {k}=<span className="text-fg-muted">{mv}</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {symbol && <CryptoIcon symbol={symbol} size={20} />}
+                <Badge variant={isLong ? 'profit' : 'risk'}>{isLong ? 'LONG' : 'SHORT'}</Badge>
+                {symbol && <span className="font-mono text-xs text-fg-muted">{symbol}</span>}
+                <span className={cn('font-mono text-sm font-semibold tabular-nums', v >= 0 ? 'text-profit' : 'text-risk')}>
+                  {formatSignalStrength(v)} Alpha Score
+                </span>
+                <Badge variant={s.validation_status === 'VALID' ? 'profit' : 'warning'}>{s.validation_status}</Badge>
+                <span className="ml-auto shrink-0 text-[11px] text-fg-subtle">{formatTimestamp(s.ts)}</span>
               </div>
-              <span className="shrink-0 text-[11px] text-fg-subtle">{formatTimestamp(s.ts)}</span>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px]">
+                <span className="text-fg-subtle">
+                  ML Confidence <span className="text-fg">{s.ml_confidence != null ? fmtPct1(s.ml_confidence) : '—'}</span>
+                </span>
+                <span className="text-fg-subtle">
+                  ML Probability <span className="text-fg">{s.ml_probability != null ? fmtPct1(s.ml_probability) : '—'}</span>
+                </span>
+                <span className="text-fg-subtle">
+                  TP <span className="text-profit">{tp != null ? formatCapital(tp) : '—'}</span>
+                </span>
+                <span className="text-fg-subtle">
+                  SL <span className="text-risk">{sl != null ? formatCapital(sl) : '—'}</span>
+                </span>
+                <span className="text-fg-subtle">
+                  R:R <span className="text-fg">{riskReward != null ? `${riskReward.toFixed(2)}:1` : '—'}</span>
+                </span>
+                <Badge variant="neutral">{positionSizePct(s.ml_confidence)} size</Badge>
+              </div>
             </div>
           </div>
         )

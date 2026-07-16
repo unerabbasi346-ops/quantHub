@@ -57,7 +57,7 @@ export function ConvictionEquityChart({
   return (
     <Chart
       height={height}
-      ariaLabel="Conviction equity curve with drawdown shading"
+      ariaLabel="Alpha Score equity curve with drawdown shading"
       option={(theme: ChartTheme) => {
         const axis = chartAxis(theme)
         return {
@@ -89,7 +89,7 @@ export function ConvictionEquityChart({
           },
           series: [
             {
-              name: 'Conviction',
+              name: 'Alpha Score',
               type: 'line',
               data: values,
               symbol: 'none',

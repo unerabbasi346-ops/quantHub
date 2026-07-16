@@ -104,7 +104,7 @@ function TradeAnalysisTab({ signals }: { signals: Signal[] }) {
           </span>
           <div>
             <div className="flex items-center gap-2 text-sm font-medium text-fg">
-              Not computed <Badge variant="warning">requires per-trade data</Badge>
+              — <Badge variant="warning">requires per-trade data</Badge>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-fg-muted">
               Backtest runs store aggregate results only (order counts, realized/unrealized P&L totals) — there is no

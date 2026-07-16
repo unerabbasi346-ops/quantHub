@@ -25,10 +25,12 @@ function StrategySelector({
   strategies,
   current,
   onSelect,
+  currentCapital,
 }: {
   strategies: Strategy[]
   current: Strategy | null
   onSelect: (id: string) => void
+  currentCapital: string | null
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -52,7 +54,14 @@ function StrategySelector({
         )}
       >
         <Brain size={16} className="shrink-0 text-fg-subtle" />
-        <span className="min-w-0 flex-1 truncate font-medium text-fg">{current?.name ?? 'Select strategy…'}</span>
+        <span className="min-w-0 flex-1 truncate font-medium text-fg">
+          {current?.name ?? 'Select strategy…'}
+          {current && (
+            <span className="ml-2 font-mono text-xs font-normal text-fg-subtle">
+              {currentCapital != null ? formatCapital(Number.parseFloat(currentCapital)) : 'no capital configured'}
+            </span>
+          )}
+        </span>
         <ChevronDown size={16} className={cn('shrink-0 text-fg-subtle transition-transform duration-150', open && 'rotate-180')} />
       </button>
       {open && (
@@ -132,7 +141,10 @@ export function PortfolioHeader({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <StrategySelector strategies={strategies} current={activeStrategy} onSelect={onSelect} />
+        <StrategySelector
+          strategies={strategies} current={activeStrategy} onSelect={onSelect}
+          currentCapital={linkedPortfolio?.configured_capital ?? null}
+        />
         {activeStrategy && <Badge variant={statusVariant(activeStrategy.status)}>{activeStrategy.status}</Badge>}
       </div>
 

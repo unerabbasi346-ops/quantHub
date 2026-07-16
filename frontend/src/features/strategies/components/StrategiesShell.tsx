@@ -288,7 +288,7 @@ function PerformanceTab({ signals, loading }: { signals: Signal[]; loading: bool
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_16rem]">
-        <Section title="Conviction curve" description="Signed conviction over time.">
+        <Section title="Alpha Score curve" description="Signed Alpha Score over time.">
           <div className="rounded-xl border border-border bg-surface-raised p-4 shadow-sm">
             {points.length >= 2 ? (
               <LineChart data={points} tone="info" zeroBaseline height={240} />
@@ -307,8 +307,8 @@ function PerformanceTab({ signals, loading }: { signals: Signal[]; loading: bool
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Recent signals" value={total} />
         <StatCard label="Valid" value={valid} tone="profit" />
-        <StatCard label="Avg conviction" value={fmtSignal(String(avg))} tone={avg >= 0 ? 'profit' : 'risk'} />
-        <StatCard label="Max |conviction|" value={fmtSignal(String(values.reduce((a, b) => Math.max(a, Math.abs(b)), 0)))} />
+        <StatCard label="Avg Alpha Score" value={fmtSignal(String(avg))} tone={avg >= 0 ? 'profit' : 'risk'} />
+        <StatCard label="Max |Alpha Score|" value={fmtSignal(String(values.reduce((a, b) => Math.max(a, Math.abs(b)), 0)))} />
       </div>
     </div>
   )
@@ -342,7 +342,7 @@ function SignalTable({ signals }: { signals: Signal[] }) {
       },
       {
         id: 'value',
-        header: 'Value (conviction)',
+        header: 'Value (Alpha Score)',
         accessorFn: (s) => Number.parseFloat(s.value),
         cell: ({ row }) => (
           <Badge variant={pnlBadgeVariant(Number.parseFloat(row.original.value))}>{fmtSignal(row.original.value)}</Badge>

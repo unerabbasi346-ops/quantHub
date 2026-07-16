@@ -408,7 +408,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         <Section
           icon={<LineChartIcon size={16} />}
           title="Equity curve"
-          description="Signed conviction over time — an honest equity proxy (per-step P&L isn't tracked yet). Green above zero, red drawdown shading below."
+          description="Signed Alpha Score over time — an honest equity proxy (per-step P&L isn't tracked yet). Green above zero, red drawdown shading below."
         >
           <Panel className="p-4">
             {signalsQuery.isLoading ? (
@@ -479,7 +479,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
       <Section
         icon={<CalendarRange size={16} />}
         title="Monthly signal performance"
-        description="Average signed conviction by month — an honest proxy for strategy lean, not a realized P&L calendar."
+        description="Average signed Alpha Score by month — an honest proxy for strategy lean, not a realized P&L calendar."
       >
         <Panel className="p-4">
           {signalsQuery.isLoading ? (
@@ -562,7 +562,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
             </span>
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-fg">
-                Not computed <Badge variant="warning">pending backend computation</Badge>
+                — <Badge variant="warning">pending backend computation</Badge>
               </div>
               <p className="mt-1 text-xs leading-relaxed text-fg-muted">
                 Backtest runs store aggregate results only (created/filled/rejected order counts, realized/unrealized P&L
@@ -754,7 +754,7 @@ function RiskDisclosure() {
         </span>
         <div>
           <div className="flex items-center gap-2 text-sm font-medium text-fg">
-            Not computed <Badge variant="warning">deferred</Badge>
+            — <Badge variant="warning">deferred</Badge>
           </div>
           <p className="mt-1 text-xs leading-relaxed text-fg-muted">
             Risk (exposure, leverage, VaR) is computed per-portfolio today, not per-strategy — see the Risk workspace

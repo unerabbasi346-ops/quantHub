@@ -23,6 +23,7 @@ import {
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { formatCapital, formatReturn } from '@/lib/utils/format'
+import { useBacktests } from '@/features/strategies/hooks/useStrategies'
 import { computeCapitalUtilization, num } from '../analytics'
 import type { Portfolio, Position } from '../types'
 
@@ -149,6 +150,7 @@ export function PositionAnalytics({
   positionsLoading,
   positionsError,
   onRetry,
+  strategyId,
 }: {
   hasLinkedPortfolio: boolean
   linkedPortfolio: Portfolio | null
@@ -156,6 +158,7 @@ export function PositionAnalytics({
   positionsLoading: boolean
   positionsError: boolean
   onRetry: () => void
+  strategyId: string
 }) {
   const open = positions.filter((p) => !p.is_closed)
   const allocation = open
@@ -164,6 +167,22 @@ export function PositionAnalytics({
     .sort((a, b) => b.value - a.value)
   const totalMarketValue = allocation.reduce((s, a) => s + a.value, 0)
   const utilization = hasLinkedPortfolio ? computeCapitalUtilization(positions, linkedPortfolio?.configured_capital ?? null) : null
+
+  // Backtest allocation (UI wiring step, owner request): ALL assets this
+  // strategy has ever backtested, not just its current live open positions
+  // — weighted by each completed backtest's final_capital.
+  const backtestsQuery = useBacktests(strategyId)
+  const backtestBySymbol = new Map<string, number>()
+  for (const bt of backtestsQuery.data ?? []) {
+    if (!bt.symbol || bt.final_capital == null) continue
+    const v = Math.abs(Number.parseFloat(bt.final_capital))
+    if (v === 0) continue
+    backtestBySymbol.set(bt.symbol, (backtestBySymbol.get(bt.symbol) ?? 0) + v)
+  }
+  const backtestAllocation = [...backtestBySymbol.entries()]
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+  const backtestTotal = backtestAllocation.reduce((s, a) => s + a.value, 0)
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -183,20 +202,31 @@ export function PositionAnalytics({
         )}
       </Section>
 
-      <Section icon={<PieChartIcon size={16} />} title="Asset allocation" description="Share of capital by open-position market value.">
-        {!hasLinkedPortfolio ? (
-          <NoLinkedPortfolio title="No allocation to show" />
-        ) : positionsLoading ? (
-          <div className="skeleton h-[280px] w-full" />
-        ) : allocation.length > 0 ? (
+      <Section icon={<PieChartIcon size={16} />} title="Asset allocation" description="Live open positions, and every asset this strategy has ever backtested.">
+        <div className="space-y-4">
           <Panel className="p-4">
-            <DonutChart data={allocation} height={280} centerLabel="deployed" centerValue={fmtMoney(totalMarketValue)} valueFormat={(v) => fmtMoney(v)} />
+            <p className="mb-2 text-[11px] uppercase tracking-wide text-fg-subtle">Live positions</p>
+            {!hasLinkedPortfolio ? (
+              <NoLinkedPortfolio title="No allocation to show" />
+            ) : positionsLoading ? (
+              <div className="skeleton h-[220px] w-full" />
+            ) : allocation.length > 0 ? (
+              <DonutChart data={allocation} height={220} centerLabel="deployed" centerValue={fmtMoney(totalMarketValue)} valueFormat={(v) => fmtMoney(v)} />
+            ) : (
+              <EmptyState icon={<Wallet size={20} />} title="No open positions to allocate" description="Allocation appears once this portfolio holds positions with a market value." />
+            )}
           </Panel>
-        ) : (
-          <Panel className="p-6">
-            <EmptyState icon={<Wallet size={20} />} title="No open positions to allocate" description="Allocation appears once this portfolio holds positions with a market value." />
+          <Panel className="p-4">
+            <p className="mb-2 text-[11px] uppercase tracking-wide text-fg-subtle">All backtested assets</p>
+            {backtestsQuery.isLoading ? (
+              <div className="skeleton h-[220px] w-full" />
+            ) : backtestAllocation.length > 0 ? (
+              <DonutChart data={backtestAllocation} height={220} centerLabel="capital" centerValue={fmtMoney(backtestTotal)} valueFormat={(v) => fmtMoney(v)} />
+            ) : (
+              <EmptyState icon={<PieChartIcon size={20} />} title="No completed backtests yet" description="This strategy hasn't completed a backtest with a recorded asset." />
+            )}
           </Panel>
-        )}
+        </div>
       </Section>
 
       <Section title="Capital utilization" description="Deployed vs. configured capital.">
