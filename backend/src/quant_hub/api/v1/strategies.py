@@ -40,6 +40,7 @@
 #     unbounded feed is neither useful nor safe to serialize wholesale.
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -54,21 +55,28 @@ from quant_hub.api.dependencies import (
     AssetRepo,
     BacktestRepo,
     DbSession,
+    FundingRateRepo,
     MLModelRepo,
     OHLCVRepo,
+    OpenInterestRepo,
     PortfolioRepo,
     PositionRepo,
     SignalRepo,
     StrategyRepo,
 )
 from quant_hub.api.envelope import ApiError, ErrorCode, ResponseEnvelope, ok
+from quant_hub.domain.market_data.entities import AssetRef
 from quant_hub.domain.strategy_engine.entities import RecordedSignal, RegisteredStrategy
+from quant_hub.domain.strategy_engine.entities import Signal as DomainSignal
 from quant_hub.domain.strategy_engine.implied_sizing import (
     assert_direction_matches_value,
     compute_direction,
     compute_implied_leverage,
     compute_implied_size_usdt,
 )
+from quant_hub.domain.strategy_engine.strategy import MarketDataView
+from quant_hub.infrastructure.backtesting.point_in_time_view import PointInTimeMarketDataView
+from quant_hub.ml.feature_engineering import FEATURE_NAMES, compute_signal_features
 from quant_hub.ml.ml_engine import XGBoostMetaLabeler
 from quant_hub.ml.model_factory import create_model
 
@@ -135,29 +143,35 @@ _SL_STDEV_MULTIPLE = Decimal("1.5")  # flagged convention, see SignalOut docstri
 _VOLATILITY_WINDOW = 20              # task spec: "20-period price std dev"
 
 
-def _compute_ml_insights(value: Decimal, model: XGBoostMetaLabeler, bars: list[Any]) -> MLSignalInsights | None:
-    """Real bars + a real (if minimally-featured) model prediction — never
+async def _compute_ml_insights(
+    signal: DomainSignal, model: XGBoostMetaLabeler, view: MarketDataView, interval: str
+) -> MLSignalInsights | None:
+    """Real bars + a real, real-feature-engineered model prediction — never
     fabricated. Returns None when fewer than _VOLATILITY_WINDOW bars exist
     (an honest "not enough history" case, not a fabricated volatility), and
-    also None when the deployed model rejects the single-feature vector
-    (ValueError: real-world-verified case — a model trained via a richer
-    /api/ml/train call has more feature columns than this endpoint's
-    placeholder provides; see SignalOut docstring point 2). Degrading to
+    also None when the deployed model rejects the feature vector (ValueError
+    — e.g. a model trained on a different feature set/version). Degrading to
     "no insights" is the honest outcome for a genuine feature-shape
     mismatch, not a 500.
+
+    The feature vector is built by ml/feature_engineering.py's
+    compute_signal_features — 8 real features (price momentum, volatility,
+    volume ratio, funding rate, OI change, signal conviction), replacing the
+    old single-feature `[signal.value]` placeholder (see SignalOut docstring
+    point 2, now resolved). `view` must already be point-in-time-correct for
+    `signal.ts` — this function trusts it and does not re-check.
     """
+    bars = list(await view.latest_bars(signal.asset, interval, limit=_VOLATILITY_WINDOW))
     if len(bars) < _VOLATILITY_WINDOW:
         return None
-    window = bars[-_VOLATILITY_WINDOW:]  # bars are oldest -> newest
-    closes = [b.close for b in window]
+    closes = [b.close for b in bars[-_VOLATILITY_WINDOW:]]
     entry_price = closes[-1]
     mean = sum(closes, Decimal(0)) / Decimal(len(closes))
     variance = sum(((c - mean) ** 2 for c in closes), Decimal(0)) / Decimal(len(closes))
     stdev = variance.sqrt()
 
-    # Minimal placeholder feature vector (signal.value only) — see SignalOut
-    # docstring point 2: no real feature-engineering pipeline exists yet.
-    X = pd.DataFrame([[float(value)]], columns=["f0"])
+    features = await compute_signal_features(signal, view, interval)
+    X = pd.DataFrame([[features[name] for name in FEATURE_NAMES]], columns=list(FEATURE_NAMES))
     try:
         probability = float(model.predict(X)[0])
     except ValueError:
@@ -219,13 +233,14 @@ class SignalOut(BaseModel):
          exact same pattern already established for direction/
          implied_size_usdt/implied_leverage above, never persisted, never
          touching core.signals.
-      2. NO REAL FEATURE-ENGINEERING PIPELINE EXISTS (Task 0 ML-folder
-         audit finding) to build the feature vector XGBoostMetaLabeler was
-         actually trained on. The single feature used here is the signal's
-         own `value` (conviction) — a deliberately minimal placeholder,
-         NOT a real feature set. A production deployment needs a real
-         feature pipeline before this number means anything; flagged
-         rather than silently fabricating additional "features".
+      2. REAL FEATURE ENGINEERING (resolves the Task 0 ML-folder audit
+         finding): the feature vector is ml/feature_engineering.py's
+         compute_signal_features — 8 real features (5/20-period price
+         momentum, 20-period volatility, volume ratio, funding rate, OI
+         change, signal conviction and its magnitude) built from a
+         point-in-time-correct MarketDataView scoped to this signal's own
+         `ts` (bars/funding/OI truncated to <= ts before construction, so
+         the model never sees data from after the signal it's scoring).
       3. ml_direction_agreement approximates "does ML agree with this
          signal" as predicted_probability > 0.5 — XGBoostMetaLabeler is a
          META-LABELER (predicts P(this already-decided trade is
@@ -376,6 +391,8 @@ async def get_strategy_signals(
     asset_repo: AssetRepo,
     position_repo: PositionRepo,
     bars_repo: OHLCVRepo,
+    funding_repo: FundingRateRepo,
+    oi_repo: OpenInterestRepo,
     ml_repo: MLModelRepo,
     limit: int = Query(100, ge=1, le=1000, description="Max most-recent signals"),
 ) -> ResponseEnvelope[list[SignalOut]]:
@@ -445,20 +462,54 @@ async def get_strategy_signals(
             ml_model = None
 
     interval = str(strategy.config.get("interval", "1h"))
+    # Per-distinct-asset caches for point-in-time view construction: full
+    # available history fetched ONCE per asset (not per signal), then
+    # locally truncated to <= each signal's own ts below — §10.3.4
+    # point-in-time correctness (no lookahead), same dedup-per-distinct-id
+    # pattern as _implied_leverage_for above.
+    asset_refs: dict[UUID, AssetRef] = {}
     bars_by_asset: dict[UUID, list[Any]] = {}
+    funding_by_asset: dict[UUID, list[Any]] = {}
+    oi_by_asset: dict[UUID, list[Any]] = {}
 
-    async def _bars_for(asset_id: UUID) -> list[Any]:
-        if asset_id not in bars_by_asset:
-            bars_by_asset[asset_id] = await bars_repo.get_bars(asset_id, interval, limit=_VOLATILITY_WINDOW)
-        return bars_by_asset[asset_id]
+    async def _view_for(asset_id: UUID, as_of: datetime) -> tuple[AssetRef, MarketDataView] | None:
+        if asset_id not in assets:
+            assets[asset_id] = await asset_repo.get_by_id(asset_id)
+        asset = assets[asset_id]
+        if asset is None:
+            return None
+        if asset_id not in asset_refs:
+            asset_refs[asset_id] = AssetRef(
+                symbol=asset.symbol, exchange=asset.exchange,
+                asset_class="crypto", instrument_type=asset.instrument_type,
+            )
+            bars_by_asset[asset_id] = await bars_repo.get_bars(asset_id, interval, limit=100_000)
+            funding_by_asset[asset_id] = await funding_repo.get_funding_rates(asset_id, limit=100_000)
+            oi_by_asset[asset_id] = await oi_repo.get_open_interest_history(asset_id, limit=100_000)
+        all_bars = bars_by_asset[asset_id]
+        # Bars are oldest->newest; truncate to strictly-before-or-at as_of so
+        # the view can never see a bar the signal itself postdates (no
+        # lookahead) — bisect on the sorted ts column.
+        idx = bisect.bisect_right([b.ts for b in all_bars], as_of)
+        return asset_refs[asset_id], PointInTimeMarketDataView(
+            bars=all_bars[:idx],
+            asset=asset_refs[asset_id],
+            interval=interval,
+            funding=funding_by_asset[asset_id],
+            open_interest=oi_by_asset[asset_id],
+            as_of=as_of,
+        )
 
     out: list[SignalOut] = []
     for s in signals:
         leverage = await _implied_leverage_for(s.asset_id)
         ml_insights = None
         if ml_model is not None:
-            asset_bars = await _bars_for(s.asset_id)
-            ml_insights = _compute_ml_insights(s.value, ml_model, asset_bars)
+            resolved = await _view_for(s.asset_id, s.ts)
+            if resolved is not None:
+                asset_ref, view = resolved
+                domain_signal = DomainSignal(asset=asset_ref, value=s.value, ts=s.ts)
+                ml_insights = await _compute_ml_insights(domain_signal, ml_model, view, interval)
         out.append(
             SignalOut.from_recorded(
                 s, configured_capital=configured_capital, implied_leverage=leverage, ml_insights=ml_insights

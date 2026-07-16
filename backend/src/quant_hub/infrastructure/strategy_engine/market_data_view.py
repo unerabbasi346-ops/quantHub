@@ -18,11 +18,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, OpenInterest, Tick
 from quant_hub.domain.market_data.interfaces import (
     AssetRepository,
     FundingRateRepository,
     OHLCVRepository,
+    OpenInterestRepository,
     TickRepository,
 )
 from quant_hub.domain.strategy_engine.strategy import MarketDataView
@@ -49,6 +50,7 @@ class RepositoryBackedMarketDataView(MarketDataView):
         bars: OHLCVRepository,
         ticks: TickRepository,
         funding_rates: FundingRateRepository | None = None,
+        open_interest: OpenInterestRepository | None = None,
     ) -> None:
         self._assets = assets
         self._bars = bars
@@ -59,6 +61,9 @@ class RepositoryBackedMarketDataView(MarketDataView):
         # returns empty, matching the ABC's concrete default. Additive so every
         # existing 3-arg construction site is unchanged.
         self._funding_rates = funding_rates
+        # Same optional-wiring pattern as funding_rates, for OI (migration
+        # b4f8e21ac9d3) — additive, every existing construction site unchanged.
+        self._open_interest = open_interest
 
     async def latest_bars(
         self, asset: AssetRef, interval: str, limit: int = 100
@@ -86,3 +91,15 @@ class RepositoryBackedMarketDataView(MarketDataView):
         if asset_id is None:
             return []
         return await self._funding_rates.get_funding_rates(asset_id, limit)
+
+    async def latest_open_interest(
+        self, asset: AssetRef, limit: int = 100
+    ) -> Sequence[OpenInterest]:
+        # No OI repo wired -> defer to the ABC's empty default, same
+        # "no data yet" treatment as unwired funding above.
+        if self._open_interest is None:
+            return []
+        asset_id = await self._assets.get_by_symbol_exchange(asset.symbol, asset.exchange)
+        if asset_id is None:
+            return []
+        return await self._open_interest.get_open_interest_history(asset_id, limit)

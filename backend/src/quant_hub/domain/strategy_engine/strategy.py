@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 
-from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, OpenInterest, Tick
 from quant_hub.domain.strategy_engine.entities import Signal
 
 
@@ -96,6 +96,19 @@ class MarketDataView(ABC):
         Strategy-contract return meaning "no signal"), never an AttributeError.
         A view that HAS funding data (RepositoryBackedMarketDataView) overrides
         this. A SPOT instrument legitimately has no funding and returns empty.
+        """
+        return []
+
+    async def latest_open_interest(
+        self, asset: AssetRef, limit: int = 100
+    ) -> Sequence[OpenInterest]:
+        """Most-recent persisted perpetual open-interest observations for an
+        instrument, oldest→newest, read-only (migration b4f8e21ac9d3).
+
+        Same concrete-default-empty pattern as latest_funding_rates above,
+        for the same reason: OI is perpetual-only market data, so a SPOT
+        instrument or a view with no OI repository wired legitimately
+        returns empty rather than raising.
         """
         return []
 

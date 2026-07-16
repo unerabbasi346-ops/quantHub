@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
-from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, Tick
+from quant_hub.domain.market_data.entities import AssetRef, FundingRate, OHLCVBar, OpenInterest, Tick
 from quant_hub.domain.strategy_engine.strategy import MarketDataView
 
 
@@ -51,6 +51,7 @@ class PointInTimeMarketDataView(MarketDataView):
         asset: AssetRef,
         interval: str,
         funding: Sequence[FundingRate] = (),
+        open_interest: Sequence[OpenInterest] = (),
         as_of: datetime | None = None,
     ) -> None:
         self._bars = list(bars)
@@ -58,6 +59,8 @@ class PointInTimeMarketDataView(MarketDataView):
         self._interval = interval
         # Funding kept sorted oldest->newest and clamped to as_of on read (point-in-time).
         self._funding = sorted(funding, key=lambda f: f.funding_time)
+        # Same treatment for OI (migration b4f8e21ac9d3) as funding above.
+        self._open_interest = sorted(open_interest, key=lambda o: o.ts)
         self._as_of = as_of
 
     async def latest_bars(
@@ -85,5 +88,18 @@ class PointInTimeMarketDataView(MarketDataView):
             self._funding
             if self._as_of is None
             else [f for f in self._funding if f.funding_time <= self._as_of]
+        )
+        return visible[-limit:] if 0 < limit < len(visible) else list(visible)
+
+    async def latest_open_interest(
+        self, asset: AssetRef, limit: int = 100
+    ) -> Sequence[OpenInterest]:
+        # Same instrument-scoping and §10.3.4 as_of clamp as latest_funding_rates.
+        if (asset.symbol, asset.exchange) != (self._asset.symbol, self._asset.exchange):
+            return []
+        visible = (
+            self._open_interest
+            if self._as_of is None
+            else [o for o in self._open_interest if o.ts <= self._as_of]
         )
         return visible[-limit:] if 0 < limit < len(visible) else list(visible)
