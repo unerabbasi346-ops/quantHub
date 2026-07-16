@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -154,7 +154,12 @@ class MLOut(BaseModel):
 
 # ── Routes ───────────────────────────────────────────────────────────────
 @router.get("/status", response_model=ResponseEnvelope[SystemStatusOut], summary="Full Hermes system status")
-async def get_status(session: DbSession, redis: CacheClient) -> ResponseEnvelope[SystemStatusOut]:
+async def get_status(session: DbSession, redis: CacheClient, response: Response) -> ResponseEnvelope[SystemStatusOut]:
+    # Perf pass: this is the heaviest Hermes read (services+assets+funding+
+    # strategies+models+jobs in one call) — 15s cache keeps it well under
+    # the poll's own 60s cadence while still bounding worst-case load if
+    # multiple tabs/pages request it near-simultaneously.
+    response.headers["Cache-Control"] = "public, max-age=15"
     status_ = await hermes_coordinator.get_status(session, redis)
     return ok(
         SystemStatusOut(

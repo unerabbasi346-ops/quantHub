@@ -30,7 +30,7 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Response, status
 from pydantic import BaseModel, field_serializer
 
 from quant_hub.api.dependencies import AssetRepo, DbSession, PortfolioRepo, PositionRepo
@@ -133,7 +133,10 @@ def _portfolio_out(portfolio: Portfolio) -> PortfolioOut:
     response_model=ResponseEnvelope[list[PortfolioOut]],
     summary="List active portfolios",
 )
-async def list_portfolios(repo: PortfolioRepo) -> ResponseEnvelope[list[PortfolioOut]]:
+async def list_portfolios(repo: PortfolioRepo, response: Response) -> ResponseEnvelope[list[PortfolioOut]]:
+    # Perf pass: the portfolio list rarely changes mid-session — 30s cache,
+    # called on every dashboard/portfolio page load.
+    response.headers["Cache-Control"] = "public, max-age=30"
     portfolios = await repo.list_active()
     return ok([_portfolio_out(p) for p in portfolios])
 

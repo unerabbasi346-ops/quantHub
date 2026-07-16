@@ -37,7 +37,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 from pydantic import BaseModel, field_serializer
 
 from quant_hub.api.dependencies import AssetRepo, DbSession, FundingRateRepo, OHLCVRepo, OpenInterestRepo
@@ -104,7 +104,11 @@ class OHLCVBarOut(BaseModel):
     response_model=ResponseEnvelope[list[AssetOut]],
     summary="List active tradable assets",
 )
-async def list_assets(repo: AssetRepo) -> ResponseEnvelope[list[AssetOut]]:
+async def list_assets(repo: AssetRepo, response: Response) -> ResponseEnvelope[list[AssetOut]]:
+    # Perf pass: the asset registry changes on ingestion events, not per
+    # request — safe to cache for 60s, cutting a repeated fetch every page
+    # (Dashboard, Markets, Risk all call this) down to one per minute.
+    response.headers["Cache-Control"] = "public, max-age=60"
     assets = await repo.list_active()
     return ok([AssetOut.model_validate(a, from_attributes=True) for a in assets])
 

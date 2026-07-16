@@ -5,7 +5,7 @@
 //
 // REPLACES the previous ComingSoon deferral (S-6: "no backend audit/
 // notification/metrics pipeline exists yet") now that Hermes IS that
-// pipeline — read-only, polled every 30s. Five sections, task-specified
+// pipeline — read-only, polled every 60s. Five sections, task-specified
 // order: (1) System Health Strip, (2) Data Pipeline (ingestion + funding
 // freshness), (3) Strategy Lifecycle, (4) ML Operations, (5) System Timeline.
 'use client'
@@ -98,7 +98,7 @@ function HealthStrip({ status }: { status: NonNullable<ReturnType<typeof useHerm
   const redis = status.services.find((s) => s.name === 'redis') ?? null
 
   return (
-    <Section icon={<Server size={16} />} title="System health" description="Backend, database, and cache connectivity — polled every 30s.">
+    <Section icon={<Server size={16} />} title="System health" description="Backend, database, and cache connectivity — polled every 60s.">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <ServiceTile label="Backend API" service={backend} />

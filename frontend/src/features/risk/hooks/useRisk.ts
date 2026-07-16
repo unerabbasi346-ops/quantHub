@@ -10,7 +10,11 @@ export function useRiskSnapshot(portfolioId: string) {
     queryKey: ['risk-snapshot', portfolioId],
     queryFn: () => riskService.getSnapshot(portfolioId),
     enabled: Boolean(portfolioId),
-    refetchInterval: 10_000, // Doc 15 §Risk SLO: intraday update cadence
+    // Raised from 10s (perf pass) — 10s was the fastest poll on the
+    // platform and ran even when Risk wasn't the visible page. 60s minimum
+    // per the perf pass's "nothing faster than 30s" rule; risk snapshots
+    // don't need sub-minute freshness for an intraday, not HFT, workflow.
+    refetchInterval: 60_000,
   })
 }
 

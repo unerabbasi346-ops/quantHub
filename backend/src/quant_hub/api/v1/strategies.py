@@ -48,7 +48,7 @@ from typing import Any
 from uuid import UUID
 
 import pandas as pd
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 from pydantic import BaseModel, field_serializer
 
 from quant_hub.api.dependencies import (
@@ -366,7 +366,10 @@ def _serialize_backtest_row(row: dict[str, Any]) -> BacktestOut:
     response_model=ResponseEnvelope[list[StrategyOut]],
     summary="List all registered strategies (the registry)",
 )
-async def list_strategies(repo: StrategyRepo) -> ResponseEnvelope[list[StrategyOut]]:
+async def list_strategies(repo: StrategyRepo, response: Response) -> ResponseEnvelope[list[StrategyOut]]:
+    # Perf pass: the strategy registry rarely changes mid-session — 30s
+    # cache, called from the dashboard strategy hero + every strategies page.
+    response.headers["Cache-Control"] = "public, max-age=30"
     strategies = await repo.list_all()
     return ok([StrategyOut.from_registered(s) for s in strategies])
 

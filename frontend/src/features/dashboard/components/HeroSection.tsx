@@ -17,7 +17,7 @@
 // into the AI row without restructuring this panel.
 'use client'
 
-import { type ReactNode } from 'react'
+import { memo, type ComponentType, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
   ArrowLeftRight,
@@ -26,6 +26,7 @@ import {
   Cpu,
   Database,
   ShieldAlert,
+  type LucideProps,
 } from 'lucide-react'
 import { Badge, EmptyState, ErrorState, glassSurface, Ring, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
@@ -82,7 +83,13 @@ function HeroStrategyChart() {
 
 // ── Right: Intelligence Workspace (30%) ─────────────────────────────────
 interface EngineStatusRowProps {
-  icon: ReactNode
+  // A component REFERENCE (e.g. `ShieldAlert`), not a JSX element — a
+  // function-reference prop is the same object on every render, unlike
+  // `<ShieldAlert size={15} />` which mints a new element instance each
+  // time. That stability is what lets React.memo below actually skip a
+  // re-render for a row whose content is static (Risk Engine, AI Engine),
+  // rather than bailing out on the icon prop every single poll regardless.
+  icon: ComponentType<LucideProps>
   label: string
   status: string
   variant: BadgeVariant
@@ -90,7 +97,11 @@ interface EngineStatusRowProps {
   muted?: boolean
 }
 
-function EngineStatusRow({ icon, label, status, variant, detail, muted }: EngineStatusRowProps) {
+// Perf pass: memoized — rendered 6x inside IntelligenceWorkspace, which
+// re-renders every 60s Hermes poll. Rows backed by literal, unchanging
+// props (Risk Engine, AI Engine) now genuinely skip re-rendering instead
+// of remounting on every poll regardless of whether their content moved.
+const EngineStatusRow = memo(function EngineStatusRow({ icon: Icon, label, status, variant, detail, muted }: EngineStatusRowProps) {
   // Same 'row' kind Table.tsx uses for its rows — a crisp opacity+slide (no
   // filter, so it can't detach from box model), staggered purely by each
   // row's own vertical position, giving the "engines populate one after
@@ -105,7 +116,7 @@ function EngineStatusRow({ icon, label, status, variant, detail, muted }: Engine
       )}
     >
       <span className={cn('mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md', muted ? 'bg-surface text-fg-subtle' : 'bg-accent-soft text-accent')}>
-        {icon}
+        <Icon size={15} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
@@ -116,7 +127,7 @@ function EngineStatusRow({ icon, label, status, variant, detail, muted }: Engine
       </div>
     </motion.div>
   )
-}
+})
 
 // Honesty caveat (owner-requested fix): analytics.ml_models.metrics.accuracy
 // is computed by MODEL.evaluate() ON ITS OWN TRAINING SET (see
@@ -149,7 +160,7 @@ function IntelligenceWorkspace() {
           </span>
           <div>
             <h2 className="text-sm font-semibold tracking-tight text-fg">Intelligence Workspace</h2>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">Hermes system status — real, polled every 30s</p>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">Hermes system status — real, polled every 60s</p>
           </div>
         </div>
         {health && (
@@ -165,21 +176,21 @@ function IntelligenceWorkspace() {
 
       <div className="mt-4 flex flex-1 flex-col gap-2.5">
         <EngineStatusRow
-          icon={<Brain size={15} />}
+          icon={Brain}
           label="Strategy Engine"
           status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.strategy_engine.active_count} active`}
           variant={healthQuery.isError ? 'risk' : health && health.strategy_engine.active_count > 0 ? 'profit' : 'neutral'}
           detail={health ? `${health.strategy_engine.signals_24h} signals · 24h` : 'hermes/health'}
         />
         <EngineStatusRow
-          icon={<Database size={15} />}
+          icon={Database}
           label="Data Pipeline"
           status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.data_pipeline.fresh_count} fresh`}
           variant={healthQuery.isError ? 'risk' : health && health.data_pipeline.dead_count > 0 ? 'warning' : 'profit'}
           detail={health ? `${health.data_pipeline.stale_count} stale · ${health.data_pipeline.dead_count} dead` : 'hermes/health'}
         />
         <EngineStatusRow
-          icon={<Cpu size={15} />}
+          icon={Cpu}
           label="ML Engine"
           status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.ml_engine.trained_count} trained`}
           variant={healthQuery.isError ? 'risk' : health && health.ml_engine.trained_count > 0 ? 'profit' : 'neutral'}
@@ -194,14 +205,14 @@ function IntelligenceWorkspace() {
           }
         />
         <EngineStatusRow
-          icon={<ShieldAlert size={15} />}
+          icon={ShieldAlert}
           label="Risk Engine"
           status="Operational"
           variant="neutral"
           detail="No real-time risk status is wired to Hermes yet — pre-trade assessments run per order (see Risk page)."
         />
         <EngineStatusRow
-          icon={<ArrowLeftRight size={15} />}
+          icon={ArrowLeftRight}
           label="Execution Engine"
           status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.execution_engine.orders_today} today`}
           variant={healthQuery.isError ? 'risk' : health && health.execution_engine.orders_today > 0 ? 'info' : 'neutral'}
@@ -219,7 +230,7 @@ function IntelligenceWorkspace() {
             identically to the real engine rows above so a future AI
             integration populates it in place, without a layout change. */}
         <EngineStatusRow
-          icon={<Bot size={15} />}
+          icon={Bot}
           label="AI Engine"
           status="Not connected"
           variant="neutral"

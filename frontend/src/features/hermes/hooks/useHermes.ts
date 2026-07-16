@@ -2,10 +2,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { hermesService } from '../services/hermes.service'
 
-// 30s polling everywhere Hermes is consumed (Intelligence Workspace,
-// Monitoring page System Health Strip) — task-specified interval, matching
-// the platform's existing Markets live-bar polling cadence.
-const POLL_MS = 30_000
+// 60s polling everywhere Hermes is consumed (Intelligence Workspace,
+// Monitoring page System Health Strip) — raised from 30s (perf pass):
+// 5 concurrent Hermes queries at 30s was a real chunk of the dashboard's
+// steady-state request volume; Hermes health data doesn't need sub-minute
+// freshness.
+const POLL_MS = 60_000
 
 export function useHermesStatus() {
   return useQuery({
