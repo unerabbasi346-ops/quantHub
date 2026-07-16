@@ -75,8 +75,18 @@ class CCXTConnector(MarketDataConnector, FundingRateConnector, OpenInterestConne
         # Passing an explicit session makes ccxt treat it as caller-owned
         # (own_session=False internally) — it will NOT close this session
         # for us, so close() below must do it explicitly.
+        #
+        # REAL-EXECUTION FINDING: a caller-supplied session keeps aiohttp's
+        # own ClientTimeout default (total=300s) rather than picking up
+        # ccxt's `timeout` option (which only applies when ccxt constructs
+        # its own session) — a single stalled request could silently hang
+        # for up to 5 minutes per attempt, effectively defeating with_retry's
+        # bounded-3-attempts design (Doc 11 §8). An explicit 20s total
+        # timeout here makes a stalled request fail fast into the existing
+        # ccxt.NetworkError retry path instead.
         self._session = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+            connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver()),
+            timeout=aiohttp.ClientTimeout(total=20),
         )
         self._exchange = exchange_class({"enableRateLimit": True, "session": self._session})
 
