@@ -28,11 +28,11 @@ import {
   ShieldAlert,
   type LucideProps,
 } from 'lucide-react'
-import { Badge, EmptyState, ErrorState, glassSurface, Ring, type BadgeVariant } from '@/components/ui'
+import { Badge, EmptyState, ErrorState, Gauge, glassSurface, Ring, type BadgeVariant } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
 import { formatRatio, formatTimestamp } from '@/lib/utils/format'
 import { useReveal } from '@/lib/motion'
-import { useHermesHealth } from '@/features/hermes/hooks/useHermes'
+import { useHermesHealth, useHermesStatus } from '@/features/hermes/hooks/useHermes'
 import { useStrategies } from '@/features/strategies/hooks/useStrategies'
 import { useStrategyPerformance } from '@/features/strategies/hooks/useStrategyPerformance'
 import { RotatingStrategyChart } from '@/features/strategies/components/RotatingStrategyChart'
@@ -123,7 +123,8 @@ const EngineStatusRow = memo(function EngineStatusRow({ icon: Icon, label, statu
           <span className={cn('truncate text-sm font-medium', muted ? 'text-fg-muted' : 'text-fg')}>{label}</span>
           <Badge variant={variant}>{status}</Badge>
         </div>
-        <p className="mt-0.5 truncate text-[11px] text-fg-subtle">{detail}</p>
+        {/* div, not p — detail can carry block-level content (Ring gauge). */}
+        <div className="mt-0.5 truncate text-[11px] text-fg-subtle">{detail}</div>
       </div>
     </motion.div>
   )
@@ -146,35 +147,91 @@ function healthTone(score: number): 'profit' | 'warning' | 'risk' {
   return 'risk'
 }
 
+// Freshness bar: real fresh/stale/dead pipeline counts as proportional
+// green/amber/red segments.
+function FreshnessBar({ fresh, stale, dead }: { fresh: number; stale: number; dead: number }) {
+  const total = fresh + stale + dead
+  if (total === 0) return null
+  return (
+    <span className="flex h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-surface" title={`${fresh} fresh · ${stale} stale · ${dead} dead`}>
+      {fresh > 0 && <span className="h-full bg-profit" style={{ width: `${(fresh / total) * 100}%` }} />}
+      {stale > 0 && <span className="h-full bg-warning" style={{ width: `${(stale / total) * 100}%` }} />}
+      {dead > 0 && <span className="h-full bg-risk" style={{ width: `${(dead / total) * 100}%` }} />}
+    </span>
+  )
+}
+
+// Recent events — synthesized from REAL Hermes status fields (latest signal,
+// latest completed backtest, freshest ingested bar), never fabricated.
+interface HermesEvent {
+  icon: ComponentType<LucideProps>
+  text: string
+  ts: string
+}
+
+function recentEvents(status: import('@/features/hermes/types').SystemStatus | null): HermesEvent[] {
+  if (!status) return []
+  const events: HermesEvent[] = []
+  const lastSignal = status.strategies
+    .filter((s) => s.last_signal_ts != null)
+    .sort((a, b) => (a.last_signal_ts! < b.last_signal_ts! ? 1 : -1))[0]
+  if (lastSignal?.last_signal_ts) {
+    events.push({ icon: Brain, text: `Signal generated · ${lastSignal.name}`, ts: lastSignal.last_signal_ts })
+  }
+  const lastBacktest = status.strategies
+    .filter((s) => s.latest_backtest_completed_at != null)
+    .sort((a, b) => (a.latest_backtest_completed_at! < b.latest_backtest_completed_at! ? 1 : -1))[0]
+  if (lastBacktest?.latest_backtest_completed_at) {
+    events.push({ icon: ArrowLeftRight, text: `Backtest completed · ${lastBacktest.name}`, ts: lastBacktest.latest_backtest_completed_at })
+  }
+  const freshAssets = status.assets.filter((a) => a.last_bar_ts != null)
+  if (freshAssets.length > 0) {
+    const newest = freshAssets.sort((a, b) => (a.last_bar_ts! < b.last_bar_ts! ? 1 : -1))[0]
+    events.push({ icon: Database, text: `Data ingested · ${freshAssets.length} assets`, ts: newest.last_bar_ts! })
+  }
+  return events.sort((a, b) => (a.ts < b.ts ? 1 : -1)).slice(0, 3)
+}
+
 const IntelligenceWorkspace = memo(function IntelligenceWorkspace() {
   const healthQuery = useHermesHealth()
+  const statusQuery = useHermesStatus()
   const health = healthQuery.data ?? null
+  const events = recentEvents(statusQuery.data ?? null)
+  const bestAccuracy = (statusQuery.data?.models ?? [])
+    .map((m) => m.accuracy)
+    .filter((a): a is number => a != null)
+    .reduce<number | null>((best, a) => (best == null || a > best ? a : best), null)
 
   const reveal = useReveal('card')
   return (
     <motion.div {...reveal} className={cn(glassSurface('glow'), 'flex min-h-[26rem] flex-col p-5')}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-            <Brain size={16} />
-          </span>
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight text-fg">Intelligence Workspace</h2>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">Hermes system status — real, polled every 60s</p>
-          </div>
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+          <Brain size={16} />
+        </span>
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight text-fg">Intelligence Workspace</h2>
+          <p className="mt-0.5 text-[11px] text-fg-subtle">Hermes system status — real, polled every 60s</p>
         </div>
-        {health && (
-          <Ring
-            value={health.health_score / 100}
-            size={44}
-            thickness={5}
-            tone={healthTone(health.health_score)}
-            centerLabel={String(Math.round(health.health_score))}
-          />
+      </div>
+
+      {/* Large system-health gauge (ECharts) — panel-wide above the engine
+          rows; this panel is itself the hero's right 30% column, so a
+          side-by-side split leaves the gauge no measurable width. */}
+      <div className="mt-3 flex flex-col items-center">
+        {health ? (
+          <>
+            <Gauge value={Math.round(health.health_score)} min={0} max={100} height={150} className="w-full" />
+            <span className="-mt-4 text-[11px] font-medium uppercase tracking-wide text-fg-subtle">System Health</span>
+            <span className="text-[10px] text-fg-subtle">updated {formatTimestamp(health.generated_at)}</span>
+          </>
+        ) : (
+          <div className="skeleton h-32 w-32 rounded-full" />
         )}
       </div>
 
-      <div className="mt-4 flex flex-1 flex-col gap-2.5">
+      <div className="mt-3 flex flex-1 flex-col">
+        <div className="flex flex-col gap-2.5">
         <EngineStatusRow
           icon={Brain}
           label="Strategy Engine"
@@ -187,7 +244,16 @@ const IntelligenceWorkspace = memo(function IntelligenceWorkspace() {
           label="Data Pipeline"
           status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.data_pipeline.fresh_count} fresh`}
           variant={healthQuery.isError ? 'risk' : health && health.data_pipeline.dead_count > 0 ? 'warning' : 'profit'}
-          detail={health ? `${health.data_pipeline.stale_count} stale · ${health.data_pipeline.dead_count} dead` : 'hermes/health'}
+          detail={
+            health ? (
+              <span className="flex items-center gap-2">
+                {health.data_pipeline.fresh_count} fresh · {health.data_pipeline.stale_count} stale · {health.data_pipeline.dead_count} dead
+                <FreshnessBar fresh={health.data_pipeline.fresh_count} stale={health.data_pipeline.stale_count} dead={health.data_pipeline.dead_count} />
+              </span>
+            ) : (
+              'hermes/health'
+            )
+          }
         />
         <EngineStatusRow
           icon={Cpu}
@@ -195,9 +261,10 @@ const IntelligenceWorkspace = memo(function IntelligenceWorkspace() {
           status={healthQuery.isLoading ? '…' : healthQuery.isError ? 'error' : `${health!.ml_engine.trained_count} trained`}
           variant={healthQuery.isError ? 'risk' : health && health.ml_engine.trained_count > 0 ? 'profit' : 'neutral'}
           detail={
-            health?.ml_engine.last_accuracy != null ? (
-              <span title={ACCURACY_CAVEAT}>
-                last accuracy {formatRatio(health.ml_engine.last_accuracy)} <span className="italic">(training, not OOS)</span>
+            bestAccuracy != null ? (
+              <span className="flex items-center gap-2" title={ACCURACY_CAVEAT}>
+                best accuracy {formatRatio(bestAccuracy)}
+                <Ring value={bestAccuracy} size={18} thickness={3} tone={bestAccuracy >= 0.6 ? 'profit' : 'warning'} />
               </span>
             ) : (
               'analytics.ml_models'
@@ -237,6 +304,25 @@ const IntelligenceWorkspace = memo(function IntelligenceWorkspace() {
           detail="No AI backend is integrated yet — this is a permanent honest state, not a loading placeholder."
           muted
         />
+        </div>
+      </div>
+
+      {/* Recent events — last 3 real Hermes-observable events. */}
+      <div className="mt-3 border-t border-border pt-3">
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-fg-subtle">Recent events</p>
+        {events.length === 0 ? (
+          <p className="text-[11px] text-fg-subtle">No recorded system events yet.</p>
+        ) : (
+          <div className="space-y-1">
+            {events.map((e) => (
+              <div key={e.text} className="flex items-center gap-2 text-[11px] text-fg-muted">
+                <e.icon size={12} className="shrink-0 text-fg-subtle" />
+                <span className="min-w-0 flex-1 truncate">{e.text}</span>
+                <span className="shrink-0 text-fg-subtle">{formatTimestamp(e.ts)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-[11px] text-fg-subtle">

@@ -372,9 +372,10 @@ function PortfolioSummaryWidget({ portfolioId, className }: { portfolioId: strin
     <Card elevation="elevated" className={className}>
       <WidgetHead
         icon={<Wallet size={16} />}
-        title="Portfolio summary"
+        title="Live position"
         right={query.isSuccess ? <Badge variant="neutral">{open.length} open</Badge> : null}
       />
+      <p className="px-5 pt-1 text-[11px] text-fg-subtle">Paper trading — simulated position, not real capital.</p>
       <CardContent>
         {query.isLoading && <div className="skeleton h-32 w-full" />}
         {query.isError && <ErrorState description="Could not load positions." onRetry={() => query.refetch()} />}

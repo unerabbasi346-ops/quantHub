@@ -13,7 +13,7 @@
 import { Chart } from '@/components/ui/Chart'
 import type { ChartTheme } from '@/components/ui/chart-theme'
 import { EmptyState } from '@/components/ui/States'
-import { formatReturn } from '@/lib/utils/format'
+import { formatBacktestReturn } from '@/lib/utils/format'
 
 // ── Return gauge: a single real backtest total_return %, semi-circle gauge,
 //    colored profit/risk by sign — "like Image 2's Total Profits circular
@@ -41,7 +41,7 @@ export function ReturnGauge({
   return (
     <Chart
       height={height}
-      ariaLabel={`Backtest return ${formatReturn(returnPct / 100)}`}
+      ariaLabel={`Backtest return ${formatBacktestReturn(returnPct / 100)}`}
       option={(theme: ChartTheme) => {
         const color = returnPct >= 0 ? theme.profit : theme.risk
         return {
@@ -75,7 +75,7 @@ export function ReturnGauge({
                 // Small real returns (e.g. -0.0028%) round to a misleading
                 // "-0.00%" at 2dp — scale precision to the magnitude so a
                 // genuinely tiny figure still reads as nonzero.
-                formatter: () => formatReturn(returnPct / 100),
+                formatter: () => formatBacktestReturn(returnPct / 100),
                 color,
                 fontFamily: theme.fontMono,
                 fontWeight: 700,

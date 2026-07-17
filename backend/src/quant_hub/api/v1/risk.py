@@ -45,7 +45,9 @@ from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, field_serializer
 
 from quant_hub.api.dependencies import (
+    DbSession,
     PortfolioRepo,
+    PositionRepo,
     PreTradeRiskRepo,
     RiskLimitRepo,
     RiskServiceDep,
@@ -253,8 +255,21 @@ async def get_risk_snapshot(
     portfolio_id: UUID,
     portfolio_repo: PortfolioRepo,
     snapshot_repo: RiskSnapshotRepo,
+    position_repo: PositionRepo,
+    risk_service: RiskServiceDep,
+    session: DbSession,
+    fresh: bool = Query(True, description="Compute and persist a fresh snapshot from live positions before reading"),
 ) -> ResponseEnvelope[RiskSnapshotOut | None]:
     await _require_portfolio(portfolio_repo, portfolio_id)
+    if fresh:
+        # Stale-date fix (owner request): the snapshot table is only written
+        # by explicit snapshot runs, so the "latest" row could be days old.
+        # Recompute from live open positions on read — same real
+        # RiskService.snapshot_portfolio_risk path, persisted per P-5.
+        positions = [p for p in await position_repo.get_by_portfolio(portfolio_id) if not p.is_closed]
+        equity = sum((p.market_value for p in positions), Decimal("0"))
+        await risk_service.snapshot_portfolio_risk(portfolio_id, positions, equity)
+        await session.commit()
     record = await snapshot_repo.get_latest_record(portfolio_id)
     if record is None:
         # Portfolio exists but no snapshot has been computed — a legitimate
