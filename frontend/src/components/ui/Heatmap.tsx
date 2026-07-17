@@ -21,6 +21,10 @@ interface HeatmapProps {
   min?: number
   max?: number
   valueFormat?: (v: number) => string
+  /** Override the visualMap ramp (low→high), e.g. vivid P&L red/neutral/green. */
+  colors?: string[]
+  /** Force a fixed cell-label color (defaults to the theme foreground). */
+  labelColor?: string
   className?: string
 }
 
@@ -33,6 +37,8 @@ export function Heatmap({
   min = mode === 'diverging' ? -1 : 0,
   max = 1,
   valueFormat = (v) => v.toFixed(2),
+  colors,
+  labelColor,
   className,
 }: HeatmapProps) {
   const points: [number, number, number][] = []
@@ -87,9 +93,10 @@ export function Heatmap({
           textStyle: { color: theme.fgSubtle, fontFamily: theme.fontMono, fontSize: 10 },
           inRange: {
             color:
-              mode === 'diverging'
+              colors ??
+              (mode === 'diverging'
                 ? [theme.risk, theme.borderStrong, theme.profit]
-                : [theme.borderStrong, theme.info],
+                : [theme.borderStrong, theme.info]),
           },
         },
         series: [
@@ -98,7 +105,7 @@ export function Heatmap({
             data: points,
             label: {
               show: xLabels.length <= 12,
-              color: theme.fg,
+              color: labelColor ?? theme.fg,
               fontFamily: theme.fontMono,
               fontSize: 10,
               formatter: (p: unknown) => valueFormat((p as { data: [number, number, number] }).data[2]),

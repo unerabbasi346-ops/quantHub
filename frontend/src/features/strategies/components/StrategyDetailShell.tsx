@@ -505,6 +505,10 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
               mode="diverging"
               min={-monthly.maxAbs}
               max={monthly.maxAbs}
+              // Vivid P&L palette (owner request): #FF1744 loss → dark
+              // neutral → #00C853 gain; white labels for readability.
+              colors={['#FF1744', '#1a1a2e', '#00C853']}
+              labelColor="#ffffff"
               height={Math.max(180, monthly.years.length * 70 + 90)}
               valueFormat={(v) => (monthlyIsPnl ? fmtMoney(String(v)) : formatSignalStrength(v))}
             />
@@ -714,7 +718,14 @@ function MarketContext({ symbol }: { symbol: string | null }) {
   const changePct = change != null && prev ? (change / Number.parseFloat(prev.close)) * 100 : null
 
   return (
-    <Section title="Market context" description="The strategy's configured instrument, live from the same feed Markets renders.">
+    <Section
+      title="Market context"
+      description={
+        symbol
+          ? `Strategy instrument: ${symbol} — live from the same feed Markets renders. Only this instrument shows because it's the one this strategy trades.`
+          : "The strategy's configured instrument, live from the same feed Markets renders."
+      }
+    >
       <Panel className="p-5">
         {!symbol ? (
           <div className="flex h-24 items-center justify-center text-sm text-fg-muted">

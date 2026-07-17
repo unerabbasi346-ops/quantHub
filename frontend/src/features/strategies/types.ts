@@ -53,6 +53,11 @@ export interface Signal {
   ml_tp_suggestion: string | null
   ml_sl_suggestion: string | null
   ml_breakeven: string | null
+  // Read-time quality assessment (domain/strategy_engine/signal_quality.py,
+  // surfaced by SignalOut) — never persisted, real rule evaluation only.
+  quality_score: string | null
+  quality_recommendation: string | null // TRADE | SKIP | REVIEW
+  quality_reasons: string[]
 }
 
 // The engine's self-describing §10.3.7 result summary (Decimals already

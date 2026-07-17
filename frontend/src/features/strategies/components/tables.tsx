@@ -9,10 +9,20 @@
 
 import { useMemo } from 'react'
 import { Badge, InstitutionalTable, type InstitutionalColumnDef, type BadgeVariant, pnlBadgeVariant } from '@/components/ui'
-import { formatCapital, formatReturn } from '@/lib/utils/format'
+import { formatCapital } from '@/lib/utils/format'
 import type { Backtest } from '../types'
 
-export const fmtReturnPct = (v: string | null) => (v === null ? '—' : formatReturn(Number.parseFloat(v)))
+// Backtest total returns render as a full-precision percentage, never the
+// generic bps rounding formatReturn applies below 0.1% — "+0.016%" is clearer
+// than "+1.61 bps" in a backtest context (owner request).
+export const fmtReturnPct = (v: string | null) => {
+  if (v === null) return '—'
+  const value = Number.parseFloat(v)
+  if (!Number.isFinite(value)) return '—'
+  const pct = value * 100
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${Math.abs(pct).toFixed(Math.abs(pct) >= 0.1 ? 2 : 3)}%`
+}
 export const fmtMoney = (v: string | null) => (v === null ? '—' : formatCapital(Number.parseFloat(v)))
 
 export function backtestStatusVariant(status: string): BadgeVariant {
