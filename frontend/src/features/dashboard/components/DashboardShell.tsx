@@ -27,7 +27,7 @@
 'use client'
 
 import { memo, useMemo, type ReactNode } from 'react'
-import { ArrowLeftRight, CandlestickChart, Gauge, LayoutDashboard, ShieldAlert, TrendingUp, Wallet } from 'lucide-react'
+import { ArrowLeftRight, CandlestickChart, Gauge, LayoutDashboard, Radio, ShieldAlert, TrendingUp, Wallet } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import {
   Badge,
@@ -36,7 +36,6 @@ import {
   CardHeader,
   CardTitle,
   CryptoIcon,
-  DonutChart,
   EmptyState,
   ErrorState,
   InstitutionalTable,
@@ -48,15 +47,17 @@ import {
   type BadgeVariant,
 } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatCapital, formatMaxDrawdownPct, formatReturn, formatTimestamp } from '@/lib/utils/format'
+import { formatCapital, formatReturn, formatTimestamp } from '@/lib/utils/format'
 import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio, Position } from '@/features/portfolio/types'
 import { useOrders } from '@/features/execution/hooks/useExecution'
 import type { Order } from '@/features/execution/types'
 import { useRiskSnapshot } from '@/features/risk/hooks/useRisk'
 import { useAssets, useBars } from '@/features/markets/hooks/useMarkets'
+import { useHermesHealth, useHermesStrategies } from '@/features/hermes/hooks/useHermes'
 import { useStrategies } from '@/features/strategies/hooks/useStrategies'
 import { strategiesService } from '@/features/strategies/services/strategies.service'
+import { fmtReturnPct } from '@/features/strategies/components/tables'
 import type { Backtest } from '@/features/strategies/types'
 import { HeroSection } from './HeroSection'
 import { StrategySection } from './StrategySection'
@@ -66,7 +67,6 @@ const PREFERRED_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT']
 const fmtMoney = (v: string | null) => (v == null ? '—' : formatCapital(Number.parseFloat(v)))
 const fmtSigned = (v: number) => (v > 0 ? '+' : '') + fmtMoney(String(v))
 const fmtQty = (v: string) => Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 8 })
-const fmtLeverage = (v: string) => `${Number.parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 6 })}×`
 const fmtTime = (iso: string | null) => (!iso ? '—' : formatTimestamp(iso))
 
 function WidgetHead({ icon, title, right }: { icon: ReactNode; title: string; right?: ReactNode }) {
@@ -135,7 +135,7 @@ export function DashboardShell() {
               Value, Allocation, PnL, Exposure"). */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
             <PortfolioSummaryWidget portfolioId={portfolioId} className="lg:col-span-2" />
-            <AllocationWidget portfolioId={portfolioId} />
+            <SignalActivityWidget />
             <RiskSnapshotWidget portfolioId={portfolioId} />
           </div>
 
@@ -176,6 +176,7 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
   // still resolves it) but no longer used here.
   const strategiesQuery = useStrategies()
   const strategies = strategiesQuery.data ?? []
+  const activeStrategies = strategies.filter((s) => s.status.toUpperCase() === 'ACTIVE')
   const backtestQueries = useQueries({
     queries: strategies.map((s) => ({
       queryKey: ['backtests', s.id],
@@ -186,31 +187,8 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
   const allBacktests: Backtest[] = backtestQueries.flatMap((q) => q.data ?? [])
   const completedBacktests = allBacktests.filter((b) => b.status === 'COMPLETED')
 
-  // Portfolio card: total capital across every completed backtest run.
-  const totalBacktestCapital = completedBacktests.reduce(
-    (s, b) => s + (b.final_capital != null ? Number.parseFloat(b.final_capital) : 0), 0,
-  )
-  const distinctAssets = new Set(completedBacktests.map((b) => b.symbol).filter((s): s is string => Boolean(s)))
-
-  // Risk card: max drawdown across every strategy's computed metrics —
-  // small N (registered strategies), same per-strategy fetch pattern as
-  // the backtests above.
-  const metricsQueries = useQueries({
-    queries: strategies.map((s) => ({
-      queryKey: ['strategy-metrics', s.id],
-      queryFn: () => strategiesService.getMetrics(s.id),
-      enabled: Boolean(s.id),
-    })),
-  })
-  const drawdowns = metricsQueries
-    .map((q) => q.data?.max_drawdown_pct)
-    .filter((v): v is string => v != null)
-    .map(Number.parseFloat)
-  const worstDrawdown = drawdowns.length ? Math.max(...drawdowns) : null
-
-  // Performance card: best (highest total_return) COMPLETED backtest across
-  // every registered strategy — not live unrealized P&L, which is a single
-  // open position's noise, not a performance figure.
+  // Best (highest total_return) COMPLETED backtest across every registered
+  // strategy — drives both the Best Backtest and vs-BTC-Benchmark cards.
   const bestBacktest = completedBacktests
     .filter((b) => b.total_return != null)
     .reduce<Backtest | null>((best, b) => {
@@ -220,6 +198,9 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
     }, null)
   const bestReturnPct = bestBacktest ? Number.parseFloat(bestBacktest.total_return!) : null
   const bestBenchmarkPct = bestBacktest?.benchmark_return != null ? Number.parseFloat(bestBacktest.benchmark_return) : null
+  const bestStrategyName = bestBacktest?.strategy_id
+    ? strategies.find((s) => s.id === bestBacktest.strategy_id)?.name ?? bestBacktest.name
+    : bestBacktest?.name ?? null
 
   // Market card: BTC + ETH, Doc 10 §Analytics Grid's "Market Overview" —
   // fixed reference instruments, not the page's synced/selected asset
@@ -275,39 +256,47 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
   return (
     <div className="grid grid-cols-12 gap-4">
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
-        <WidgetHead icon={<Wallet size={16} />} title="Portfolio" />
+        <WidgetHead icon={<Wallet size={16} />} title="Active Strategies" />
         <CardContent>
-          <div className="font-mono text-metric font-bold tabular-nums text-fg">{fmtMoney(String(totalBacktestCapital))}</div>
+          <div className="font-mono text-metric font-bold tabular-nums text-fg">{activeStrategies.length}</div>
           <div className="mt-1 text-[11px] text-fg-subtle">
-            total capital across {completedBacktests.length} completed backtest{completedBacktests.length === 1 ? '' : 's'}
+            {activeStrategies.length === 1 ? '1 strategy running' : `${activeStrategies.length} strategies running`}
           </div>
         </CardContent>
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
-        <WidgetHead icon={<ShieldAlert size={16} />} title="Risk" />
-        <CardContent>
-          <div className="font-mono text-metric font-bold tabular-nums text-fg">{distinctAssets.size}</div>
-          <div className="mt-1 text-[11px] text-fg-subtle">
-            asset{distinctAssets.size === 1 ? '' : 's'} traded
-            {worstDrawdown != null && <> · {formatMaxDrawdownPct(worstDrawdown)} worst drawdown</>}
-          </div>
-        </CardContent>
-      </Card>
-      <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
-        <WidgetHead icon={<TrendingUp size={16} />} title="Performance" />
+        <WidgetHead icon={<TrendingUp size={16} />} title="Best Backtest" />
         <CardContent>
           {bestReturnPct != null ? (
             <>
               <div className={cn('font-mono text-metric font-bold tabular-nums', bestReturnPct >= 0 ? 'text-profit' : 'text-risk')}>
-                {formatReturn(bestReturnPct)}
+                {fmtReturnPct(bestBacktest!.total_return)}
               </div>
               <div className="mt-1 truncate text-[11px] text-fg-subtle">
-                best backtest · {bestBacktest?.name}
-                {bestBenchmarkPct != null && <> · vs BTC {formatReturn(bestBenchmarkPct)}</>}
+                {bestStrategyName}
+                {bestBacktest?.symbol && <> · {bestBacktest.symbol}</>}
               </div>
             </>
           ) : (
             <div className="text-sm text-fg-muted">No completed backtests yet.</div>
+          )}
+        </CardContent>
+      </Card>
+      <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
+        <WidgetHead icon={<ShieldAlert size={16} />} title="vs BTC Benchmark" />
+        <CardContent>
+          {bestReturnPct != null && bestBenchmarkPct != null ? (
+            <>
+              <div className="flex items-baseline gap-1.5 font-mono font-bold tabular-nums">
+                <span className={cn('text-metric', bestReturnPct >= 0 ? 'text-profit' : 'text-risk')}>{fmtReturnPct(bestBacktest!.total_return)}</span>
+                <span className="text-sm text-fg-subtle">strategy</span>
+              </div>
+              <div className="mt-1 text-[11px] text-fg-subtle">
+                vs <span className={cn('font-mono', bestBenchmarkPct >= 0 ? 'text-profit' : 'text-risk')}>{fmtReturnPct(bestBacktest!.benchmark_return)}</span> BTC buy-and-hold, same period
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-fg-muted">No benchmark comparison yet.</div>
           )}
         </CardContent>
       </Card>
@@ -401,61 +390,118 @@ function PortfolioSummaryWidget({ portfolioId, className }: { portfolioId: strin
   )
 }
 
-// Allocation (Doc 10 §Portfolio Section: "Portfolio Value, Allocation, PnL,
-// Exposure") — same real open-position market values as the Portfolio page's
-// own allocation donut, sized for the dashboard grid.
-function AllocationWidget({ portfolioId }: { portfolioId: string }) {
-  const query = usePositions(portfolioId)
-  const open = (query.data ?? []).filter((p) => !p.is_closed)
-  const totalMarketValue = open.reduce((s, p) => s + Number.parseFloat(p.market_value), 0)
-  const allocation = open
-    .map((p) => ({ name: p.symbol ?? p.asset_id, value: Math.abs(Number.parseFloat(p.market_value)) }))
-    .filter((d) => d.value > 0)
-    .sort((a, b) => b.value - a.value)
+// Signal Activity (replaces the Allocation donut, which duplicated the
+// Portfolio Summary next to it) — real Hermes lifecycle data: signals over
+// the last 24h, the most recent signal timestamp, and which strategies are
+// actively emitting.
+function SignalActivityWidget() {
+  const healthQuery = useHermesHealth()
+  const strategiesQuery = useHermesStrategies()
+  const health = healthQuery.data ?? null
+  const lifecycles = strategiesQuery.data?.strategies ?? []
+  const lastSignalTs = lifecycles
+    .map((s) => s.last_signal_ts)
+    .filter((ts): ts is string => ts != null)
+    .sort()
+    .at(-1) ?? null
+  const activeNames = lifecycles.filter((s) => s.status.toUpperCase() === 'ACTIVE').map((s) => s.name)
 
   return (
     <Card elevation="elevated">
-      <WidgetHead icon={<Wallet size={16} />} title="Allocation" />
-      <CardContent>
-        {query.isLoading && <div className="skeleton h-40 w-full" />}
-        {query.isError && <ErrorState description="Could not load positions." onRetry={() => query.refetch()} />}
-        {query.isSuccess && allocation.length === 0 && <EmptyState title="No allocation" description="No open positions to allocate." />}
-        {allocation.length > 0 && (
-          <DonutChart data={allocation} height={180} centerLabel="value" centerValue={fmtMoney(String(totalMarketValue))} valueFormat={(v) => fmtMoney(String(v))} />
+      <WidgetHead icon={<Radio size={16} />} title="Signal activity" />
+      <CardContent className="space-y-3">
+        {(healthQuery.isLoading || strategiesQuery.isLoading) && <div className="skeleton h-28 w-full" />}
+        {healthQuery.isError && <ErrorState description="Could not load Hermes status." onRetry={() => healthQuery.refetch()} />}
+        {health && strategiesQuery.isSuccess && (
+          <>
+            <div>
+              <div className="font-mono text-metric font-bold tabular-nums text-fg">{health.strategy_engine.signals_24h}</div>
+              <div className="mt-0.5 text-[11px] text-fg-subtle">signals generated · last 24h</div>
+            </div>
+            <div className="space-y-1.5 border-t border-border pt-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-fg-subtle">Last signal</span>
+                <span className="font-mono text-fg">{lastSignalTs ? fmtTime(lastSignalTs) : '—'}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-fg-subtle">Active strategies</span>
+                <span className="truncate font-mono text-fg" title={activeNames.join(', ')}>
+                  {activeNames.length === 0 ? '—' : activeNames.length === 1 ? activeNames[0] : `${activeNames.length} active`}
+                </span>
+              </div>
+            </div>
+            <SourceNote>Hermes strategy lifecycle (polled every 60s)</SourceNote>
+          </>
         )}
       </CardContent>
     </Card>
   )
 }
 
+// Risk Snapshot (professional layout, owner request): the live position with
+// entry/P&L/leverage from real portfolio data, plus an honest plain-language
+// note for the metrics that still need return-series computation.
 function RiskSnapshotWidget({ portfolioId }: { portfolioId: string }) {
   const query = useRiskSnapshot(portfolioId)
+  const positionsQuery = usePositions(portfolioId)
   const snap = query.data ?? null
+  const open = (positionsQuery.data ?? []).filter((p) => !p.is_closed)
+  const pos = open[0] ?? null
+  const qty = pos ? Number.parseFloat(pos.quantity) : null
+  const entry = pos ? Number.parseFloat(pos.average_entry_price) : null
+  const pnl = pos ? Number.parseFloat(pos.unrealized_pnl) : null
+  const cost = qty != null && entry != null ? Math.abs(qty * entry) : null
+  const pnlPct = pnl != null && cost != null && cost > 0 ? (pnl / cost) * 100 : null
+
   return (
     <Card elevation="elevated">
       <WidgetHead
         icon={<ShieldAlert size={16} />}
         title="Risk snapshot"
-        right={snap ? (snap.breaches.length > 0 ? <Badge variant="risk">{snap.breaches.length} breach</Badge> : <Badge variant="profit">OK</Badge>) : null}
+        right={snap ? <Badge variant={snap.breaches.length > 0 ? 'risk' : 'profit'}>● Live</Badge> : null}
       />
-      <CardContent className="space-y-4">
-        {query.isLoading && <div className="skeleton h-28 w-full" />}
+      <CardContent className="space-y-3">
+        {(query.isLoading || positionsQuery.isLoading) && <div className="skeleton h-28 w-full" />}
         {query.isError && <ErrorState description="Could not load risk snapshot." onRetry={() => query.refetch()} />}
-        {query.isSuccess && !snap && <EmptyState title="No snapshot" description="No risk snapshot computed yet." />}
-        {snap && (
+        {query.isSuccess && positionsQuery.isSuccess && !pos && (
+          <EmptyState title="No open position" description="No open positions — nothing at risk right now." />
+        )}
+        {pos && (
           <>
-            <div className="grid grid-cols-2 gap-4">
-              <div><div className="text-[11px] uppercase tracking-wide text-fg-subtle">Gross exp.</div><div className="mt-0.5 font-mono text-lg font-semibold tabular-nums text-fg">{fmtMoney(snap.gross_exposure)}</div></div>
-              <div><div className="text-[11px] uppercase tracking-wide text-fg-subtle">Gross lev.</div><div className="mt-0.5 font-mono text-lg font-semibold tabular-nums text-fg">{fmtLeverage(snap.gross_leverage)}</div></div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-fg-subtle">Deferred metrics</div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {snap.deferred_metrics.map((m) => (<Badge key={m.name} variant="warning" title={m.reason}>{m.name}</Badge>))}
+            <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-fg-subtle">Position</span>
+                <span className="font-mono font-medium text-fg">
+                  {pos.symbol ?? '—'} <span className={cn(qty != null && qty < 0 ? 'text-risk' : 'text-profit')}>{qty != null && qty < 0 ? 'SHORT' : 'LONG'}</span>
+                  {open.length > 1 && <span className="text-fg-subtle"> +{open.length - 1} more</span>}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-fg-subtle">Size</span>
+                <span className="font-mono tabular-nums text-fg">{fmtMoney(pos.market_value)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-fg-subtle">Entry price</span>
+                <span className="font-mono tabular-nums text-fg">{fmtMoney(pos.average_entry_price)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-fg-subtle">Current P&L</span>
+                <span className={cn('font-mono tabular-nums', pnl != null && pnl < 0 ? 'text-risk' : 'text-profit')}>
+                  {pnl != null ? fmtSigned(pnl) : '—'}
+                  {pnlPct != null && <> ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)</>}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-fg-subtle">Leverage</span>
+                <span className="font-mono tabular-nums text-fg">
+                  {pos.leverage != null ? `${Number.parseFloat(pos.leverage).toFixed(1)}x` : '1.0x (spot)'}
+                </span>
               </div>
             </div>
-            <p className="text-xs text-fg-subtle">As of {fmtTime(snap.snapshot_at)}</p>
-            <SourceNote>the portfolio's live risk snapshot</SourceNote>
+            <p className="border-t border-border pt-3 text-[11px] leading-relaxed text-fg-subtle">
+              Advanced metrics (VaR, CVaR, drawdown, beta) require return-series computation — not available yet.
+            </p>
+            {snap && <SourceNote>live positions + risk snapshot ({fmtTime(snap.snapshot_at)})</SourceNote>}
           </>
         )}
       </CardContent>
