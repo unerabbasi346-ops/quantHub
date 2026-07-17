@@ -220,6 +220,135 @@ async def get_train_status(job_id: str, redis: CacheClient) -> ResponseEnvelope[
     return ok(TrainStatusOut(job_id=job_id, **data))
 
 
+class TrainMetalabelerRequest(BaseModel):
+    """Research-page training: the server builds the REAL labeled dataset
+    (quant_hub.ml.training_data — every recorded signal, point-in-time
+    features, realized forward-return labels) for one instrument type, so no
+    caller ever has to fabricate feature/target arrays."""
+
+    instrument_type: str = "SPOT"  # SPOT | PERPETUAL — selects the feature set
+    horizon_bars: int = Field(24, ge=1, le=720)
+    hyperparams: dict[str, Any] = Field(default_factory=dict)
+
+
+async def _run_metalabeler_training(
+    job_id: str, instrument_type: str, horizon_bars: int, hyperparams: dict[str, Any], redis: Any
+) -> None:
+    """Background job mirroring scripts/retrain_metalabeler.py exactly:
+    chronological 80/20 split, held-out metrics vs the majority-class
+    baseline, and deployment ONLY when the model beats that baseline."""
+    from quant_hub.ml.feature_engineering import feature_mask, feature_names_for
+    from quant_hub.ml.training_data import build_metalabeler_datasets
+
+    key = f"ml:train:{job_id}"
+
+    async def _set_status(payload: dict[str, Any]) -> None:
+        await redis.set(key, json.dumps(payload), ex=_JOB_TTL_SECONDS)
+
+    base = json.loads(await redis.get(key))
+    base["status"] = "RUNNING"
+    await _set_status(base)
+
+    try:
+        datasets = await build_metalabeler_datasets(horizon_bars)
+        if instrument_type not in datasets:
+            raise ValueError(
+                f"No labelable {instrument_type} signals exist (missing bar history "
+                f"or no recorded signals for that instrument type)"
+            )
+        X, y = datasets[instrument_type]
+        if len(X) < 50:
+            raise ValueError(f"Only {len(X)} labeled {instrument_type} signals — need >= 50 to train")
+
+        split = int(len(X) * 0.8)
+        X_train, X_test = X.iloc[:split], X.iloc[split:]
+        y_train, y_test = y.iloc[:split], y.iloc[split:]
+
+        model = create_model("XGBoost_MetaLabeler", hyperparams)
+        model.train(X_train, y_train)
+        eval_metrics = _jsonable(model.evaluate(X_test, y_test))
+
+        baseline = max(float(y_test.mean()), 1.0 - float(y_test.mean()))
+        accuracy = float(eval_metrics["accuracy"])
+        beats_baseline = accuracy > baseline
+
+        metrics: dict[str, Any] = {
+            **eval_metrics,
+            "baseline": baseline,
+            "beats_baseline": beats_baseline,
+            "deployed": beats_baseline,
+            "train_rows": len(X_train),
+            "test_rows": len(X_test),
+            "horizon_bars": horizon_bars,
+            "instrument_type": instrument_type,
+            "features": list(feature_names_for(instrument_type)),
+            "feature_mask": feature_mask(instrument_type),
+        }
+
+        if beats_baseline:
+            model_type = f"XGBoost_MetaLabeler_{instrument_type}"
+            artifact_dir = _ARTIFACT_ROOT / model_type
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = str(artifact_dir / f"{job_id}.joblib")
+            model.save_model(artifact_path)
+            async with AsyncSessionLocal() as session:
+                repo = SQLAlchemyMLModelRepository(session)
+                await repo.register_trained(
+                    model_type=model_type, version=job_id, framework="xgboost",
+                    artifact_path=artifact_path, config=hyperparams, metrics=metrics,
+                )
+                await session.commit()
+        else:
+            metrics["not_deployed_reason"] = (
+                f"held-out accuracy {accuracy:.4f} <= majority-class baseline {baseline:.4f} — "
+                "model adds nothing over always predicting the majority class"
+            )
+
+        base["status"] = "COMPLETED"
+        base["completed_at"] = datetime.now(timezone.utc).isoformat()
+        base["metrics"] = metrics
+        await _set_status(base)
+    except Exception as exc:  # noqa: BLE001 — surfaced via job status, never swallowed
+        base["status"] = "FAILED"
+        base["completed_at"] = datetime.now(timezone.utc).isoformat()
+        base["error"] = str(exc)
+        await _set_status(base)
+
+
+@router.post(
+    "/train/metalabeler",
+    response_model=ResponseEnvelope[TrainJobOut],
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Train the metalabeler on the real signal dataset (server-built), baseline-gated deploy",
+)
+async def train_metalabeler(
+    body: TrainMetalabelerRequest,
+    background_tasks: BackgroundTasks,
+    redis: CacheClient,
+) -> ResponseEnvelope[TrainJobOut]:
+    if body.instrument_type not in ("SPOT", "PERPETUAL"):
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCode.VALIDATION_ERROR,
+            "instrument_type must be SPOT or PERPETUAL",
+        )
+    job_id = str(uuid7())
+    created_at = datetime.now(timezone.utc).isoformat()
+    await redis.set(
+        f"ml:train:{job_id}",
+        json.dumps({
+            "status": "PENDING",
+            "model_type": f"XGBoost_MetaLabeler_{body.instrument_type}",
+            "created_at": created_at,
+        }),
+        ex=_JOB_TTL_SECONDS,
+    )
+    background_tasks.add_task(
+        _run_metalabeler_training, job_id, body.instrument_type, body.horizon_bars, body.hyperparams, redis
+    )
+    return ok(TrainJobOut(job_id=job_id))
+
+
 class PredictRequest(BaseModel):
     model_type: str
     feature_data: list[list[float]]
@@ -292,3 +421,343 @@ async def predict(body: PredictRequest, ml_repo: MLModelRepo) -> ResponseEnvelop
             note="regression model — no probability/confidence concept applies to a point forecast",
         )
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# LSTM + HMM server-built training (Research page) — same job/status plumbing
+# as the metalabeler above; each gates or evaluates per its own semantics.
+# ══════════════════════════════════════════════════════════════════════════
+
+class TrainLstmRequest(BaseModel):
+    """Server builds the same real labeled signal dataset as the metalabeler;
+    the LSTM consumes it as feature sequences (seq_length lookback)."""
+
+    instrument_type: str = "SPOT"
+    horizon_bars: int = Field(24, ge=1, le=720)
+    seq_length: int = Field(20, ge=2, le=100)
+    hyperparams: dict[str, Any] = Field(default_factory=dict)
+
+
+_LSTM_MIN_SIGNALS = 500
+
+
+async def _run_lstm_training(
+    job_id: str, instrument_type: str, horizon_bars: int, seq_length: int,
+    hyperparams: dict[str, Any], redis: Any,
+) -> None:
+    """LSTM on the real signal dataset: chronological 80/20 split, per-row
+    sliding-window predictions on the held-out tail, accuracy vs the
+    majority-class baseline, deploy only if it beats the baseline."""
+    import torch as _torch
+    import torch.nn as _nn
+
+    from quant_hub.ml.feature_engineering import feature_names_for
+    from quant_hub.ml.training_data import build_metalabeler_datasets
+
+    key = f"ml:train:{job_id}"
+
+    async def _set_status(payload: dict[str, Any]) -> None:
+        await redis.set(key, json.dumps(payload), ex=_JOB_TTL_SECONDS)
+
+    base = json.loads(await redis.get(key))
+    base["status"] = "RUNNING"
+    await _set_status(base)
+
+    try:
+        datasets = await build_metalabeler_datasets(horizon_bars)
+        if instrument_type not in datasets:
+            raise ValueError(f"No labelable {instrument_type} signals exist")
+        X, y = datasets[instrument_type]
+        if len(X) < _LSTM_MIN_SIGNALS:
+            raise ValueError(
+                f"Only {len(X)} labeled {instrument_type} signals — LSTM needs >= {_LSTM_MIN_SIGNALS} "
+                f"({_LSTM_MIN_SIGNALS - len(X)} more required)"
+            )
+
+        n_features = X.shape[1]
+        params = {"input_dim": n_features, "seq_length": seq_length, **hyperparams}
+        split = int(len(X) * 0.8)
+        X_train, X_test = X.iloc[:split], X.iloc[split:]
+        y_train, y_test = y.iloc[:split], y.iloc[split:]
+
+        model = create_model("LSTM_Predictor", params)
+        model.train(X_train, y_train)
+
+        # Held-out per-row predictions: each test row scored from its own
+        # trailing seq_length feature window (train tail + test prefix), the
+        # same information a live inference call would have.
+        X_all_scaled = model.scaler.transform(X)
+        preds: list[float] = []
+        _nn.Module.train(model, False)
+        with _torch.no_grad():
+            for i in range(split, len(X)):
+                lo = max(0, i - seq_length)
+                window = _torch.tensor(X_all_scaled[lo:i + 1], dtype=_torch.float32).unsqueeze(0)
+                out, _ = model.lstm(window)
+                preds.append(float(model.linear(out[:, -1, :]).item()))
+
+        pred_labels = [1 if p > 0.5 else 0 for p in preds]
+        accuracy = float(np.mean([pl == yt for pl, yt in zip(pred_labels, y_test.tolist())]))
+        baseline = max(float(y_test.mean()), 1.0 - float(y_test.mean()))
+        beats_baseline = accuracy > baseline
+
+        metrics: dict[str, Any] = {
+            "accuracy": accuracy,
+            "baseline": baseline,
+            "beats_baseline": beats_baseline,
+            "deployed": beats_baseline,
+            "train_rows": len(X_train),
+            "test_rows": len(X_test),
+            "horizon_bars": horizon_bars,
+            "seq_length": seq_length,
+            "instrument_type": instrument_type,
+            "features": list(feature_names_for(instrument_type)),
+        }
+        if beats_baseline:
+            model_type = f"LSTM_Predictor_{instrument_type}"
+            artifact_dir = _ARTIFACT_ROOT / model_type
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = str(artifact_dir / f"{job_id}.joblib")
+            model.save_model(artifact_path)
+            async with AsyncSessionLocal() as session:
+                repo = SQLAlchemyMLModelRepository(session)
+                await repo.register_trained(
+                    model_type=model_type, version=job_id, framework="pytorch",
+                    artifact_path=artifact_path, config=params, metrics=metrics,
+                )
+                await session.commit()
+        else:
+            metrics["not_deployed_reason"] = (
+                f"held-out accuracy {accuracy:.4f} <= majority-class baseline {baseline:.4f}"
+            )
+
+        base["status"] = "COMPLETED"
+        base["completed_at"] = datetime.now(timezone.utc).isoformat()
+        base["metrics"] = metrics
+        await _set_status(base)
+    except Exception as exc:  # noqa: BLE001 — surfaced via job status, never swallowed
+        base["status"] = "FAILED"
+        base["completed_at"] = datetime.now(timezone.utc).isoformat()
+        base["error"] = str(exc)
+        await _set_status(base)
+
+
+@router.post(
+    "/train/lstm",
+    response_model=ResponseEnvelope[TrainJobOut],
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Train the LSTM predictor on the real signal dataset (server-built), baseline-gated deploy",
+)
+async def train_lstm(
+    body: TrainLstmRequest,
+    background_tasks: BackgroundTasks,
+    redis: CacheClient,
+) -> ResponseEnvelope[TrainJobOut]:
+    if body.instrument_type not in ("SPOT", "PERPETUAL"):
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST, ErrorCode.VALIDATION_ERROR,
+            "instrument_type must be SPOT or PERPETUAL",
+        )
+    job_id = str(uuid7())
+    await redis.set(
+        f"ml:train:{job_id}",
+        json.dumps({
+            "status": "PENDING",
+            "model_type": f"LSTM_Predictor_{body.instrument_type}",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }),
+        ex=_JOB_TTL_SECONDS,
+    )
+    background_tasks.add_task(
+        _run_lstm_training, job_id, body.instrument_type, body.horizon_bars, body.seq_length,
+        body.hyperparams, redis,
+    )
+    return ok(TrainJobOut(job_id=job_id))
+
+
+class TrainHmmRequest(BaseModel):
+    """HMM regime detection trains on real bar data directly (returns +
+    rolling volatility) — no signals involved."""
+
+    symbol: str = "BTC/USDT"
+    exchange: str = "binance"
+    interval: str = "1h"
+    hyperparams: dict[str, Any] = Field(default_factory=dict)
+
+
+_HMM_MIN_BARS = 500
+_HMM_VOL_WINDOW = 24
+_REGIME_LABELS = {0: "bear", 1: "neutral", 2: "bull"}
+
+
+async def _run_hmm_training(
+    job_id: str, symbol: str, exchange: str, interval: str,
+    hyperparams: dict[str, Any], redis: Any,
+) -> None:
+    """HMM on [return, rolling vol] of real bars. Unsupervised — no accuracy
+    gate; metrics carry regime distribution, average durations, a downsampled
+    regime history, and the current regime with posterior confidence."""
+    from quant_hub.persistence.repositories.market_data import (
+        SQLAlchemyAssetRepository,
+        SQLAlchemyOHLCVRepository,
+    )
+
+    key = f"ml:train:{job_id}"
+
+    async def _set_status(payload: dict[str, Any]) -> None:
+        await redis.set(key, json.dumps(payload), ex=_JOB_TTL_SECONDS)
+
+    base = json.loads(await redis.get(key))
+    base["status"] = "RUNNING"
+    await _set_status(base)
+
+    try:
+        async with AsyncSessionLocal() as session:
+            assets = SQLAlchemyAssetRepository(session)
+            asset_id = await assets.get_by_symbol_exchange(symbol, exchange)
+            if asset_id is None:
+                raise ValueError(f"No ingested asset {symbol}@{exchange}")
+            bars = await SQLAlchemyOHLCVRepository(session).get_bars(asset_id, interval, limit=200_000)
+        if len(bars) < _HMM_MIN_BARS:
+            raise ValueError(
+                f"Only {len(bars)} {interval} bars for {symbol} — HMM needs >= {_HMM_MIN_BARS}"
+            )
+
+        closes = pd.Series([float(b.close) for b in bars])
+        ts = [b.ts for b in bars]
+        returns = closes.pct_change()
+        vol = returns.rolling(_HMM_VOL_WINDOW).std()
+        frame = pd.DataFrame({"ret": returns, "vol": vol}).dropna()
+        offset = len(closes) - len(frame)  # first usable bar index
+
+        model = create_model("HMM_RegimeDetector", hyperparams)
+        model.train(frame)
+        regimes = model.predict(frame)
+
+        # Current regime + posterior confidence (real hmmlearn predict_proba).
+        X_scaled = model.scaler.transform(frame)
+        post = model.model.predict_proba(X_scaled)
+        raw_last = model.model.predict(X_scaled)[-1]
+        current_regime = int(regimes[-1])
+        current_confidence = float(post[-1][raw_last])
+
+        counts = {int(r): int((regimes == r).sum()) for r in set(regimes.tolist())}
+        durations = _jsonable(model.evaluate(frame))
+
+        # Downsampled history for the UI timeline — every real point, strided.
+        stride = max(1, len(regimes) // 500)
+        history = [
+            {"ts": ts[offset + i].isoformat(), "regime": int(regimes[i])}
+            for i in range(0, len(regimes), stride)
+        ]
+
+        metrics: dict[str, Any] = {
+            "symbol": symbol,
+            "interval": interval,
+            "bars_used": len(frame),
+            "regime_labels": _REGIME_LABELS,
+            "regime_distribution": counts,
+            "avg_durations": durations,
+            "current_regime": current_regime,
+            "current_regime_label": _REGIME_LABELS.get(current_regime, str(current_regime)),
+            "current_confidence": current_confidence,
+            "regime_history": history,
+        }
+
+        model_type = "HMM_RegimeDetector"
+        artifact_dir = _ARTIFACT_ROOT / model_type
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = str(artifact_dir / f"{job_id}.joblib")
+        model.save_model(artifact_path)
+        async with AsyncSessionLocal() as session:
+            repo = SQLAlchemyMLModelRepository(session)
+            await repo.register_trained(
+                model_type=model_type, version=job_id, framework="hmmlearn",
+                artifact_path=artifact_path,
+                config={"symbol": symbol, "interval": interval, **hyperparams},
+                metrics=metrics,
+            )
+            await session.commit()
+
+        base["status"] = "COMPLETED"
+        base["completed_at"] = datetime.now(timezone.utc).isoformat()
+        base["metrics"] = metrics
+        await _set_status(base)
+    except Exception as exc:  # noqa: BLE001 — surfaced via job status, never swallowed
+        base["status"] = "FAILED"
+        base["completed_at"] = datetime.now(timezone.utc).isoformat()
+        base["error"] = str(exc)
+        await _set_status(base)
+
+
+@router.post(
+    "/train/hmm",
+    response_model=ResponseEnvelope[TrainJobOut],
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Train the HMM regime detector on real bar returns (no accuracy gate)",
+)
+async def train_hmm(
+    body: TrainHmmRequest,
+    background_tasks: BackgroundTasks,
+    redis: CacheClient,
+) -> ResponseEnvelope[TrainJobOut]:
+    job_id = str(uuid7())
+    await redis.set(
+        f"ml:train:{job_id}",
+        json.dumps({
+            "status": "PENDING",
+            "model_type": "HMM_RegimeDetector",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }),
+        ex=_JOB_TTL_SECONDS,
+    )
+    background_tasks.add_task(
+        _run_hmm_training, job_id, body.symbol, body.exchange, body.interval, body.hyperparams, redis
+    )
+    return ok(TrainJobOut(job_id=job_id))
+
+
+class RegimeOut(BaseModel):
+    model_id: str
+    trained_at: str
+    symbol: str | None
+    current_regime: int | None
+    current_regime_label: str | None
+    current_confidence: float | None
+    regime_distribution: dict[str, int] | None
+    regime_history: list[dict[str, Any]] | None
+
+
+@router.get(
+    "/regime",
+    response_model=ResponseEnvelope[RegimeOut | None],
+    summary="Latest trained HMM regime state (train-time computed, real bars)",
+)
+async def get_regime() -> ResponseEnvelope[RegimeOut | None]:
+    from sqlalchemy import text as _sa_text
+
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                _sa_text(
+                    """
+                    SELECT id, created_at, metrics FROM analytics.ml_models
+                    WHERE model_type = 'HMM_RegimeDetector' AND metrics ? 'regime_history'
+                    ORDER BY created_at DESC LIMIT 1
+                    """
+                )
+            )
+        ).first()
+    if row is None:
+        return ok(None)
+    m = row.metrics or {}
+    return ok(RegimeOut(
+        model_id=str(row.id),
+        trained_at=row.created_at.isoformat(),
+        symbol=m.get("symbol"),
+        current_regime=m.get("current_regime"),
+        current_regime_label=m.get("current_regime_label"),
+        current_confidence=m.get("current_confidence"),
+        regime_distribution={str(k): v for k, v in (m.get("regime_distribution") or {}).items()} or None,
+        regime_history=m.get("regime_history"),
+    ))
