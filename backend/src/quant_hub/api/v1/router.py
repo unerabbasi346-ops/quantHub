@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from quant_hub.api.v1 import execution, health, markets, portfolio, risk, strategies
+from quant_hub.api.v1 import backtests, execution, health, markets, portfolio, risk, strategies
 
 api_router = APIRouter()
 
@@ -34,3 +34,6 @@ api_router.include_router(strategies.router)
 
 # Step 4.6: risk vertical slice — limits + pre-trade assessments + snapshot.
 api_router.include_router(risk.router)
+
+# Research page: cross-strategy backtest explorer + run/equity-curve surface.
+api_router.include_router(backtests.router)

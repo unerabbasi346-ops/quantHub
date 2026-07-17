@@ -114,6 +114,8 @@ interface InstitutionalTableProps<TData> {
   onRowClick?: (row: TData) => void
   /** Row whose data matches this predicate gets a persistent selected highlight. */
   isRowSelected?: (row: TData) => boolean
+  /** Extra classes per row (e.g. green/red tint by sign). */
+  rowClassName?: (row: TData) => string
 }
 
 function csvEscape(value: unknown): string {
@@ -135,6 +137,7 @@ export function InstitutionalTable<TData>({
   rowHeight = 44,
   onRowClick,
   isRowSelected,
+  rowClassName,
 }: InstitutionalTableProps<TData>) {
   const tier = useResponsiveTier()
   const visibleColumns = useMemo(
@@ -294,6 +297,7 @@ export function InstitutionalTable<TData>({
                     'grid items-center border-b border-border/70 transition-colors duration-150 hover:bg-surface-hover/60',
                     onRowClick && 'cursor-pointer',
                     isRowSelected?.(rows[virtualRow.index].original) && 'bg-accent-soft',
+                    rowClassName?.(rows[virtualRow.index].original),
                   )}
                   style={{
                     ...gridStyle,
@@ -329,6 +333,7 @@ export function InstitutionalTable<TData>({
                     'grid items-center transition-colors duration-150 hover:bg-surface-hover/60',
                     onRowClick && 'cursor-pointer',
                     isRowSelected?.(row.original) && 'bg-accent-soft',
+                    rowClassName?.(row.original),
                   )}
                   style={gridStyle}
                 >
