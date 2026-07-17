@@ -54,6 +54,9 @@ export interface MLModelStatus {
   // Majority-class baseline the deploy gate compared against (api/ml.py) —
   // null for models trained before baseline gating existed.
   baseline: number | null
+  // Training-data date span from metrics — null for legacy rows.
+  period_start: ISOTimestamp | null
+  period_end: ISOTimestamp | null
   deployed_at: ISOTimestamp | null
   created_at: ISOTimestamp
 }

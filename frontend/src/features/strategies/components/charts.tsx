@@ -513,3 +513,81 @@ export function FeatureImportanceChart({ importance, height = 220 }: { importanc
     />
   )
 }
+
+// ── Regime posterior timeline: stacked area of daily-averaged HMM posterior
+//    probabilities (bear=red / neutral=gray / bull=green), summing to 1 per
+//    day — a smooth read of regime cycles, not the hourly flicker of discrete
+//    states. Optional dashed "now" marker at the latest point. ──
+export function RegimePosteriorTimeline({
+  posteriors,
+  height = 200,
+}: {
+  posteriors: { ts: string; bear?: number; neutral?: number; bull?: number }[]
+  height?: number
+}) {
+  if (posteriors.length < 2) {
+    return (
+      <div style={{ height }}>
+        <EmptyState title="No regime history" description="Train the HMM regime detector to build a posterior timeline." />
+      </div>
+    )
+  }
+  const nowTs = posteriors[posteriors.length - 1].ts
+  return (
+    <Chart
+      height={height}
+      ariaLabel="Regime posterior timeline"
+      option={(theme: ChartTheme) => {
+        const axis = chartAxis(theme)
+        const band = (key: 'bear' | 'neutral' | 'bull', color: string) => ({
+          name: key,
+          type: 'line' as const,
+          stack: 'posterior',
+          areaStyle: { color, opacity: 0.85 },
+          lineStyle: { width: 0 },
+          symbol: 'none',
+          emphasis: { disabled: true },
+          data: posteriors.map((p) => [p.ts, p[key] ?? 0]),
+        })
+        return {
+          tooltip: chartTooltip(theme, {
+            trigger: 'axis',
+            formatter: (params: unknown) => {
+              const arr = params as { seriesName: string; value: [string, number] }[]
+              const day = new Date(arr[0].value[0]).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+              const lines = arr.map((s) => `${s.seriesName}: <b>${Math.round(s.value[1] * 100)}%</b>`).join('<br/>')
+              return `${day}<br/>${lines}`
+            },
+          }),
+          legend: { show: false },
+          grid: { left: 44, right: 16, top: 12, bottom: 28 },
+          xAxis: {
+            type: 'time',
+            ...axis,
+            splitLine: { show: false },
+            axisLabel: { ...axis.axisLabel, formatter: (v: number) => new Date(v).getFullYear().toString() },
+          },
+          yAxis: { type: 'value', min: 0, max: 1, ...axis, axisLabel: { ...axis.axisLabel, formatter: (v: number) => `${Math.round(v * 100)}%` } },
+          series: [
+            band('bear', theme.risk),
+            band('neutral', theme.borderStrong),
+            band('bull', theme.profit),
+            {
+              name: 'now',
+              type: 'line',
+              data: [[nowTs, 0], [nowTs, 1]],
+              lineStyle: { color: theme.fgSubtle, width: 1, type: 'dashed' },
+              symbol: 'none',
+              silent: true,
+              markPoint: {
+                symbol: 'pin', symbolSize: 0,
+                label: { show: true, formatter: 'now', position: 'top', color: theme.fgSubtle, fontSize: 10 },
+                data: [{ name: 'now', coord: [nowTs, 1] }],
+              },
+            },
+          ],
+        }
+      }}
+    />
+  )
+}

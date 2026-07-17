@@ -272,6 +272,7 @@ async def _run_metalabeler_training(
         accuracy = float(eval_metrics["accuracy"])
         beats_baseline = accuracy > baseline
 
+        period_start, period_end = await _signal_period(instrument_type)
         metrics: dict[str, Any] = {
             **eval_metrics,
             "baseline": baseline,
@@ -283,6 +284,8 @@ async def _run_metalabeler_training(
             "instrument_type": instrument_type,
             "features": list(feature_names_for(instrument_type)),
             "feature_mask": feature_mask(instrument_type),
+            "period_start": period_start,
+            "period_end": period_end,
         }
 
         if beats_baseline:
@@ -428,6 +431,31 @@ async def predict(body: PredictRequest, ml_repo: MLModelRepo) -> ResponseEnvelop
 # as the metalabeler above; each gates or evaluates per its own semantics.
 # ══════════════════════════════════════════════════════════════════════════
 
+
+async def _signal_period(instrument_type: str) -> tuple[str | None, str | None]:
+    """Min/max signal timestamp for an instrument type — the real date span
+    the metalabeler/LSTM training dataset was drawn from (for the UI's
+    'training period' card). Honest nulls if no signals exist."""
+    from sqlalchemy import text as _sa_text
+
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                _sa_text(
+                    """
+                    SELECT MIN(s.ts) lo, MAX(s.ts) hi
+                    FROM core.signals s
+                    JOIN market_data.assets a ON a.id = s.asset_id
+                    WHERE a.instrument_type = :it
+                    """
+                ),
+                {"it": instrument_type},
+            )
+        ).first()
+    if row is None or row.lo is None:
+        return None, None
+    return row.lo.isoformat(), row.hi.isoformat()
+
 class TrainLstmRequest(BaseModel):
     """Server builds the same real labeled signal dataset as the metalabeler;
     the LSTM consumes it as feature sequences (seq_length lookback)."""
@@ -497,12 +525,18 @@ async def _run_lstm_training(
                 preds.append(float(model.linear(out[:, -1, :]).item()))
 
         pred_labels = [1 if p > 0.5 else 0 for p in preds]
-        accuracy = float(np.mean([pl == yt for pl, yt in zip(pred_labels, y_test.tolist())]))
+        y_true = y_test.tolist()
+        accuracy = float(np.mean([pl == yt for pl, yt in zip(pred_labels, y_true)]))
         baseline = max(float(y_test.mean()), 1.0 - float(y_test.mean()))
         beats_baseline = accuracy > baseline
 
+        from sklearn.metrics import precision_score, recall_score
+
+        period_start, period_end = await _signal_period(instrument_type)
         metrics: dict[str, Any] = {
             "accuracy": accuracy,
+            "precision": float(precision_score(y_true, pred_labels, zero_division=0)),
+            "recall": float(recall_score(y_true, pred_labels, zero_division=0)),
             "baseline": baseline,
             "beats_baseline": beats_baseline,
             "deployed": beats_baseline,
@@ -512,6 +546,8 @@ async def _run_lstm_training(
             "seq_length": seq_length,
             "instrument_type": instrument_type,
             "features": list(feature_names_for(instrument_type)),
+            "period_start": period_start,
+            "period_end": period_end,
         }
         if beats_baseline:
             model_type = f"LSTM_Predictor_{instrument_type}"
@@ -624,27 +660,88 @@ async def _run_hmm_training(
             )
 
         closes = pd.Series([float(b.close) for b in bars])
+        volumes = pd.Series([float(b.volume) for b in bars])
         ts = [b.ts for b in bars]
         returns = closes.pct_change()
         vol = returns.rolling(_HMM_VOL_WINDOW).std()
-        frame = pd.DataFrame({"ret": returns, "vol": vol}).dropna()
-        offset = len(closes) - len(frame)  # first usable bar index
+        # Observation matrix — the prompt's four conceptual dimensions. funding
+        # / open-interest are 0 for a SPOT asset; a zero-variance column would
+        # make GaussianHMM's "full" covariance singular, so constant columns
+        # are dropped before fitting (data_features records the full intended
+        # set; feature_columns records what actually fed the model).
+        volume_ratio = volumes / volumes.rolling(_HMM_VOL_WINDOW).mean()
+        candidates = pd.DataFrame({
+            "returns": returns,
+            "volume_ratio": volume_ratio,
+            "funding_rate": 0.0,           # SPOT — no funding stream
+            "open_interest": 0.0,          # SPOT — no OI stream
+            "volatility": vol,
+        }).dropna()
+        offset = len(closes) - len(candidates)  # first usable bar index
+        used_cols = [c for c in candidates.columns if candidates[c].nunique() > 1]
+        frame = candidates[used_cols]
 
         model = create_model("HMM_RegimeDetector", hyperparams)
         model.train(frame)
-        regimes = model.predict(frame)
+        regimes = model.predict(frame)  # already mapped 0=bear/1=neutral/2=bull
 
-        # Current regime + posterior confidence (real hmmlearn predict_proba).
+        # Per-timestep posteriors, mapped raw-state -> regime label.
         X_scaled = model.scaler.transform(frame)
-        post = model.model.predict_proba(X_scaled)
-        raw_last = model.model.predict(X_scaled)[-1]
+        raw_post = model.model.predict_proba(X_scaled)
+        n_comp = model.params["n_components"]
+        # regime_mapping: raw_state -> regime index (bijection). Invert it.
+        raw_for_regime = {v: k for k, v in model.regime_mapping.items()}
+        regime_post = np.column_stack([
+            raw_post[:, raw_for_regime[r]] if r in raw_for_regime else np.zeros(len(raw_post))
+            for r in range(n_comp)
+        ])
         current_regime = int(regimes[-1])
-        current_confidence = float(post[-1][raw_last])
+        current_confidence = float(regime_post[-1][current_regime])
 
-        counts = {int(r): int((regimes == r).sum()) for r in set(regimes.tolist())}
-        durations = _jsonable(model.evaluate(frame))
+        counts = {int(r): int((regimes == r).sum()) for r in range(n_comp)}
 
-        # Downsampled history for the UI timeline — every real point, strided.
+        # Average regime duration (consecutive same-regime runs), in bars/hours.
+        durations_by_regime: dict[int, list[int]] = {r: [] for r in range(n_comp)}
+        run_r, run_len = int(regimes[0]), 1
+        for r in regimes[1:]:
+            if int(r) == run_r:
+                run_len += 1
+            else:
+                durations_by_regime[run_r].append(run_len)
+                run_r, run_len = int(r), 1
+        durations_by_regime[run_r].append(run_len)
+        hours_per_bar = 24 if interval == "1d" else 1
+        avg_duration_hours = {
+            _REGIME_LABELS[r]: (float(np.mean(v)) * hours_per_bar if v else 0.0)
+            for r, v in durations_by_regime.items()
+        }
+        avg_duration_bars = float(np.mean([len(regimes)] + [d for v in durations_by_regime.values() for d in v]))
+
+        # Transition matrix in regime order (rows/cols = bear/neutral/bull).
+        raw_trans = model.model.transmat_
+        transition_matrix = [
+            [float(raw_trans[raw_for_regime[i]][raw_for_regime[j]]) for j in range(n_comp)]
+            for i in range(n_comp)
+        ]
+        # P(regime changes within 24 bars) = 1 - P(stay)^24 for current regime.
+        p_stay = transition_matrix[current_regime][current_regime]
+        regime_change_prob_24h = float(1.0 - p_stay ** (24 // hours_per_bar))
+        # Transition entropy (stability): avg row entropy, lower = more stable.
+        import math as _math
+        transition_entropy = float(np.mean([
+            -sum(p * _math.log(p) for p in row if p > 0) for row in transition_matrix
+        ]))
+
+        # Daily posterior bands for a smooth timeline — average the 3-regime
+        # posterior within each calendar day (kills the hourly flicker).
+        post_df = pd.DataFrame(regime_post, columns=["bear", "neutral", "bull"][:n_comp])
+        post_df["day"] = [ts[offset + i].date().isoformat() for i in range(len(post_df))]
+        daily = post_df.groupby("day", sort=True).mean()
+        regime_posteriors = [
+            {"ts": day, **{k: float(daily.loc[day, k]) for k in daily.columns}}
+            for day in daily.index
+        ]
+        # Backwards-compatible discrete history (still consumed by the old chart).
         stride = max(1, len(regimes) // 500)
         history = [
             {"ts": ts[offset + i].isoformat(), "regime": int(regimes[i])}
@@ -657,11 +754,23 @@ async def _run_hmm_training(
             "bars_used": len(frame),
             "regime_labels": _REGIME_LABELS,
             "regime_distribution": counts,
-            "avg_durations": durations,
+            "regime_counts": {_REGIME_LABELS[r]: c for r, c in counts.items()},
+            "avg_durations": _jsonable(model.evaluate(frame)),
+            "avg_duration_hours": avg_duration_hours,
+            "avg_duration_bars": avg_duration_bars,
+            "transition_matrix": transition_matrix,
+            "transition_entropy": transition_entropy,
+            "regime_change_prob_24h": regime_change_prob_24h,
             "current_regime": current_regime,
             "current_regime_label": _REGIME_LABELS.get(current_regime, str(current_regime)),
+            "current_regime_posterior": current_confidence,
             "current_confidence": current_confidence,
             "regime_history": history,
+            "regime_posteriors": regime_posteriors,
+            "data_features": ["returns", "volume_ratio", "funding_rate", "open_interest"],
+            "feature_columns": used_cols,
+            "period_start": ts[offset].isoformat(),
+            "period_end": ts[-1].isoformat(),
         }
 
         model_type = "HMM_RegimeDetector"
@@ -726,6 +835,18 @@ class RegimeOut(BaseModel):
     current_confidence: float | None
     regime_distribution: dict[str, int] | None
     regime_history: list[dict[str, Any]] | None
+    # Extended fields (owner request) — the richer regime intelligence the
+    # Strategy-page Market Regime + Research training UI render.
+    regime_counts: dict[str, int] | None = None
+    avg_duration_hours: dict[str, float] | None = None
+    transition_matrix: list[list[float]] | None = None
+    transition_entropy: float | None = None
+    regime_change_prob_24h: float | None = None
+    regime_posteriors: list[dict[str, Any]] | None = None
+    bars_used: int | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    data_features: list[str] | None = None
 
 
 @router.get(
@@ -760,4 +881,14 @@ async def get_regime() -> ResponseEnvelope[RegimeOut | None]:
         current_confidence=m.get("current_confidence"),
         regime_distribution={str(k): v for k, v in (m.get("regime_distribution") or {}).items()} or None,
         regime_history=m.get("regime_history"),
+        regime_counts=m.get("regime_counts"),
+        avg_duration_hours=m.get("avg_duration_hours"),
+        transition_matrix=m.get("transition_matrix"),
+        transition_entropy=m.get("transition_entropy"),
+        regime_change_prob_24h=m.get("regime_change_prob_24h"),
+        regime_posteriors=m.get("regime_posteriors"),
+        bars_used=m.get("bars_used"),
+        period_start=m.get("period_start"),
+        period_end=m.get("period_end"),
+        data_features=m.get("data_features"),
     ))

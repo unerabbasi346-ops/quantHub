@@ -85,6 +85,8 @@ class MLModelStatusOut(BaseModel):
     status: str
     accuracy: float | None
     baseline: float | None
+    period_start: str | None = None
+    period_end: str | None = None
     deployed_at: datetime | None
     created_at: datetime
 
