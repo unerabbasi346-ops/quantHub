@@ -51,6 +51,9 @@ export interface MLModelStatus {
   model_type: string
   status: string
   accuracy: number | null
+  // Majority-class baseline the deploy gate compared against (api/ml.py) —
+  // null for models trained before baseline gating existed.
+  baseline: number | null
   deployed_at: ISOTimestamp | null
   created_at: ISOTimestamp
 }

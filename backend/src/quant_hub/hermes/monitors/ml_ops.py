@@ -27,6 +27,9 @@ class MLModelStatus:
     model_type: str
     status: str
     accuracy: float | None
+    # Majority-class baseline from metrics JSONB (api/ml.py's _run_training) —
+    # null for models trained before baseline gating existed.
+    baseline: float | None
     deployed_at: datetime | None
     created_at: datetime
 
@@ -58,10 +61,14 @@ async def get_model_registry(session: AsyncSession, limit: int = 20) -> list[MLM
     out: list[MLModelStatus] = []
     for row in rows:
         accuracy = None
+        baseline = None
         if row.metrics and isinstance(row.metrics, dict):
             raw = row.metrics.get("accuracy")
             if isinstance(raw, (int, float)):
                 accuracy = float(raw)
+            raw_baseline = row.metrics.get("baseline")
+            if isinstance(raw_baseline, (int, float)):
+                baseline = float(raw_baseline)
         out.append(
             MLModelStatus(
                 model_id=str(row.id),
@@ -69,6 +76,7 @@ async def get_model_registry(session: AsyncSession, limit: int = 20) -> list[MLM
                 model_type=row.model_type,
                 status=row.status,
                 accuracy=accuracy,
+                baseline=baseline,
                 deployed_at=row.deployed_at,
                 created_at=row.created_at,
             )

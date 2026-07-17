@@ -84,6 +84,7 @@ class MLModelStatusOut(BaseModel):
     model_type: str
     status: str
     accuracy: float | None
+    baseline: float | None
     deployed_at: datetime | None
     created_at: datetime
 
