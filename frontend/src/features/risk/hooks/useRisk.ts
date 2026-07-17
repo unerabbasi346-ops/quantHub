@@ -10,10 +10,14 @@ export function useRiskSnapshot(portfolioId: string) {
     queryKey: ['risk-snapshot', portfolioId],
     queryFn: () => riskService.getSnapshot(portfolioId),
     enabled: Boolean(portfolioId),
-    // Raised from 10s (perf pass) — 10s was the fastest poll on the
-    // platform and ran even when Risk wasn't the visible page. 60s minimum
-    // per the perf pass's "nothing faster than 30s" rule; risk snapshots
-    // don't need sub-minute freshness for an intraday, not HFT, workflow.
+    // Force a fresh recompute on every page load / selector change (the
+    // backend recomputes+persists from live positions on read, fresh=true) —
+    // guarantees the snapshot date is current, never a stale cached one.
+    refetchOnMount: 'always',
+    staleTime: 0,
+    // Raised from 10s (perf pass) — 60s minimum per the perf pass's
+    // "nothing faster than 30s" rule; risk snapshots don't need sub-minute
+    // freshness for an intraday, not HFT, workflow.
     refetchInterval: 60_000,
   })
 }
