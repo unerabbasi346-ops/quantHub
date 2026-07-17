@@ -114,6 +114,7 @@ export function StrategiesShell() {
               return (
                 <button
                   key={strategy.id}
+                  suppressHydrationWarning
                   onClick={() => selectStrategy(strategy.id)}
                   aria-current={selected ? 'true' : undefined}
                   className={cn(
@@ -182,6 +183,7 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
         {TABS.map((t) => (
           <button
             key={t.key}
+            suppressHydrationWarning
             onClick={() => setTab(t.key)}
             className={cn(
               'relative px-3.5 py-2 text-sm font-medium transition-colors',

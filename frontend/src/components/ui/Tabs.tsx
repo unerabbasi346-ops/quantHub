@@ -37,6 +37,7 @@ export function Tabs({ items, defaultValue, className }: TabsProps) {
           return (
             <button
               key={item.value}
+              suppressHydrationWarning
               role="tab"
               id={`${baseId}-tab-${item.value}`}
               aria-selected={selected}

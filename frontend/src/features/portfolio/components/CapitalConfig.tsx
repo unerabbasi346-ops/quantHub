@@ -70,6 +70,7 @@ export function CapitalConfig({ portfolio, openMarketValue = 0 }: { portfolio: P
           <Button
             size="sm"
             variant="secondary"
+            suppressHydrationWarning
             onClick={() => {
               setDraft(current ?? '')
               setEditing(true)
@@ -107,6 +108,7 @@ export function CapitalConfig({ portfolio, openMarketValue = 0 }: { portfolio: P
                 </span>
                 <input
                   autoFocus
+                  suppressHydrationWarning
                   type="number"
                   inputMode="decimal"
                   min="0"
@@ -122,10 +124,10 @@ export function CapitalConfig({ portfolio, openMarketValue = 0 }: { portfolio: P
                   className="h-9 w-40 rounded-lg border border-border bg-surface pl-12 pr-3 font-mono text-sm text-fg tabular-nums focus:border-accent focus:outline-none"
                 />
               </div>
-              <Button size="sm" variant="primary" onClick={submit} disabled={mutation.isPending}>
+              <Button suppressHydrationWarning size="sm" variant="primary" onClick={submit} disabled={mutation.isPending}>
                 {mutation.isPending ? 'Saving…' : 'Save'}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={mutation.isPending}>
+              <Button suppressHydrationWarning size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={mutation.isPending}>
                 Cancel
               </Button>
             </div>

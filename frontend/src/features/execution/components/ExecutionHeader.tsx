@@ -36,6 +36,7 @@ function StrategySelector({
     <div className="relative w-full max-w-sm" ref={ref}>
       <button
         type="button"
+        suppressHydrationWarning
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
@@ -60,6 +61,7 @@ function StrategySelector({
               <button
                 key={s.id}
                 type="button"
+                suppressHydrationWarning
                 role="option"
                 aria-selected={selected}
                 onClick={() => {

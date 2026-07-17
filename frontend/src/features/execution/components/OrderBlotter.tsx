@@ -183,6 +183,7 @@ export function OrderBlotter({ orders, executions }: { orders: Order[]; executio
           {(['ALL', 'TODAY', 'FILLED', 'PENDING', 'REJECTED'] as BlotterFilter[]).map((f) => (
             <button
               key={f}
+              suppressHydrationWarning
               onClick={() => setFilter(f)}
               className={cn(
                 'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',

@@ -111,6 +111,7 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
     <Card elevation="elevated" interactive className="group relative h-full" style={{ perspective: '1600px' }}>
       <button
         type="button"
+        suppressHydrationWarning
         aria-label={flipped ? 'Show strategy summary' : 'Show asset allocation'}
         title={flipped ? 'Show strategy summary' : 'Show asset allocation'}
         onClick={(e) => {

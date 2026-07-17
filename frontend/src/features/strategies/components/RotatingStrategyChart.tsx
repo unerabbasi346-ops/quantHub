@@ -122,6 +122,7 @@ export function RotatingStrategyChart({ items }: { items: StrategyPerformance[] 
               <button
                 key={it.strategy.id}
                 type="button"
+                suppressHydrationWarning
                 role="tab"
                 aria-selected={i === index}
                 aria-label={`Show ${it.strategy.name}`}

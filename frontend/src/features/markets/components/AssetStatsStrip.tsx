@@ -34,6 +34,7 @@ export function AssetStatsStrip({
           <button
             key={asset.id}
             type="button"
+            suppressHydrationWarning
             onClick={() => onSelect(asset)}
             className={cn(
               'flex shrink-0 items-center gap-2 rounded-full border bg-surface-raised/50 px-3.5 py-2 backdrop-blur-sm transition-colors',

@@ -237,6 +237,7 @@ function BacktesterSection({
             Research capital — sandbox only
             <input
               type="number"
+              suppressHydrationWarning
               min={100}
               step={1000}
               className={cn(selectCls, 'w-32 font-mono')}
@@ -249,7 +250,7 @@ function BacktesterSection({
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg-muted">
             Strategy (platform plugins only)
-            <select className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
+            <select suppressHydrationWarning className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
               <option value="">Select strategy…</option>
               {runnable.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
@@ -258,7 +259,7 @@ function BacktesterSection({
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg-muted">
             Asset ({assets.length} with ~5yr 1h data)
-            <select className={selectCls} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+            <select suppressHydrationWarning className={selectCls} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
               <option value="">Select asset…</option>
               {assets.map((a) => (
                 <option key={a.id} value={a.symbol}>{a.symbol} · {yearsLabel(a.bars)}</option>
@@ -267,13 +268,13 @@ function BacktesterSection({
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg-muted">
             Start
-            <input type="date" className={selectCls} value={start} onChange={(e) => setStart(e.target.value)} />
+            <input suppressHydrationWarning type="date" className={selectCls} value={start} onChange={(e) => setStart(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg-muted">
             End
-            <input type="date" className={selectCls} value={end} onChange={(e) => setEnd(e.target.value)} />
+            <input suppressHydrationWarning type="date" className={selectCls} value={end} onChange={(e) => setEnd(e.target.value)} />
           </label>
-          <Button onClick={onRun} disabled={!canRun}>
+          <Button suppressHydrationWarning onClick={onRun} disabled={!canRun}>
             {pendingRunName ? 'Running…' : runMutation.isPending ? 'Starting…' : 'Run Backtest'}
           </Button>
         </div>
@@ -495,13 +496,13 @@ function ExplorerSection({
       description="Pick a strategy to browse its runs — losers included. Bold rows beat the BTC buy-and-hold benchmark. Click a row for its equity curve."
       actions={
         <div className="flex items-center gap-2">
-          <select className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
+          <select suppressHydrationWarning className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
             <option value="">All strategies</option>
             {runnable.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
-          <Button variant="ghost" size="sm" onClick={() => setProfitableOnly((v) => !v)}>
+          <Button suppressHydrationWarning variant="ghost" size="sm" onClick={() => setProfitableOnly((v) => !v)}>
             {profitableOnly ? 'Show all' : 'Profitable only'}
           </Button>
         </div>
@@ -540,7 +541,7 @@ function ExplorerSection({
                   {curveRow.total_return != null ? formatBacktestReturn(Number.parseFloat(curveRow.total_return)) : '—'}
                 </span>
               </span>
-              <Button variant="ghost" size="sm" onClick={() => setCurveRow(null)}>Close</Button>
+              <Button suppressHydrationWarning variant="ghost" size="sm" onClick={() => setCurveRow(null)}>Close</Button>
             </div>
             {curveQuery.isLoading ? (
               <div className="skeleton h-[220px] w-full" />
@@ -740,7 +741,7 @@ function TrainingSection() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-xs text-fg-muted">
             Model type
-            <select className={selectCls} value={modelType} onChange={(e) => setModelType(e.target.value)}>
+            <select suppressHydrationWarning className={selectCls} value={modelType} onChange={(e) => setModelType(e.target.value)}>
               {MODEL_OPTIONS.map((m) => (
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
@@ -750,6 +751,7 @@ function TrainingSection() {
             <label className="flex flex-col gap-1 text-xs text-fg-muted">
               Instrument type (feature set)
               <select
+                suppressHydrationWarning
                 className={selectCls}
                 value={instrumentType}
                 onChange={(e) => setInstrumentType(e.target.value as 'SPOT' | 'PERPETUAL')}
@@ -762,10 +764,10 @@ function TrainingSection() {
           {model.kind === 'hmm' && (
             <label className="flex flex-col gap-1 text-xs text-fg-muted">
               Asset (bar returns)
-              <input className={cn(selectCls, 'w-36 font-mono')} value={hmmSymbol} onChange={(e) => setHmmSymbol(e.target.value)} />
+              <input suppressHydrationWarning className={cn(selectCls, 'w-36 font-mono')} value={hmmSymbol} onChange={(e) => setHmmSymbol(e.target.value)} />
             </label>
           )}
-          <Button onClick={onTrain} disabled={busy}>
+          <Button suppressHydrationWarning onClick={onTrain} disabled={busy}>
             {busy ? 'Training…' : 'Train Model'}
           </Button>
           {model.kind === 'lstm' && (
@@ -935,7 +937,7 @@ function NotesSection({ strategies }: { strategies: Strategy[] }) {
       actions={<Badge variant="warning">local only — stored in this browser</Badge>}
     >
       <Panel className="space-y-3 p-4">
-        <select className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
+        <select suppressHydrationWarning className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
           <option value="">Select strategy…</option>
           {strategies.map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>

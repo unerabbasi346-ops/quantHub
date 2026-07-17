@@ -58,6 +58,7 @@ function AssetDropdown({ assets, active, onSelect }: { assets: Asset[]; active: 
     <div className="relative" ref={ref}>
       <button
         type="button"
+        suppressHydrationWarning
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-lg border border-border bg-surface-raised/50 px-2.5 py-1.5 text-sm hover:border-border-strong"
       >
@@ -71,6 +72,7 @@ function AssetDropdown({ assets, active, onSelect }: { assets: Asset[]; active: 
             <button
               key={a.id}
               type="button"
+              suppressHydrationWarning
               onClick={() => {
                 onSelect(a)
                 setOpen(false)
@@ -134,6 +136,7 @@ export function MarketChartSection({
               {TIMEFRAMES.map((t) => (
                 <button
                   key={t}
+                  suppressHydrationWarning
                   onClick={() => setTf(t)}
                   className={cn(
                     'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',

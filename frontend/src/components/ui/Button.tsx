@@ -64,6 +64,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
+      suppressHydrationWarning
       className={cn(
         'inline-flex items-center justify-center gap-2 rounded-lg font-medium',
         // Doc 06 §Interaction Standards — subtle hover micro-animation

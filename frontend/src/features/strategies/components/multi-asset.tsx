@@ -54,6 +54,7 @@ export function SimCapitalInput({ capital, onChange }: { capital: number; onChan
       <span className="whitespace-nowrap">Simulated capital</span>
       <input
         type="number"
+        suppressHydrationWarning
         min={100}
         step={1000}
         value={capital}
@@ -147,6 +148,7 @@ export function MultiAssetBacktestSection({ strategy, capital }: { strategy: Str
         perAsset.length > 0 ? (
           <button
             type="button"
+            suppressHydrationWarning
             onClick={runFresh}
             disabled={sweeping}
             className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised/60 px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:border-border-strong disabled:opacity-50"
@@ -204,6 +206,7 @@ export function MultiAssetBacktestSection({ strategy, capital }: { strategy: Str
                 <div key={r.id} className={cn(ret >= 0 ? 'bg-profit/[0.04]' : 'bg-risk/[0.05]')}>
                   <button
                     type="button"
+                    suppressHydrationWarning
                     onClick={() => setExpanded(open ? null : r.id)}
                     className="grid w-full grid-cols-[1.6fr_1fr_1fr_1fr_1fr_1fr_0.8fr_auto] items-center gap-2 px-3 py-2.5 text-left font-mono text-xs tabular-nums transition-colors hover:bg-surface-hover"
                   >

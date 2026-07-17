@@ -185,6 +185,7 @@ export function TopBar() {
         <div className="relative" ref={moreRef}>
           <button
             type="button"
+            suppressHydrationWarning
             aria-haspopup="menu"
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen((v) => !v)}
@@ -231,6 +232,7 @@ export function TopBar() {
       <div className="relative lg:hidden" ref={mobileRef}>
         <button
           type="button"
+          suppressHydrationWarning
           aria-label="Open navigation menu"
           aria-haspopup="menu"
           aria-expanded={mobileOpen}
@@ -274,6 +276,7 @@ export function TopBar() {
             palette (Doc 13/05). No longer a styled placeholder. */}
         <button
           type="button"
+          suppressHydrationWarning
           onClick={openCommandPalette}
           aria-label="Search (opens command palette)"
           className="hidden max-w-xs flex-1 items-center gap-2 rounded-lg border border-border/70 bg-surface-raised/60 py-2 pl-3 pr-2 text-left backdrop-blur-md transition-colors hover:border-border-strong/80 hover:bg-surface-hover/70 xl:flex"
@@ -286,6 +289,7 @@ export function TopBar() {
         <Tooltip content={mounted && theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
           <button
             type="button"
+            suppressHydrationWarning
             aria-label="Toggle theme"
             onClick={toggleTheme}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
@@ -300,6 +304,7 @@ export function TopBar() {
         <Tooltip content="Notifications — planned, no alert pipeline yet">
           <button
             type="button"
+            suppressHydrationWarning
             aria-label="Notifications (coming soon)"
             className="relative flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg"
           >
@@ -314,6 +319,7 @@ export function TopBar() {
         <Tooltip content="Local operator — real accounts deferred">
           <button
             type="button"
+            suppressHydrationWarning
             aria-label="Account (single-user local platform)"
             className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-surface-hover"
           >

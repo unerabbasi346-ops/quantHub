@@ -216,6 +216,7 @@ export function InstitutionalTable<TData>({
               <Search size={14} className="pointer-events-none absolute left-2.5 text-fg-subtle" />
               <input
                 type="text"
+                suppressHydrationWarning
                 value={globalFilter}
                 onChange={(e) => setGlobalFilter(e.target.value)}
                 placeholder={searchPlaceholder}
@@ -228,6 +229,7 @@ export function InstitutionalTable<TData>({
           {exportFilename && (
             <button
               type="button"
+              suppressHydrationWarning
               onClick={exportCsv}
               disabled={rows.length === 0}
               className="flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface/60 px-2.5 py-1.5 text-[11px] font-medium text-fg-muted transition-colors hover:border-border-strong hover:text-fg disabled:pointer-events-none disabled:opacity-40"
@@ -262,6 +264,7 @@ export function InstitutionalTable<TData>({
                   {header.isPlaceholder ? null : header.column.getCanSort() ? (
                     <button
                       type="button"
+                      suppressHydrationWarning
                       onClick={header.column.getToggleSortingHandler()}
                       title={sortState ? undefined : 'Sort — shift-click to add a secondary sort'}
                       className={cn(
