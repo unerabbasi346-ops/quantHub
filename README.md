@@ -69,9 +69,13 @@ npm run dev
 
 Visit `http://localhost:3000` for the dashboard, `http://localhost:8000/v1/health` to confirm the backend is running.
 
-Run the test suite:
+Run the test suite (one-time setup: a dedicated `<db>_test` database, kept
+schema-isolated from your dev data — tests/conftest.py derives its name from
+`DATABASE_URL` automatically, so nothing in .env changes):
 ```bash
 cd backend
+createdb quant_hub_test   # or: docker exec <postgres-container> psql -U quant_hub -d postgres -c "CREATE DATABASE quant_hub_test OWNER quant_hub"
+DATABASE_URL=postgresql://quant_hub:<password>@localhost:5432/quant_hub_test alembic upgrade head
 PYTHONPATH=src pytest tests/
 ```
 
