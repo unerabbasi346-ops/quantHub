@@ -26,7 +26,7 @@ import { motion } from 'framer-motion'
 import { ArrowUpRight, Brain, RotateCw } from 'lucide-react'
 import { Badge, Card, DonutChart, Sparkline } from '@/components/ui'
 import { cn } from '@/lib/utils/cn'
-import { formatCapital, formatMaxDrawdownPct, formatReturn, formatSharpe, formatSignalStrength, formatTimestamp, formatWinRate } from '@/lib/utils/format'
+import { formatBacktestReturn, formatMaxDrawdownPct, formatSharpe, formatSignalStrength, formatTimestamp, formatWinRate } from '@/lib/utils/format'
 import { useSyncStore } from '@/lib/store/sync'
 import { useBacktests, useStrategyMetrics } from '../hooks/useStrategies'
 import type { StrategyPerformance } from '../hooks/useStrategyPerformance'
@@ -35,7 +35,7 @@ import { isReferenceStrategy, REFERENCE_BADGE, REFERENCE_CAPTION, REFERENCE_TOOL
 function returnPct(v: string | null): { text: string; tone: 'profit' | 'risk' | 'muted' } {
   if (v === null) return { text: '—', tone: 'muted' }
   const n = Number.parseFloat(v)
-  return { text: formatReturn(n), tone: n >= 0 ? 'profit' : 'risk' }
+  return { text: formatBacktestReturn(n), tone: n >= 0 ? 'profit' : 'risk' }
 }
 
 function fmtSignalTime(iso: string): string {
@@ -77,18 +77,26 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
   // it the default selection everywhere else (e.g. the /strategies list).
   const setSyncedStrategyId = useSyncStore((s) => s.setSelectedStrategyId)
 
-  // Back face: allocation by symbol, weighted by |final_capital| per backtest
-  // (a real "how much of this strategy's tested capital sits in which asset"
-  // view — not a live portfolio holding).
-  const byAsset = new Map<string, number>()
+  // Back face (owner request): slice per backtested asset, sized by TRADE
+  // COUNT — the most actively backtested asset gets the largest slice. Label
+  // carries symbol + trades + return%; all real analytics.backtests fields.
+  const byAsset = new Map<string, { trades: number; ret: number | null }>()
+  let totalTrades = 0
   for (const bt of backtestsQuery.data ?? []) {
-    if (!bt.symbol || bt.final_capital == null) continue
-    const v = Math.abs(Number.parseFloat(bt.final_capital))
-    if (v === 0) continue
-    byAsset.set(bt.symbol, (byAsset.get(bt.symbol) ?? 0) + v)
+    if (!bt.symbol || bt.trade_count == null || bt.trade_count === 0) continue
+    const prev = byAsset.get(bt.symbol) ?? { trades: 0, ret: null }
+    byAsset.set(bt.symbol, {
+      trades: prev.trades + bt.trade_count,
+      // Latest listed return for that symbol (rows come newest-first).
+      ret: prev.ret ?? (bt.total_return != null ? Number.parseFloat(bt.total_return) : null),
+    })
+    totalTrades += bt.trade_count
   }
   const allocation = [...byAsset.entries()]
-    .map(([name, value]) => ({ name, value }))
+    .map(([symbol, d]) => ({
+      name: `${symbol} · ${d.trades} trades${d.ret != null ? ` · ${formatBacktestReturn(d.ret)}` : ''}`,
+      value: d.trades,
+    }))
     .sort((a, b) => b.value - a.value)
 
   // Benchmark comparison (Rule 5): the latest backtest's own strategy return
@@ -170,7 +178,7 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
                 <div className="text-[11px] text-fg-subtle">{hasBacktest ? 'latest backtest total return' : 'no backtest run yet'}</div>
                 {benchmarkReturn != null && (
                   <div className={cn('mt-1 text-[11px]', beatsBenchmark ? 'text-profit' : 'text-fg-subtle')}>
-                    vs BTC {formatReturn(benchmarkReturn)} {beatsBenchmark ? '· beats benchmark' : ''}
+                    vs BTC {formatBacktestReturn(benchmarkReturn)} {beatsBenchmark ? '· beats benchmark' : ''}
                   </div>
                 )}
               </div>
@@ -226,7 +234,7 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
             </span>
             <div className="min-w-0">
               <h3 className="truncate text-sm font-semibold tracking-tight text-fg">{strategy.name}</h3>
-              <p className="mt-0.5 truncate text-[11px] text-fg-subtle">Backtest capital by asset</p>
+              <p className="mt-0.5 truncate text-[11px] text-fg-subtle">Backtest activity by asset (trade count)</p>
             </div>
           </div>
           <div className="flex flex-1 items-center justify-center">
@@ -236,8 +244,9 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
               <DonutChart
                 data={allocation}
                 height={180}
-                centerLabel="capital"
-                valueFormat={(v) => formatCapital(v)}
+                centerValue={String(allocation.length)}
+                centerLabel={`asset${allocation.length === 1 ? '' : 's'} · ${totalTrades.toLocaleString()} trades`}
+                valueFormat={(v) => `${v.toLocaleString()} trades`}
               />
             ) : (
               <p className="text-center text-[11px] text-fg-subtle">No completed backtests with a recorded asset yet.</p>

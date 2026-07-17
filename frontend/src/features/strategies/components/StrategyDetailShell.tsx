@@ -73,6 +73,7 @@ import { ConsecutiveRunsChart, ConvictionEquityChart, SignalStrengthDistribution
 import { MLIntelligenceSection } from './MLIntelligence'
 import { BacktestReturnTile, PendingMetricTile, RealMetricTile, RealRingTile } from './metric-tiles'
 import { BacktestRunCards, RecentSignalRows } from './rich-lists'
+import { MultiAssetBacktestSection, SimCapitalInput, TradePnlDistributionSection, useSimCapital } from './multi-asset'
 import { fmtMoney, fmtReturnPct } from './tables'
 
 // Signal history depth for the detail workspace's derived analytics (monthly
@@ -381,10 +382,11 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
 
   const tradeCount = latest?.trade_count ?? results?.trade_count ?? null
   const retNum = latest?.total_return != null ? Number.parseFloat(latest.total_return) : null
+  const [capital, setCapital] = useSimCapital(strategy.id)
 
   return (
     <>
-      {/* ── Section 1: title + real-data pill strip ── */}
+      {/* ── Section 1: title + real-data pill strip + simulated capital ── */}
       <Panel className="space-y-4 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
@@ -401,14 +403,19 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
               {strategy.description ?? (reference ? REFERENCE_CAPTION : 'No description.')} · <span className="font-mono">v{strategy.version}</span>
             </p>
           </div>
+          <SimCapitalInput capital={capital} onChange={setCapital} />
         </div>
         <StatPillStrip strategy={strategy} totalSignals={signals.length} validity={validity} latest={latest} latestSignal={latestSignal} />
       </Panel>
 
+      {/* ── Multi-asset backtest view (owner request): the strategy page's
+          default backtest presentation — never a single asset only. ── */}
+      <MultiAssetBacktestSection strategy={strategy} capital={capital} />
+
       {/* ── ML Intelligence — prominent, placed right after the header per
           owner request (see MLIntelligence.tsx's module docstring for why
           this is a Section rather than a page-wide tab). ── */}
-      <MLIntelligenceSection signals={signals} symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null} />
+      <MLIntelligenceSection signals={signals} symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null} capital={capital} />
 
       {/* ── Section 2: equity/conviction curve (60%) + performance metrics grid (40%) ── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
@@ -570,24 +577,7 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
       <OrderFlow query={backtestsQuery} results={results} fillRate={fillRate} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Section icon={<Sigma size={16} />} title="Trade P&L distribution" description="Distribution of realized trade outcomes by magnitude.">
-          <Panel className="flex items-start gap-3 p-5">
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warning-soft text-warning">
-              <ShieldQuestion size={16} />
-            </span>
-            <div>
-              <div className="flex items-center gap-2 text-sm font-medium text-fg">
-                — <Badge variant="warning">pending backend computation</Badge>
-              </div>
-              <p className="mt-1 text-xs leading-relaxed text-fg-muted">
-                Backtest runs store aggregate results only (created/filled/rejected order counts, realized/unrealized P&L
-                totals) — there is no per-trade fill record to bucket into a distribution. Per-order fills exist for live
-                portfolio executions, not backtest replays, so bucketing those would misattribute a different data source
-                to this chart. Shown honestly rather than approximated.
-              </p>
-            </div>
-          </Panel>
-        </Section>
+        <TradePnlDistributionSection strategyId={strategy.id} />
 
         <Section
           icon={<Activity size={16} />}
@@ -623,26 +613,20 @@ function StrategyDetailBody({ strategy }: { strategy: Strategy }) {
         {backtestsQuery.isSuccess && backtests.length > 0 && <BacktestRunCards backtests={backtests} />}
       </Section>
 
-      {/* Market Analytics + Risk Analytics — Doc 06 lists both as sections
-          every strategy workspace owns. Market Context is real (reuses the
-          same asset/bar data the Markets page renders, for this strategy's
-          configured symbol). Strategy-level risk is honestly deferred: risk
-          is computed per-portfolio (see the Risk workspace), not per-strategy
-          yet, so this is a disclosure, not a fabricated score. */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <MarketContext symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null} />
-        <RiskDisclosure />
-      </div>
+      {/* Market Analytics — real instrument context. (Risk Analytics
+          removed permanently, owner request: per-strategy risk attribution
+          belongs to the Risk workspace, not a deferred card here.) */}
+      <MarketContext symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null} />
 
-      {/* Supporting widgets */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <RecentSignals
-          query={signalsQuery}
-          signals={signals}
-          symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null}
-        />
-        <BacktestPanel query={backtestsQuery} latest={latest} count={backtests.length} />
-      </div>
+      {/* Signals grouped by source (owner request): live signals emitted
+          since the strategy was registered vs historical backtest-replay
+          signals — never mixed without context. */}
+      <GroupedSignals
+        query={signalsQuery}
+        signals={signals}
+        strategy={strategy}
+        symbol={typeof strategy.config?.symbol === 'string' ? (strategy.config.symbol as string) : null}
+      />
     </>
   )
 }
@@ -765,31 +749,6 @@ function MarketContext({ symbol }: { symbol: string | null }) {
   )
 }
 
-// ── Risk Analytics: honest deferral, matching the Risk workspace's own
-//    "Not computed" pattern rather than inventing a per-strategy score. ──
-function RiskDisclosure() {
-  return (
-    <Section title="Risk analytics" description="Per-strategy risk attribution.">
-      <Panel className="flex items-start gap-3 p-5">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-warning-soft text-warning">
-          <ShieldQuestion size={16} />
-        </span>
-        <div>
-          <div className="flex items-center gap-2 text-sm font-medium text-fg">
-            — <Badge variant="warning">deferred</Badge>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-fg-muted">
-            Risk (exposure, leverage, VaR) is computed per-portfolio today, not per-strategy — see the Risk workspace
-            for the portfolios this strategy trades in. A strategy-level attribution would need to trace positions
-            back to originating signals, which the platform doesn&apos;t do yet. Shown honestly rather than as a
-            fabricated score.
-          </p>
-        </div>
-      </Panel>
-    </Section>
-  )
-}
-
 function Meta({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -799,70 +758,65 @@ function Meta({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function RecentSignals({
+// Signals grouped by source (owner request): "live" = emitted at-or-after the
+// strategy's registration timestamp (the strategy was actually running);
+// "backtest" = historical replay timestamps before registration. Deterministic
+// rule from real fields, no heuristics on gaps.
+function GroupedSignals({
   query,
   signals,
+  strategy,
   symbol,
 }: {
   query: ReturnType<typeof useSignals>
   signals: Signal[]
+  strategy: Strategy
   symbol: string | null
 }) {
-  const recent = [...signals].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()).slice(0, 8)
-  return (
-    <Section
-      title="Recent signals"
-      description="Most recent signals emitted by this strategy — signal strength, direction and validation at a glance."
-      actions={query.isSuccess ? <Badge variant="neutral">{signals.length}</Badge> : null}
-    >
-      {query.isLoading && <div className="rounded-xl border border-border/60 p-4"><SkeletonTable rows={5} cols={3} /></div>}
-      {query.isError && <ErrorState description="Could not load signals." onRetry={() => query.refetch()} />}
-      {query.isSuccess && recent.length === 0 && (
-        <Panel className="p-6"><EmptyState icon={<ListChecks size={20} />} title="No signals" description="This strategy has emitted no signals yet." /></Panel>
-      )}
-      {query.isSuccess && recent.length > 0 && <RecentSignalRows signals={recent} symbol={symbol} />}
-    </Section>
-  )
-}
+  const registeredAt = strategy.created_at ? new Date(strategy.created_at).getTime() : null
+  const ordered = [...signals].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+  const live = registeredAt != null ? ordered.filter((s) => new Date(s.ts).getTime() >= registeredAt) : []
+  const backtest = registeredAt != null ? ordered.filter((s) => new Date(s.ts).getTime() < registeredAt) : ordered
+  const fmtRange = (xs: Signal[]) => {
+    if (xs.length === 0) return null
+    const f = (ts: string) => new Date(ts).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+    const newest = f(xs[0].ts)
+    const oldest = f(xs[xs.length - 1].ts)
+    return newest === oldest ? newest : `${oldest} – ${newest}`
+  }
 
-function BacktestPanel({
-  query,
-  latest,
-  count,
-}: {
-  query: ReturnType<typeof useBacktests>
-  latest: import('../types').Backtest | null
-  count: number
-}) {
+  if (query.isLoading) return <div className="rounded-xl border border-border/60 p-4"><SkeletonTable rows={5} cols={3} /></div>
+  if (query.isError) return <ErrorState description="Could not load signals." onRetry={() => query.refetch()} />
+  if (signals.length === 0)
+    return (
+      <Panel className="p-6"><EmptyState icon={<ListChecks size={20} />} title="No signals" description="This strategy has emitted no signals yet." /></Panel>
+    )
+
   return (
-    <Section
-      title="Backtest results"
-      description="Results from replaying this strategy over historical data."
-      actions={query.isSuccess ? <Badge variant="neutral">{count}</Badge> : null}
-    >
-      {query.isLoading && <div className="skeleton h-40 w-full" />}
-      {query.isError && <ErrorState description="Could not load backtests." onRetry={() => query.refetch()} />}
-      {query.isSuccess && !latest && (
-        <Panel className="p-6">
-          <EmptyState title="No backtest runs" description="This strategy has no backtest yet — return/fills are shown as “—”, never fabricated." />
-        </Panel>
-      )}
-      {latest && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Total return" value={fmtReturnPct(latest.total_return)} tone={latest.total_return && Number.parseFloat(latest.total_return) >= 0 ? 'profit' : 'risk'} />
-            <StatCard label="Fills" value={latest.results?.orders_filled ?? latest.trade_count ?? '—'} />
-            <StatCard label="Final capital" value={fmtMoney(latest.final_capital)} />
-            <StatCard label="Realized P&L" value={latest.results ? fmtMoney(latest.results.realized_pnl) : '—'} tone={latest.results && Number.parseFloat(latest.results.realized_pnl) >= 0 ? 'profit' : 'risk'} />
-          </div>
-          {latest.reproducibility_hash && (
-            <p className="rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[11px] text-fg-subtle" title={latest.reproducibility_hash}>
-              determinism hash · {latest.reproducibility_hash.slice(0, 20)}…
-            </p>
-          )}
-        </div>
-      )}
-    </Section>
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <Section
+        title="Live signals"
+        description={`Signals emitted since this strategy was registered (${fmtDate(strategy.created_at)}).`}
+        actions={<Badge variant="profit">{live.length}</Badge>}
+      >
+        {live.length === 0 ? (
+          <Panel className="p-6"><EmptyState title="No live signals yet" description="Nothing emitted since registration — everything below is backtest replay." /></Panel>
+        ) : (
+          <RecentSignalRows signals={live.slice(0, 8)} symbol={symbol} />
+        )}
+      </Section>
+      <Section
+        title="Backtest signals"
+        description={backtest.length > 0 ? `Historical simulation signals — ${fmtRange(backtest)} period.` : 'Historical simulation signals.'}
+        actions={<Badge variant="neutral">{backtest.length}</Badge>}
+      >
+        {backtest.length === 0 ? (
+          <Panel className="p-6"><EmptyState title="No backtest signals" description="No replay signals recorded." /></Panel>
+        ) : (
+          <RecentSignalRows signals={backtest.slice(0, 8)} symbol={symbol} />
+        )}
+      </Section>
+    </div>
   )
 }
 

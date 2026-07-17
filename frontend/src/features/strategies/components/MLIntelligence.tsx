@@ -22,10 +22,11 @@ import { Badge, Card, EmptyState, Panel, Section, type BadgeVariant } from '@/co
 import { cn } from '@/lib/utils/cn'
 import { formatCapital, formatRatio, formatSignalStrength, formatTimestamp } from '@/lib/utils/format'
 import { useHermesMl } from '@/features/hermes/hooks/useHermes'
+import { useRegime } from '@/features/research/hooks/useResearch'
 import type { MLModelStatus } from '@/features/hermes/types'
 import { mlConfidencePoints } from '../analytics'
 import type { Signal } from '../types'
-import { MLConfidenceScatterChart } from './charts'
+import { MLConfidenceScatterChart, RegimeTimelineChart } from './charts'
 
 // Mirrors HeroSection.tsx/MonitoringShell.tsx's ACCURACY_CAVEAT — the model
 // registry's `accuracy` is scored on the model's OWN training set
@@ -97,7 +98,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   )
 }
 
-function SignalCard({ signal, symbol }: { signal: Signal; symbol: string | null }) {
+function SignalCard({ signal, symbol, capital }: { signal: Signal; symbol: string | null; capital: number }) {
   const isLong = signal.direction.toUpperCase() === 'LONG'
   const value = Number.parseFloat(signal.value)
   const confidence = num(signal.ml_confidence)
@@ -132,7 +133,13 @@ function SignalCard({ signal, symbol }: { signal: Signal; symbol: string | null 
         />
         <DetailRow
           label="Implied size"
-          value={size != null ? `${formatCapital(size)} (${sizePctLabel(confidence)})` : '—'}
+          value={
+            size != null
+              ? `${formatCapital(size)} (${sizePctLabel(confidence)})`
+              : // Simulated sizing from the page's capital input — same 2%/3%
+                // rule the backend applies; labeled simulated, never implied-real.
+                `${formatCapital(capital * (confidence != null && confidence > 0.7 ? 0.03 : 0.02))} (${sizePctLabel(confidence)}, simulated)`
+          }
         />
         <DetailRow
           label="ML analysis"
@@ -239,12 +246,16 @@ function ModelPerformancePanel({ models, isLoading }: { models: MLModelStatus[];
   )
 }
 
-function RegimePanel({ models, isLoading }: { models: MLModelStatus[]; isLoading: boolean }) {
-  const hmm = models.find((m) => m.model_type === 'HMM_RegimeDetector')
+const REGIME_TONE: Record<string, BadgeVariant> = { bear: 'risk', neutral: 'neutral', bull: 'profit' }
+const REGIME_NAMES: Record<string, string> = { '0': 'bear', '1': 'neutral', '2': 'bull' }
 
-  if (isLoading) return <div className="skeleton h-28 w-full" />
+function RegimePanel() {
+  const regimeQuery = useRegime()
+  const regime = regimeQuery.data ?? null
 
-  if (!hmm) {
+  if (regimeQuery.isLoading) return <div className="skeleton h-28 w-full" />
+
+  if (!regime) {
     return (
       <div className="flex flex-col items-center gap-3">
         <EmptyState
@@ -259,25 +270,36 @@ function RegimePanel({ models, isLoading }: { models: MLModelStatus[]; isLoading
     )
   }
 
+  const label = regime.current_regime_label ?? String(regime.current_regime ?? '—')
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm text-fg">{hmm.model_type}</span>
-          <Badge variant={modelStatusVariant(hmm.status)}>{hmm.status}</Badge>
+          <span className="text-sm text-fg-muted">Current regime{regime.symbol ? ` · ${regime.symbol}` : ''}</span>
+          <Badge variant={REGIME_TONE[label] ?? 'neutral'}>{label.toUpperCase()}</Badge>
+          {regime.current_confidence != null && (
+            <span className="font-mono text-xs text-fg-subtle">{(regime.current_confidence * 100).toFixed(0)}% posterior confidence</span>
+          )}
         </div>
-        <span className="text-[11px] text-fg-subtle">trained {formatTimestamp(hmm.created_at)}</span>
+        <span className="text-[11px] text-fg-subtle">trained {formatTimestamp(regime.trained_at)}</span>
       </div>
-      <p className="text-[11px] leading-relaxed text-fg-subtle">
-        A regime model is registered, but no live regime-inference endpoint exists yet to classify the current bar or
-        build a regime history — the platform doesn&apos;t persist per-bar regime predictions today. Shown honestly
-        rather than a fabricated classification.
-      </p>
+      {regime.regime_history && regime.regime_history.length > 1 && (
+        <RegimeTimelineChart history={regime.regime_history} height={140} />
+      )}
+      {regime.regime_distribution && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-fg-subtle">
+          {Object.entries(regime.regime_distribution).map(([k, v]) => (
+            <span key={k}>
+              {REGIME_NAMES[k] ?? k} <span className="font-mono text-fg-muted">{v.toLocaleString()} bars</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-export function MLIntelligenceSection({ signals, symbol }: { signals: Signal[]; symbol: string | null }) {
+export function MLIntelligenceSection({ signals, symbol, capital = 10_000 }: { signals: Signal[]; symbol: string | null; capital?: number }) {
   const mlQuery = useHermesMl()
   const models = mlQuery.data?.models ?? []
 
@@ -321,7 +343,7 @@ export function MLIntelligenceSection({ signals, symbol }: { signals: Signal[]; 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {recentSignals.map((s) => (
                 <Fragment key={s.id}>
-                  <SignalCard signal={s} symbol={symbol} />
+                  <SignalCard signal={s} symbol={symbol} capital={capital} />
                 </Fragment>
               ))}
             </div>
@@ -352,11 +374,12 @@ export function MLIntelligenceSection({ signals, symbol }: { signals: Signal[]; 
           </Panel>
         </div>
 
-        {/* Section 4: market regime */}
+        {/* Section 4: market regime — real /api/ml/regime state (train-time
+            computed from real bars) once an HMM has been trained. */}
         <div>
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Market regime</h3>
           <Panel className="p-5">
-            <RegimePanel models={models} isLoading={mlQuery.isLoading} />
+            <RegimePanel />
           </Panel>
         </div>
       </div>

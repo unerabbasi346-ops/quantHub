@@ -2,7 +2,7 @@
 // API Layer: all backend communication through centralized client — Doc 08 §API Layer
 // Per Doc 00 §14.11
 import { apiClient } from '@/lib/api/client'
-import type { Backtest, ComputedMetrics, MonthlyReturn, Signal, Strategy } from '../types'
+import type { Backtest, ComputedMetrics, MonthlyReturn, Signal, Strategy, TradePnlDistribution } from '../types'
 
 export const strategiesService = {
   // The registry — every registered strategy (api/v1/strategies.py, Step 4.5).
@@ -26,4 +26,7 @@ export const strategiesService = {
   // api/v1/strategies.py PATCH /strategies/{id}/status). The first real write.
   setStatus: (strategyId: string, status: 'ACTIVE' | 'INACTIVE') =>
     apiClient.patch<Strategy>(`/v1/strategies/${strategyId}/status`, { status }),
+  // Server-computed histogram of realized trade P&L (core.executions).
+  getTradePnlDistribution: (strategyId: string) =>
+    apiClient.get<TradePnlDistribution>(`/v1/strategies/${strategyId}/trade-pnl-distribution`),
 }

@@ -428,3 +428,88 @@ export function SignalStrengthDistributionChart({
     />
   )
 }
+
+// ── Regime timeline: step line of HMM regime states over time (0=bear,
+//    1=neutral, 2=bull) — real train-time history from /api/ml/regime. ──
+export function RegimeTimelineChart({ history, height = 160 }: { history: { ts: string; regime: number }[]; height?: number }) {
+  if (history.length < 2) {
+    return (
+      <div style={{ height }}>
+        <EmptyState title="No regime history" description="Train the HMM regime detector to build a history." />
+      </div>
+    )
+  }
+  const names = ['bear', 'neutral', 'bull']
+  return (
+    <Chart
+      height={height}
+      ariaLabel="Market regime timeline"
+      option={(theme: ChartTheme) => {
+        const axis = chartAxis(theme)
+        const tone = [theme.risk, theme.borderStrong, theme.profit]
+        return {
+          tooltip: chartTooltip(theme, {
+            trigger: 'item',
+            formatter: (p: unknown) => {
+              const d = p as { value: [number, number] }
+              return `${new Date(d.value[0]).toLocaleString()}<br/><b>${names[d.value[1]] ?? d.value[1]}</b>`
+            },
+          }),
+          grid: { left: 64, right: 16, top: 12, bottom: 28 },
+          xAxis: { type: 'time', ...axis, splitLine: { show: false } },
+          yAxis: {
+            type: 'value', min: 0, max: 2, interval: 1, ...axis,
+            axisLabel: { ...axis.axisLabel, formatter: (v: number) => names[v] ?? String(v) },
+          },
+          series: [{
+            type: 'line', step: 'end', showSymbol: false,
+            lineStyle: { width: 1.5, color: theme.info },
+            data: history.map((h) => {
+              const v: [number, number] = [new Date(h.ts).getTime(), h.regime]
+              return { value: v, itemStyle: { color: tone[h.regime] ?? theme.info } }
+            }),
+          }],
+        }
+      }}
+    />
+  )
+}
+
+// ── Feature importance: horizontal bars from a model's real
+//    feature_importance metrics (XGBoost.evaluate) — never fabricated. ──
+export function FeatureImportanceChart({ importance, height = 220 }: { importance: Record<string, number>; height?: number }) {
+  const entries = Object.entries(importance).sort((a, b) => a[1] - b[1])
+  if (entries.length === 0) {
+    return (
+      <div style={{ height }}>
+        <EmptyState title="No feature importances" description="This model type does not report feature importance." />
+      </div>
+    )
+  }
+  return (
+    <Chart
+      height={height}
+      ariaLabel="Feature importance"
+      option={(theme: ChartTheme) => {
+        const axis = chartAxis(theme)
+        return {
+          tooltip: chartTooltip(theme, {
+            formatter: (p: unknown) => {
+              const d = p as { name: string; value: number }
+              return `${d.name}<br/><b>${d.value.toFixed(4)}</b>`
+            },
+          }),
+          grid: { left: 110, right: 24, top: 8, bottom: 24 },
+          xAxis: { type: 'value', ...axis },
+          yAxis: { type: 'category', data: entries.map(([k]) => k), ...axis },
+          series: [{
+            type: 'bar',
+            data: entries.map(([, v]) => v),
+            itemStyle: { color: theme.info, borderRadius: [0, 3, 3, 0] },
+            barMaxWidth: 16,
+          }],
+        }
+      }}
+    />
+  )
+}

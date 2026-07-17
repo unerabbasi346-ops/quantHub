@@ -28,6 +28,16 @@ export function formatReturn(value: number): string {
   return `${sign}${Math.abs(pct).toFixed(2)}%`
 }
 
+// Backtest total returns — ALWAYS a percentage, never the bps treatment
+// above (owner request): "+0.016%" beats "+1.61 bps" in a backtest context.
+// 3dp below 0.1% so tiny returns keep full precision.
+export function formatBacktestReturn(value: number): string {
+  if (!Number.isFinite(value)) return '—'
+  const pct = value * 100
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${Math.abs(pct).toFixed(Math.abs(pct) >= 0.1 ? 2 : 3)}%`
+}
+
 // Sharpe/Sortino/Calmar-style ratios — always 2dp, with a "~0.00" tell for
 // values too close to zero for 2dp to distinguish from noise.
 export function formatRatio(value: number): string {

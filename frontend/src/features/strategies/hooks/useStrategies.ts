@@ -66,3 +66,11 @@ export function useStrategyMetrics(strategyId: string) {
     enabled: Boolean(strategyId),
   })
 }
+
+export function useTradePnlDistribution(strategyId: string) {
+  return useQuery({
+    queryKey: ['trade-pnl-distribution', strategyId],
+    queryFn: () => strategiesService.getTradePnlDistribution(strategyId),
+    enabled: Boolean(strategyId),
+  })
+}

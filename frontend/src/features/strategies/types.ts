@@ -119,3 +119,23 @@ export interface MonthlyReturn {
   realized_pnl: string
   trade_count: number
 }
+
+// GET /v1/strategies/{id}/trade-pnl-distribution — server-computed histogram
+// over realized execution P&L; empty buckets/nulls when no closed trades.
+export interface PnlBucket {
+  bucket_min: string
+  bucket_max: string
+  count: number
+  total_pnl: string
+}
+
+export interface TradePnlDistribution {
+  buckets: PnlBucket[]
+  trade_count: number
+  win_count: number
+  loss_count: number
+  avg_win: string | null
+  avg_loss: string | null
+  best_trade: string | null
+  worst_trade: string | null
+}

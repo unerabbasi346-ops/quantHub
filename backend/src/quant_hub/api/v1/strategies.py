@@ -75,6 +75,7 @@ from quant_hub.domain.strategy_engine.implied_sizing import (
     compute_implied_leverage,
     compute_implied_size_usdt,
 )
+from quant_hub.domain.strategy_engine.signal_quality import evaluate_signal_quality
 from quant_hub.domain.strategy_engine.strategy import MarketDataView
 from quant_hub.infrastructure.backtesting.point_in_time_view import PointInTimeMarketDataView
 from quant_hub.ml.feature_engineering import compute_signal_features, feature_names_for
@@ -280,10 +281,19 @@ class SignalOut(BaseModel):
     ml_tp_suggestion: Decimal | None = None
     ml_sl_suggestion: Decimal | None = None
     ml_breakeven: Decimal | None = None
+    # ── SIGNAL QUALITY (read-time, domain/strategy_engine/signal_quality.py) —
+    # a triage SUGGESTION computed from available inputs only (strength always;
+    # ML agreement only when a deployed model scored this signal; regime only
+    # when a regime detector is wired — currently never, honest None). Never
+    # persisted, never a guarantee.
+    quality_score: Decimal | None = None
+    quality_recommendation: str | None = None  # TRADE | SKIP | REVIEW
+    quality_reasons: list[str] = []
 
     @field_serializer(
         "value", "implied_size_usdt", "implied_leverage", "ml_confidence",
         "ml_probability", "ml_tp_suggestion", "ml_sl_suggestion", "ml_breakeven",
+        "quality_score",
         when_used="json",
     )
     def _serialize_decimal(self, value: Decimal | None) -> str | None:
@@ -300,6 +310,10 @@ class SignalOut(BaseModel):
     ) -> "SignalOut":
         direction = compute_direction(signal.value)
         assert_direction_matches_value(signal.value, direction)  # Task 4 consistency check
+        quality = evaluate_signal_quality(
+            signal.value,
+            ml_probability=ml_insights.probability if ml_insights else None,
+        )
         return cls(
             id=signal.id,
             strategy_id=signal.strategy_id,
@@ -318,6 +332,9 @@ class SignalOut(BaseModel):
             ml_tp_suggestion=ml_insights.tp_suggestion if ml_insights else None,
             ml_sl_suggestion=ml_insights.sl_suggestion if ml_insights else None,
             ml_breakeven=ml_insights.breakeven if ml_insights else None,
+            quality_score=quality.quality_score,
+            quality_recommendation=quality.recommendation,
+            quality_reasons=list(quality.reasons),
         )
 
 
@@ -738,3 +755,101 @@ async def set_strategy_status(
         )
     await session.commit()
     return ok(StrategyOut.from_registered(updated))
+
+
+class PnlBucketOut(BaseModel):
+    """One equal-width histogram bucket over this strategy's realized trade
+    P&L rows (core.executions joined via core.orders) — server-computed,
+    never binned client-side."""
+
+    bucket_min: Decimal
+    bucket_max: Decimal
+    count: int
+    total_pnl: Decimal
+
+    @field_serializer("bucket_min", "bucket_max", "total_pnl", when_used="json")
+    def _ser(self, v: Decimal) -> str:
+        return format(v, "f")
+
+
+class TradePnlDistributionOut(BaseModel):
+    buckets: list[PnlBucketOut]
+    trade_count: int
+    win_count: int
+    loss_count: int
+    avg_win: Decimal | None
+    avg_loss: Decimal | None
+    best_trade: Decimal | None
+    worst_trade: Decimal | None
+
+    @field_serializer("avg_win", "avg_loss", "best_trade", "worst_trade", when_used="json")
+    def _ser(self, v: Decimal | None) -> str | None:
+        return None if v is None else format(v, "f")
+
+
+@router.get(
+    "/strategies/{strategy_id}/trade-pnl-distribution",
+    response_model=ResponseEnvelope[TradePnlDistributionOut],
+    summary="Histogram of realized trade P&L across this strategy's executions",
+)
+async def get_trade_pnl_distribution(
+    strategy_id: UUID,
+    repo: StrategyRepo,
+    session: DbSession,
+) -> ResponseEnvelope[TradePnlDistributionOut]:
+    strategy = await repo.get_by_id(strategy_id)
+    if strategy is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ErrorCode.RESOURCE_NOT_FOUND,
+            f"Strategy {strategy_id} not found",
+        )
+    rows = (
+        await session.execute(
+            sa_text(
+                """
+                SELECT e.realized_pnl
+                FROM core.executions e
+                JOIN core.orders o ON e.order_id = o.id
+                WHERE o.strategy_id = :sid
+                  AND e.realized_pnl IS NOT NULL
+                  AND e.realized_pnl != 0
+                """
+            ),
+            {"sid": strategy_id},
+        )
+    ).scalars().all()
+
+    pnls = [Decimal(r) for r in rows]
+    if not pnls:
+        return ok(TradePnlDistributionOut(
+            buckets=[], trade_count=0, win_count=0, loss_count=0,
+            avg_win=None, avg_loss=None, best_trade=None, worst_trade=None,
+        ))
+
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    lo, hi = min(pnls), max(pnls)
+    n_buckets = 10
+    width = (hi - lo) / n_buckets if hi > lo else Decimal("1")
+    buckets: list[PnlBucketOut] = []
+    for i in range(n_buckets):
+        bmin = lo + width * i
+        # Last bucket is closed on the right so `hi` itself lands in it.
+        bmax = lo + width * (i + 1)
+        members = [p for p in pnls if (bmin <= p < bmax) or (i == n_buckets - 1 and p == hi)]
+        buckets.append(PnlBucketOut(
+            bucket_min=bmin, bucket_max=bmax,
+            count=len(members), total_pnl=sum(members, Decimal("0")),
+        ))
+
+    return ok(TradePnlDistributionOut(
+        buckets=buckets,
+        trade_count=len(pnls),
+        win_count=len(wins),
+        loss_count=len(losses),
+        avg_win=(sum(wins, Decimal("0")) / len(wins)) if wins else None,
+        avg_loss=(sum(losses, Decimal("0")) / len(losses)) if losses else None,
+        best_trade=hi,
+        worst_trade=lo,
+    ))
