@@ -92,12 +92,15 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
     })
     totalTrades += bt.trade_count
   }
+  // Clean the perp ":USDT" suffix for display ("ONDO/USDT:USDT" -> "ONDO/USDT").
+  const cleanSym = (s: string) => s.split(':')[0]
   const allocation = [...byAsset.entries()]
     .map(([symbol, d]) => ({
-      name: `${symbol} · ${d.trades} trades${d.ret != null ? ` · ${formatBacktestReturn(d.ret)}` : ''}`,
+      name: `${cleanSym(symbol)} · ${d.trades} trades${d.ret != null ? ` · ${formatBacktestReturn(d.ret)}` : ''}`,
       value: d.trades,
     }))
     .sort((a, b) => b.value - a.value)
+  const soleAsset = byAsset.size === 1 ? cleanSym([...byAsset.keys()][0]) : null
 
   // Benchmark comparison (Rule 5): the latest backtest's own strategy return
   // vs BTC/USDT buy-and-hold over the same window — both real, both from the
@@ -235,7 +238,9 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
             </span>
             <div className="min-w-0">
               <h3 className="truncate text-sm font-semibold tracking-tight text-fg">{strategy.name}</h3>
-              <p className="mt-0.5 truncate text-[11px] text-fg-subtle">Backtest activity by asset (trade count)</p>
+              <p className="mt-0.5 truncate text-[11px] text-fg-subtle">
+                {soleAsset ? `Tested on ${soleAsset} only` : 'Backtest activity by asset (trade count)'}
+              </p>
             </div>
           </div>
           <div className="flex flex-1 items-center justify-center">
@@ -246,7 +251,7 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
                 data={allocation}
                 height={180}
                 centerValue={String(allocation.length)}
-                centerLabel={`asset${allocation.length === 1 ? '' : 's'} · ${totalTrades.toLocaleString()} trades`}
+                centerLabel={`asset${allocation.length === 1 ? '' : 's'} tested`}
                 valueFormat={(v) => `${v.toLocaleString()} trades`}
               />
             ) : (

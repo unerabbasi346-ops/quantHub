@@ -17,7 +17,11 @@ import { StrategyCard } from '@/features/strategies/components/StrategyCard'
 
 export function StrategySection() {
   const query = useStrategies()
-  const strategies = query.data ?? []
+  // Dashboard cards show the platform's EXECUTABLE strategies only (the
+  // reference plugins that trade through the live engine). lancaster-ml-
+  // momentum is signal-replay-only (no plugin) — its historical backtests
+  // live on the Research page, but it isn't a live-trading card here.
+  const strategies = (query.data ?? []).filter((s) => s.name.startsWith('reference-'))
   const performance = useStrategyPerformance(strategies)
 
   return (

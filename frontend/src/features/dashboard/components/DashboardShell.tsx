@@ -27,7 +27,7 @@
 'use client'
 
 import { memo, useMemo, type ReactNode } from 'react'
-import { ArrowLeftRight, CandlestickChart, Gauge, LayoutDashboard, Radio, ShieldAlert, TrendingUp, Wallet } from 'lucide-react'
+import { Activity, ArrowLeftRight, CandlestickChart, Gauge, LayoutDashboard, Radio, ShieldAlert, TrendingUp, Wallet } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import {
   Badge,
@@ -176,9 +176,12 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
   // still resolves it) but no longer used here.
   const strategiesQuery = useStrategies()
   const strategies = strategiesQuery.data ?? []
-  const activeStrategies = strategies.filter((s) => s.status.toUpperCase() === 'ACTIVE')
+  // Executable strategies only (reference plugins) — lancaster is replay-only
+  // and doesn't count as a live-trading strategy on the dashboard.
+  const executable = strategies.filter((s) => s.name.startsWith('reference-'))
+  const activeStrategies = executable.filter((s) => s.status.toUpperCase() === 'ACTIVE')
   const backtestQueries = useQueries({
-    queries: strategies.map((s) => ({
+    queries: executable.map((s) => ({
       queryKey: ['backtests', s.id],
       queryFn: () => strategiesService.getBacktests(s.id),
       enabled: Boolean(s.id),
@@ -187,8 +190,7 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
   const allBacktests: Backtest[] = backtestQueries.flatMap((q) => q.data ?? [])
   const completedBacktests = allBacktests.filter((b) => b.status === 'COMPLETED')
 
-  // Best (highest total_return) COMPLETED backtest across every registered
-  // strategy — drives both the Best Backtest and vs-BTC-Benchmark cards.
+  // Best (highest total_return) COMPLETED backtest across executable strategies.
   const bestBacktest = completedBacktests
     .filter((b) => b.total_return != null)
     .reduce<Backtest | null>((best, b) => {
@@ -201,6 +203,13 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
   const bestStrategyName = bestBacktest?.strategy_id
     ? strategies.find((s) => s.id === bestBacktest.strategy_id)?.name ?? bestBacktest.name
     : bestBacktest?.name ?? null
+
+  // System Health card — real Hermes composite health score + engine count.
+  const healthQuery = useHermesHealth()
+  const health = healthQuery.data ?? null
+  const enginesOperational = health
+    ? [health.strategy_engine.active_count > 0, health.data_pipeline.fresh_count > 0, health.ml_engine.trained_count > 0, health.execution_engine.orders_today >= 0].filter(Boolean).length
+    : 0
 
   // Market card: BTC + ETH, Doc 10 §Analytics Grid's "Market Overview" —
   // fixed reference instruments, not the page's synced/selected asset
@@ -256,11 +265,11 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
   return (
     <div className="grid grid-cols-12 gap-4">
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
-        <WidgetHead icon={<Wallet size={16} />} title="Active Strategies" />
+        <WidgetHead icon={<Activity size={16} />} title="Active Strategies" />
         <CardContent>
           <div className="font-mono text-metric font-bold tabular-nums text-fg">{activeStrategies.length}</div>
-          <div className="mt-1 text-[11px] text-fg-subtle">
-            {activeStrategies.length === 1 ? '1 strategy running' : `${activeStrategies.length} strategies running`}
+          <div className="mt-1 truncate text-[11px] text-fg-subtle" title={activeStrategies.map((s) => s.name).join(', ')}>
+            {activeStrategies.length > 0 ? activeStrategies.map((s) => s.name).join(', ') : 'none running'}
           </div>
         </CardContent>
       </Card>
@@ -273,8 +282,8 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
                 {fmtReturnPct(bestBacktest!.total_return)}
               </div>
               <div className="mt-1 truncate text-[11px] text-fg-subtle">
-                {bestStrategyName}
-                {bestBacktest?.symbol && <> · {bestBacktest.symbol}</>}
+                {bestStrategyName}{bestBacktest?.symbol && <> · {bestBacktest.symbol.split(':')[0]}</>}
+                {bestBenchmarkPct != null && <> · vs <span className={cn('font-mono', bestBenchmarkPct >= 0 ? 'text-profit' : 'text-risk')}>{fmtReturnPct(bestBacktest!.benchmark_return)}</span> BTC</>}
               </div>
             </>
           ) : (
@@ -283,20 +292,17 @@ const AnalyticsGrid = memo(function AnalyticsGrid({ portfolioId: _portfolioId }:
         </CardContent>
       </Card>
       <Card elevation="elevated" className="col-span-12 md:col-span-6 xl:col-span-3">
-        <WidgetHead icon={<ShieldAlert size={16} />} title="vs BTC Benchmark" />
+        <WidgetHead icon={<ShieldAlert size={16} />} title="System Health" />
         <CardContent>
-          {bestReturnPct != null && bestBenchmarkPct != null ? (
+          {health ? (
             <>
-              <div className="flex items-baseline gap-1.5 font-mono font-bold tabular-nums">
-                <span className={cn('text-metric', bestReturnPct >= 0 ? 'text-profit' : 'text-risk')}>{fmtReturnPct(bestBacktest!.total_return)}</span>
-                <span className="text-sm text-fg-subtle">strategy</span>
+              <div className={cn('font-mono text-metric font-bold tabular-nums', health.health_score >= 75 ? 'text-profit' : health.health_score >= 40 ? 'text-warning' : 'text-risk')}>
+                {Math.round(health.health_score)}
               </div>
-              <div className="mt-1 text-[11px] text-fg-subtle">
-                vs <span className={cn('font-mono', bestBenchmarkPct >= 0 ? 'text-profit' : 'text-risk')}>{fmtReturnPct(bestBacktest!.benchmark_return)}</span> BTC buy-and-hold, same period
-              </div>
+              <div className="mt-1 text-[11px] text-fg-subtle">{enginesOperational} engines operational</div>
             </>
           ) : (
-            <div className="text-sm text-fg-muted">No benchmark comparison yet.</div>
+            <div className="text-sm text-fg-muted">Health score unavailable.</div>
           )}
         </CardContent>
       </Card>
