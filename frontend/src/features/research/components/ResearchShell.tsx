@@ -64,15 +64,12 @@ import {
   useTrainStatus,
 } from '../hooks/useResearch'
 import { useHermesMl } from '@/features/hermes/hooks/useHermes'
+import { resolveTop20, TOP_20_SYMBOLS } from '@/lib/assets/top20'
 import type { BacktestSummary } from '../types'
 
 // Only strategies the backend can actually replay (plugin classes exist) —
 // mirrors api/v1/backtests.py's allow-list; the API 400s anything else.
 const RUNNABLE = new Set(['reference-ma-crossover', 'reference-funding-basis'])
-// ~5 years of 1h bars. Only 1h-granularity assets reach this; lower-count
-// assets are stored daily and produce degenerate 0-trade runs against the
-// reference strategies' 1h interval.
-const MIN_BARS = 40_000
 
 const selectCls =
   'h-9 rounded-lg border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent'
@@ -139,7 +136,8 @@ function BacktesterSection({
   selectedRun: BacktestSummary | null
   onSelectRun: (row: BacktestSummary | null) => void
 }) {
-  const runnable = strategies.filter((s) => RUNNABLE.has(s.name))
+  // All strategies in the selector (owner request) — but only plugin-backed
+  // ones can actually be replayed. Lancaster is signal-replay-only.
   const assetsQuery = useAssets()
   const pipelineQuery = useHermesPipeline()
   const barCounts = useMemo(() => {
@@ -147,26 +145,13 @@ function BacktesterSection({
     for (const a of pipelineQuery.data?.assets ?? []) m.set(a.symbol, a.bar_count)
     return m
   }, [pipelineQuery.data])
-  // Clean list (owner request): only assets with >= 40,000 1h bars (~5 years).
-  // These are the only assets whose bars are actually stored at 1h — the
-  // reference strategies replay at "1h", so a lower-bar (daily) asset yields a
-  // degenerate 0-trade run. Dedup by symbol (keep the most-ingested version),
-  // alphabetical.
-  const assets = useMemo(() => {
-    const bySymbol = new Map<string, { id: string; symbol: string; bars: number }>()
-    for (const a of assetsQuery.data ?? []) {
-      const bars = barCounts.get(a.symbol) ?? 0
-      if (bars < MIN_BARS) continue
-      const prev = bySymbol.get(a.symbol)
-      if (!prev || bars > prev.bars) bySymbol.set(a.symbol, { id: a.id, symbol: a.symbol, bars })
-    }
-    return [...bySymbol.values()].sort((x, y) => x.symbol.localeCompare(y.symbol))
-  }, [assetsQuery.data, barCounts])
-  // "~5 years" style label from bar count (1h bars → years).
-  const yearsLabel = (bars: number) => {
-    const yrs = bars / (24 * 365)
-    return yrs >= 1 ? `~${yrs.toFixed(1)} years` : `~${Math.round(yrs * 12)} months`
-  }
+  // Canonical top-20 clean list — display clean names, resolve each to a real
+  // DB asset (spot or perp variant with the most bars); the 7 not yet ingested
+  // render greyed with a tooltip.
+  const top20 = useMemo(
+    () => resolveTop20(assetsQuery.data ?? [], (s) => barCounts.get(s) ?? 0),
+    [assetsQuery.data, barCounts],
+  )
 
   const [capital, setCapital] = useResearchCapital()
   const [strategyId, setStrategyId] = useState('')
@@ -197,8 +182,9 @@ function BacktesterSection({
     value: Number.parseFloat(p.portfolio_value),
   }))
 
-  const strategy = runnable.find((s) => s.id === strategyId) ?? null
-  const canRun = Boolean(strategy && symbol && start && end) && !runMutation.isPending && !pendingRunName
+  const strategy = strategies.find((s) => s.id === strategyId) ?? null
+  const isReplayOnly = strategy != null && !RUNNABLE.has(strategy.name)
+  const canRun = Boolean(strategy && !isReplayOnly && symbol && start && end) && !runMutation.isPending && !pendingRunName
 
   const onRun = async () => {
     if (!strategy) return
@@ -249,20 +235,29 @@ function BacktesterSection({
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg-muted">
-            Strategy (platform plugins only)
+            Strategy
             <select suppressHydrationWarning className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
               <option value="">Select strategy…</option>
-              {runnable.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+              {strategies.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}{RUNNABLE.has(s.name) ? '' : ' (replay only)'}
+                </option>
               ))}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs text-fg-muted">
-            Asset ({assets.length} with ~5yr 1h data)
+            Asset (top 20 liquid)
             <select suppressHydrationWarning className={selectCls} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
               <option value="">Select asset…</option>
-              {assets.map((a) => (
-                <option key={a.id} value={a.symbol}>{a.symbol} · {yearsLabel(a.bars)}</option>
+              {top20.map((a) => (
+                <option
+                  key={a.clean}
+                  value={a.dbSymbol ?? ''}
+                  disabled={!a.available}
+                  title={a.available ? undefined : 'Data not yet ingested'}
+                >
+                  {a.clean}{a.available ? '' : ' — no data'}
+                </option>
               ))}
             </select>
           </label>
@@ -279,6 +274,11 @@ function BacktesterSection({
           </Button>
         </div>
 
+        {isReplayOnly && (
+          <p className="text-xs text-warning">
+            {strategy?.name} — signal replay only, no live execution. Its recorded backtests are in the explorer below; it can&apos;t be re-run here (no platform plugin).
+          </p>
+        )}
         {runMutation.isError && <p className="text-xs text-risk">{String(runMutation.error)}</p>}
         {pendingRunName && (
           <p className="text-xs text-fg-muted">
@@ -386,19 +386,25 @@ function ExplorerSection({
   loading: boolean
   onSelect: (row: BacktestSummary) => void
 }) {
-  const runnable = strategies.filter((s) => RUNNABLE.has(s.name))
   const [strategyId, setStrategyId] = useState('')
   const [profitableOnly, setProfitableOnly] = useState(false)
   const [curveRow, setCurveRow] = useState<BacktestSummary | null>(null)
 
+  // Explorer shows ALL strategies incl. lancaster (its recorded backtests are
+  // valid history), filtered to the top-20 asset universe by clean base name.
+  const top20Bases = useMemo(
+    () => new Set(TOP_20_SYMBOLS.flatMap((s) => [s, `${s.replace('PEPE/USDT', '1000PEPE/USDT')}:USDT`])),
+    [],
+  )
   const rows = useMemo(
     () =>
       backtests.filter(
         (b) =>
           (!strategyId || b.strategy_id === strategyId) &&
+          (b.symbol == null || top20Bases.has(b.symbol)) &&
           (!profitableOnly || (b.total_return != null && Number.parseFloat(b.total_return) > 0)),
       ),
-    [backtests, strategyId, profitableOnly],
+    [backtests, strategyId, profitableOnly, top20Bases],
   )
 
   const curveQuery = useEquityCurve(curveRow?.id ?? null)
@@ -498,7 +504,7 @@ function ExplorerSection({
         <div className="flex items-center gap-2">
           <select suppressHydrationWarning className={selectCls} value={strategyId} onChange={(e) => setStrategyId(e.target.value)}>
             <option value="">All strategies</option>
-            {runnable.map((s) => (
+            {strategies.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
