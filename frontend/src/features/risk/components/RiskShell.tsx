@@ -38,7 +38,6 @@ import {
 import { cn } from '@/lib/utils/cn'
 import { usePortfolios, usePositions } from '@/features/portfolio/hooks/usePortfolio'
 import type { Portfolio } from '@/features/portfolio/types'
-import { useOrdersByStrategy } from '@/features/execution/hooks/useExecution'
 import { useStrategies } from '@/features/strategies/hooks/useStrategies'
 import type { Strategy } from '@/features/strategies/types'
 import { useRiskAssessments, useRiskLimits, useRiskSnapshot } from '../hooks/useRisk'
@@ -72,24 +71,22 @@ export function RiskShell() {
   const activeId = selectedId ?? strategies[0]?.id ?? ''
   const activeStrategy = strategies.find((s) => s.id === activeId) ?? null
 
-  // Strategy-scoped, mirroring the Execution page: every registered strategy
-  // has portfolio_id=null (Doc 14 §10.7 gap), so a raw portfolio selector
-  // surfaced dozens of dead one-off backtest portfolios instead of the 2
-  // strategies that actually trade. The strategy's own most-recent real
-  // order resolves which portfolio to show underneath.
-  // Only the single most recent order is needed to resolve which portfolio
-  // to show — a strategy can carry 40k+ backtest orders, and fetching all of
-  // them here (previously unbounded) took 20s+ and made this page look dead.
-  const ordersQuery = useOrdersByStrategy(activeId, 1)
-  const orders = ordersQuery.data ?? []
-  const resolvedPortfolioId = useMemo(() => {
-    if (orders.length === 0) return null
-    return orders.reduce((latest, o) => (new Date(o.created_at) > new Date(latest.created_at) ? o : latest)).portfolio_id
-  }, [orders])
-
+  // Resolve to the LIVE trading portfolio, not a throwaway backtest portfolio
+  // (owner request). Backtest runs each spawn their own one-off BACKTEST
+  // portfolio whose positions are $0 at read time — resolving the risk page to
+  // one of those made every exposure read $0. Prefer a real LIVE/PAPER
+  // portfolio instead; the strategy selector still scopes the pre-trade
+  // assessment history below.
   const portfoliosQuery = usePortfolios()
   const portfolios = portfoliosQuery.data ?? []
-  const resolvedPortfolio = portfolios.find((p) => p.id === resolvedPortfolioId) ?? null
+  const livePortfolio = useMemo(() => {
+    const trading = portfolios.filter((p) => p.portfolio_type !== 'BACKTEST')
+    // LIVE first, then PAPER; skip obvious test rows.
+    const ranked = trading
+      .filter((p) => !p.name.startsWith('f21') && !p.name.startsWith('bt-'))
+      .sort((a, b) => (a.portfolio_type === 'LIVE' ? -1 : 1) - (b.portfolio_type === 'LIVE' ? -1 : 1))
+    return ranked[0] ?? trading[0] ?? null
+  }, [portfolios])
 
   return (
     <div className="space-y-8">
@@ -105,17 +102,16 @@ export function RiskShell() {
         <EmptyState icon={<ShieldAlert size={20} />} title="No strategies" description="No strategies are registered yet." />
       )}
 
-      {activeStrategy && ordersQuery.isLoading && <div className="skeleton h-24 w-full" />}
-      {activeStrategy && !ordersQuery.isLoading && !resolvedPortfolioId && (
+      {portfoliosQuery.isSuccess && !livePortfolio && (
         <EmptyState
           icon={<ShieldAlert size={20} />}
-          title="No trading activity"
-          description={`${activeStrategy.name} hasn't generated any orders yet — risk metrics need at least one trade.`}
+          title="No live positions"
+          description="No live or paper-trading portfolio exists yet — risk metrics need a real trading portfolio, not a backtest run."
         />
       )}
-      {activeStrategy && resolvedPortfolio && (
+      {activeStrategy && livePortfolio && (
         <RiskBody
-          portfolio={resolvedPortfolio}
+          portfolio={livePortfolio}
           strategies={strategies}
           activeStrategy={activeStrategy}
           onSelect={setSelectedId}
