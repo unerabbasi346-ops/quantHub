@@ -1,15 +1,26 @@
-// Canonical top-20 liquid USDT pairs (owner request) — the ONLY assets the
-// research backtester and strategy backtest surfaces offer. Display is the
-// clean symbol ("BTC/USDT"), in this exact order. A clean symbol may resolve
-// to a SPOT or PERPETUAL DB asset (whichever actually carries usable bars);
+// Canonical top-20 liquid USDT pairs — the ONLY assets the research
+// backtester and strategy backtest surfaces offer. Display is the clean
+// symbol ("BTC/USDT"), in this exact order. A clean symbol may resolve to a
+// SPOT or PERPETUAL DB asset (whichever actually carries usable bars);
 // resolveTop20 handles that so the label stays clean while the backtest runs
 // against real data.
-
+//
+// REBUILT from what's actually ingested (owner request) — the prior list
+// named 7 tickers (DOT, MATIC, UNI, LTC, BCH, OP, ARB) that didn't exist in
+// market_data.assets, so they always rendered greyed-out. This list is the
+// real top-20 by bar count in market_data.ohlcv_bars (a liquidity/history
+// proxy — more bars means the asset has been tracked longer/more
+// consistently), so every entry is actually backtestable today:
+//   LTC 57292 · ZEC 56463 · UNI 51221 · NEAR 50393 · BTC 43100 · DOT 38377 ·
+//   PEPE(1000PEPE) 28017 · WLD 26101 · DODOX 25741 · ONDO 21781 · POL 16271
+//   (MATIC's Binance successor — MATIC itself is delisted/inactive) ·
+//   DEXE 13647 · BCH 13000 · HYPE 9877 · PUMP 8898 · AKE 7019 · EVAA 6855 ·
+//   US 5176 · LAB 1202 · ADA 1007.
 export const TOP_20_SYMBOLS: readonly string[] = [
-  'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
-  'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 'DOT/USDT',
-  'MATIC/USDT', 'UNI/USDT', 'LTC/USDT', 'BCH/USDT', 'NEAR/USDT',
-  'APT/USDT', 'OP/USDT', 'ARB/USDT', 'WLD/USDT', 'PEPE/USDT',
+  'LTC/USDT', 'ZEC/USDT', 'UNI/USDT', 'NEAR/USDT', 'BTC/USDT',
+  'DOT/USDT', 'PEPE/USDT', 'WLD/USDT', 'DODOX/USDT', 'ONDO/USDT',
+  'POL/USDT', 'DEXE/USDT', 'BCH/USDT', 'HYPE/USDT', 'PUMP/USDT',
+  'AKE/USDT', 'EVAA/USDT', 'US/USDT', 'LAB/USDT', 'ADA/USDT',
 ]
 
 // A few clean names live under a different DB symbol (Binance lists the perp
