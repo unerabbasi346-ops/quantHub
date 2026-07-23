@@ -67,6 +67,17 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
   const metrics = metricsQuery.data
   const backtestsQuery = useBacktests(strategy.id)
   const [flipped, setFlipped] = useState(false)
+  // ECharts measures its container's real pixel box at init time. The back
+  // face sits behind the front via CSS backface-visibility (not
+  // display:none), so mounting DonutChart immediately on first render was
+  // fine dimensionally — the actual glitch was ECharts initializing mid-
+  // rotateY(180deg) 3D transform, before the flip settles, producing a
+  // canvas sized/painted against a transient transform state. Deferring
+  // mount until the flip animation's onAnimationComplete fires (settled
+  // true) guarantees ECharts only ever initializes on a fully-flipped,
+  // visually stable element.
+  const [settled, setSettled] = useState(false)
+  const showDonut = flipped && settled
 
   // Real, signals-derived fields (no fetch beyond what the card already has).
   const ordered = [...signals].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
@@ -104,8 +115,12 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
 
   // Benchmark comparison (Rule 5): the latest backtest's own strategy return
   // vs BTC/USDT buy-and-hold over the same window — both real, both from the
-  // same backtest row, never fabricated when either is absent.
-  const latestBacktest = backtestsQuery.data?.[0]
+  // same backtest row, never fabricated when either is absent. Prefer the
+  // newest run that actually traded (same reasoning as
+  // useStrategyPerformance) so a stray 0-trade verification run never masks
+  // a strategy's real performance history.
+  const backtests = backtestsQuery.data ?? []
+  const latestBacktest = backtests.find((b) => (b.trade_count ?? 0) > 0) ?? backtests[0]
   const benchmarkReturn = latestBacktest?.benchmark_return != null ? Number.parseFloat(latestBacktest.benchmark_return) : null
   const strategyReturn = latestBacktest?.total_return != null ? Number.parseFloat(latestBacktest.total_return) : null
   const beatsBenchmark = strategyReturn != null && benchmarkReturn != null ? strategyReturn > benchmarkReturn : null
@@ -132,6 +147,7 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
         style={{ transformStyle: 'preserve-3d' }}
         animate={{ rotateY: flipped ? 180 : 0 }}
         transition={{ duration: 0.45, ease: 'easeInOut' }}
+        onAnimationComplete={() => setSettled(flipped)}
       >
         {/* Front */}
         <div style={{ backfaceVisibility: 'hidden' }}>
@@ -246,7 +262,9 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
           <div className="flex flex-1 items-center justify-center">
             {backtestsQuery.isLoading ? (
               <div className="skeleton h-32 w-32 rounded-full" />
-            ) : allocation.length > 0 ? (
+            ) : allocation.length === 0 ? (
+              <p className="text-center text-[11px] text-fg-subtle">No completed backtests with a recorded asset yet.</p>
+            ) : showDonut ? (
               <DonutChart
                 data={allocation}
                 height={180}
@@ -255,7 +273,9 @@ export const StrategyCard = memo(function StrategyCard({ perf }: { perf: Strateg
                 valueFormat={(v) => `${v.toLocaleString()} trades`}
               />
             ) : (
-              <p className="text-center text-[11px] text-fg-subtle">No completed backtests with a recorded asset yet.</p>
+              // Flip animation in flight — placeholder only. Mounting
+              // ECharts here would init against a mid-transform box.
+              <div className="h-[180px] w-[180px] rounded-full border border-border/40" />
             )}
           </div>
         </div>

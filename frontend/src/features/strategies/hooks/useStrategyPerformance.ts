@@ -59,7 +59,13 @@ export function useStrategyPerformance(strategies: Strategy[]): StrategyPerforma
       }),
       value: Number.parseFloat(s.value),
     }))
-    const latest = backtests[0] ?? null
+    // Prefer the newest run that actually traded — a degenerate 0-trade run
+    // (e.g. a research-page verification run against a mismatched interval)
+    // can land newest-by-timestamp and would otherwise mask a strategy's
+    // real, meaningful backtest history behind a fabricated-looking 0.000%.
+    // Falls back to the newest run overall so a genuinely trade-less
+    // strategy still shows its real (zero) result, never hidden.
+    const latest = backtests.find((b) => (b.trade_count ?? 0) > 0) ?? backtests[0] ?? null
     return {
       strategy,
       signals,
